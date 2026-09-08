@@ -7,19 +7,27 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # This project lives in iCloud Drive, and iCloud will happily try to sync
-# .build -- thousands of files churning on every compile. That produced
-# conflict copies ("checkouts 2", "apple 2"), builds that went from 3
-# seconds to over 400, and sporadic "can't open file" errors mid-build.
-# Keep the build directory outside iCloud and leave a symlink behind, so
-# plain `swift build` / `swift test` stay fast too. Only applies when the
+# both .build and the packaged app under build/ -- thousands of churning
+# compiler artifacts, plus this script's own rm-rf-then-recreate of the
+# .app bundle on every run, are exactly the kind of rapid, mid-write
+# filesystem activity iCloud syncs badly. .build got builds up to 400s+
+# and sporadic "can't open file" errors; build/ got an outright corrupted
+# duplicate ("GRASP 2.app", 0600 permissions, unusable) sitting unnoticed
+# next to the real one. Keep both outside iCloud and leave symlinks
+# behind, so plain `swift build`/`swift test` stay fast and `open build/
+# GRASP.app` keeps working from the usual path. Only applies when the
 # project actually is under iCloud -- a normal clone elsewhere is left
-# alone and just uses a regular .build directory.
-if [[ "$PWD" == *"/Mobile Documents/"* ]] && [ ! -L .build ]; then
-  EXTERNAL_BUILD_DIR="$HOME/Library/Developer/$(basename "$PWD")-build"
-  echo "iCloud path detected -- relocating .build to $EXTERNAL_BUILD_DIR"
-  rm -rf .build
-  mkdir -p "$EXTERNAL_BUILD_DIR"
-  ln -s "$EXTERNAL_BUILD_DIR" .build
+# alone and just uses regular local directories.
+if [[ "$PWD" == *"/Mobile Documents/"* ]]; then
+  for dir in .build build; do
+    if [ ! -L "$dir" ]; then
+      EXTERNAL_DIR="$HOME/Library/Developer/$(basename "$PWD")-$dir"
+      echo "iCloud path detected -- relocating $dir to $EXTERNAL_DIR"
+      rm -rf "$dir"
+      mkdir -p "$EXTERNAL_DIR"
+      ln -s "$EXTERNAL_DIR" "$dir"
+    fi
+  done
 fi
 
 # Both slices in one binary via lipo under the hood, so the app runs
