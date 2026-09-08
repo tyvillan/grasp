@@ -13,8 +13,7 @@ struct TestLifecycleIntegrationTests {
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
 
     private static func seededGeologyDeck() async throws -> (db: GRASPDatabase, deckId: String) {
-        let db = try GRASPDatabase.inMemory()
-        _ = try await VaultScanner(database: db).scan(vaultRoot: vaultRoot)
+        let db = try await VaultFixture.database()
         let deckId = try await db.queue.write { conn -> String in
             let deck = try #require(try Deck.filter(sql: """
                 courseId IN (SELECT id FROM course WHERE name = 'Physical Geology')

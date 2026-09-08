@@ -6,6 +6,22 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# This project lives in iCloud Drive, and iCloud will happily try to sync
+# .build -- thousands of files churning on every compile. That produced
+# conflict copies ("checkouts 2", "apple 2"), builds that went from 3
+# seconds to over 400, and sporadic "can't open file" errors mid-build.
+# Keep the build directory outside iCloud and leave a symlink behind, so
+# plain `swift build` / `swift test` stay fast too. Only applies when the
+# project actually is under iCloud -- a normal clone elsewhere is left
+# alone and just uses a regular .build directory.
+if [[ "$PWD" == *"/Mobile Documents/"* ]] && [ ! -L .build ]; then
+  EXTERNAL_BUILD_DIR="$HOME/Library/Developer/$(basename "$PWD")-build"
+  echo "iCloud path detected -- relocating .build to $EXTERNAL_BUILD_DIR"
+  rm -rf .build
+  mkdir -p "$EXTERNAL_BUILD_DIR"
+  ln -s "$EXTERNAL_BUILD_DIR" .build
+fi
+
 # Both slices in one binary via lipo under the hood, so the app runs
 # unmodified on Intel Macs too -- not just the Apple Silicon this is built
 # on. SwiftPM puts a universal build under .build/apple/... rather than the

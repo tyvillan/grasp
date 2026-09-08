@@ -180,6 +180,9 @@ final class AppStore {
         let courseName: String
         let cardCount: Int
         let dueCount: Int
+        /// Cards with at least one review, for the "N/M cards reviewed"
+        /// progress a deck shows on the dashboard.
+        let reviewedCount: Int
         let lastReviewedAt: Date?
     }
 
@@ -194,6 +197,7 @@ final class AppStore {
                 SELECT deck.id AS deckId, deck.name AS deckName, course.id AS courseId, course.name AS courseName,
                        COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status != 'suspended' THEN card.id END) AS cardCount,
                        COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status = 'active' AND card.due <= ? THEN card.id END) AS dueCount,
+                       COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.reps > 0 THEN card.id END) AS reviewedCount,
                        MAX(review.reviewedAt) AS lastReviewedAt
                 FROM deck
                 JOIN course ON course.id = deck.courseId
@@ -207,7 +211,7 @@ final class AppStore {
                     DeckSummary(
                         deckId: row["deckId"], deckName: row["deckName"], courseId: row["courseId"],
                         courseName: row["courseName"], cardCount: row["cardCount"], dueCount: row["dueCount"],
-                        lastReviewedAt: row["lastReviewedAt"]
+                        reviewedCount: row["reviewedCount"], lastReviewedAt: row["lastReviewedAt"]
                     )
                 }
         }
@@ -563,6 +567,66 @@ final class AppStore {
         try database.queue.write { db in
             _ = try Exam.deleteOne(db, key: examId)
         }
+    }
+
+    func materialCount(inCourse courseId: String) throws -> Int {
+        try database.queue.read { db in
+            try Material.filter(Column("courseId") == courseId).fetchCount(db)
+        }
+    }
+
+    func updateCourse(_ course: Course) throws {
+        var updated = course
+        updated.updatedAt = Date()
+        try database.queue.write { db in try updated.save(db) }
+        reload()
+    }
+
+    /// Hides a course without touching its data. Reversible, and the
+    /// scanner reuses the same (still archived) row on re-import rather
+    /// than resurrecting it as a new course.
+    func setCourseArchived(_ courseId: String, archived: Bool) throws {
+        try database.queue.write { db in
+            guard var course = try Course.fetchOne(db, key: courseId) else { return }
+            course.isArchived = archived
+            course.updatedAt = Date()
+            try course.save(db)
+        }
+        reload()
+    }
+
+    /// What a delete would actually remove -- so the confirmation can say
+    /// it in numbers instead of asking the user to take it on faith.
+    func courseDeletionImpact(_ courseId: String) throws -> (materials: Int, cards: Int, reviews: Int) {
+        try database.queue.read { db in
+            let materials = try Material.filter(Column("courseId") == courseId).fetchCount(db)
+            let cards = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM card WHERE materialId IN (SELECT id FROM material WHERE courseId = ?)
+                """, arguments: [courseId]) ?? 0
+            let reviews = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM review WHERE cardId IN (
+                    SELECT id FROM card WHERE materialId IN (SELECT id FROM material WHERE courseId = ?)
+                )
+                """, arguments: [courseId]) ?? 0
+            return (materials, cards, reviews)
+        }
+    }
+
+    /// Removes a course and everything derived from it. Notes in the vault
+    /// are never touched -- this only clears what GRASP built from them,
+    /// so a re-import of a vault-backed course brings it back.
+    func deleteCourse(_ courseId: String) throws {
+        try database.queue.write { db in
+            // `card.materialId` is ON DELETE SET NULL, so cascading from
+            // the course would strand its cards instead of removing them.
+            // Delete those explicitly first; their reviews, learn state,
+            // and deck membership cascade from the card rows.
+            try db.execute(sql: """
+                DELETE FROM card WHERE materialId IN (SELECT id FROM material WHERE courseId = ?)
+                """, arguments: [courseId])
+            _ = try Course.deleteOne(db, key: courseId)
+        }
+        reload()
     }
 
     func addManualCourse(name: String, code: String?) throws {

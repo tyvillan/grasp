@@ -39,8 +39,7 @@ struct SearchIntegrationTests {
 
     @Test("searching a real, distinctive term finds its source note")
     func findsDistinctiveTerm() async throws {
-        let db = try GRASPDatabase.inMemory()
-        _ = try await VaultScanner(database: db).scan(vaultRoot: Self.vaultRoot)
+        let db = try await VaultFixture.database()
 
         // "Permeability" is a real, distinctive Physical Geology term
         // confirmed present in the vault earlier in this project.
@@ -51,16 +50,14 @@ struct SearchIntegrationTests {
 
     @Test("an empty or punctuation-only query returns no results, not an error")
     func emptyQueryIsSafe() async throws {
-        let db = try GRASPDatabase.inMemory()
-        _ = try await VaultScanner(database: db).scan(vaultRoot: Self.vaultRoot)
+        let db = try await VaultFixture.database()
         #expect(try search("", db: db).isEmpty)
         #expect(try search("???", db: db).isEmpty)
     }
 
     @Test("a nonsense query finds nothing, without throwing")
     func nonsenseQueryFindsNothing() async throws {
-        let db = try GRASPDatabase.inMemory()
-        _ = try await VaultScanner(database: db).scan(vaultRoot: Self.vaultRoot)
+        let db = try await VaultFixture.database()
         let results = try search("zzqxxnonexistentterm", db: db)
         #expect(results.isEmpty)
     }

@@ -8,16 +8,16 @@ import AppKit
 /// tracks the system appearance automatically, including live switches --
 /// no environment threading needed at call sites.
 enum GRASPColor {
-    static let background = dynamic(light: 0xF7F6F2, dark: 0x121218)
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x1C1D28)
-    static let surfaceRaised = dynamic(light: 0xFBFAF7, dark: 0x24263A)
+    static let background = dynamic(light: 0xF7F6F2, dark: 0x000000)
+    static let surface = dynamic(light: 0xFFFFFF, dark: 0x0F0F14)
+    static let surfaceRaised = dynamic(light: 0xFBFAF7, dark: 0x17171F)
     static let accent = dynamic(light: 0xB9791A, dark: 0xF2B84B)
-    static let accentSoft = dynamic(light: 0xF3E4C8, dark: 0x3A3220)
+    static let accentSoft = dynamic(light: 0xF3E4C8, dark: 0x38301C)
     static let success = dynamic(light: 0x1E7A68, dark: 0x5FC9B5)
-    static let successSoft = dynamic(light: 0xDCEEEA, dark: 0x1D3430)
+    static let successSoft = dynamic(light: 0xDCEEEA, dark: 0x142C28)
     static let textPrimary = dynamic(light: 0x1C1D28, dark: 0xEDEDF5)
-    static let textSecondary = dynamic(light: 0x6B6B7D, dark: 0x9797AC)
-    static let stroke = dynamic(light: 0xE4E1D8, dark: 0x2E3040)
+    static let textSecondary = dynamic(light: 0x6B6B7D, dark: 0x8E8EA2)
+    static let stroke = dynamic(light: 0xE4E1D8, dark: 0x24242E)
 
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(NSColor(name: nil) { appearance in

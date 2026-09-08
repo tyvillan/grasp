@@ -60,6 +60,9 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 ImportButton()
             }
+            ToolbarItem(placement: .primaryAction) {
+                ProfileMenuButton()
+            }
         }
         .sheet(isPresented: $showingAddCourse) {
             AddCourseSheet()

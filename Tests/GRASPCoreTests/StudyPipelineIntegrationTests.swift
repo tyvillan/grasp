@@ -13,8 +13,7 @@ struct StudyPipelineIntegrationTests {
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
 
     private static func seededDatabase() async throws -> GRASPDatabase {
-        let db = try GRASPDatabase.inMemory()
-        _ = try await VaultScanner(database: db).scan(vaultRoot: vaultRoot)
+        let db = try await VaultFixture.database()
         return db
     }
 

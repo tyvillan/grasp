@@ -96,13 +96,7 @@ private struct ProfileTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                ZStack {
-                    Circle().fill(.tint.opacity(0.2))
-                    Text(initials)
-                        .font(.title.bold())
-                        .foregroundStyle(.tint)
-                }
-                .frame(width: 64, height: 64)
+                Avatar(name: profile.name, size: 64, fontSize: 22)
                 HStack(spacing: 4) {
                     Text(profile.name).lineLimit(1)
                     if profile.pinHash != nil {
@@ -114,12 +108,6 @@ private struct ProfileTile: View {
             .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(GRASPColor.stroke, lineWidth: 1))
         }
         .buttonStyle(.plain)
-    }
-
-    private var initials: String {
-        let parts = profile.name.split(separator: " ")
-        let letters = parts.prefix(2).compactMap { $0.first }
-        return letters.isEmpty ? "?" : String(letters).uppercased()
     }
 }
 
