@@ -1,0 +1,64 @@
+# GRASP
+
+**G**ather **R**esources, **A**pply, **S**tudy, **P**erform
+
+A native macOS study app that turns your own class notes into flashcards,
+adaptive practice, and tests — instead of retyping everything into Quizlet
+by hand. Point it at a folder of lecture notes (Markdown, PDF, docx,
+Jupyter notebooks) and it organizes them into courses and decks
+automatically, then drills them with the study modes that actually work.
+
+> **Status: in development.** Built against one real Obsidian vault so
+> far; the core is solid (63 automated tests, most run against real
+> imported content) but it hasn't been used by anyone but its author yet.
+
+## What it does today
+
+- **Imports** Markdown, PDF, docx, and `.ipynb` notes, organizing them into
+  courses and decks automatically from folder structure and filenames
+- **Deterministic flashcard generation** from lecture-style notes (term +
+  definition pairs), with a review queue so nothing reaches study
+  unapproved
+- **Flashcards** on a real spaced-repetition schedule (a from-scratch
+  FSRS-5 implementation, verified against the algorithm's own published
+  reference test vectors)
+- **Learn mode** — adaptive multiple-choice → written → true/false rounds
+  that escalate as you master a term, with fuzzy answer grading (a small
+  spelling slip doesn't fail you)
+- **Custom tests** — configurable question count, types, and shuffling;
+  missed questions feed back into your flashcard schedule
+- **Exam dates** that bias scheduling: cards get capped to resurface
+  before the exam, and the queue reorders by weakest retention in the
+  final week
+- **Full-text search** across every note you've imported
+- **Local profiles** — no accounts, no server, no network. Each profile's
+  data lives in its own local database; share the app with someone and
+  they get their own separate profile
+- **Optional AI card refinement** via a local Ollama server if you have
+  one running, or Apple's on-device model as a zero-setup fallback —
+  fully usable with neither; cards just come from the deterministic parser
+
+## What it doesn't do (yet)
+
+- No matching/arcade-style games
+- No Canvas LMS integration — notes come from a local folder, not a
+  synced course site
+- No cloud sync — a profile's data stays on the Mac it was created on
+
+## Stack
+
+Swift 6 / SwiftUI, SwiftPM (no Xcode project), [GRDB.swift](https://github.com/groue/GRDB.swift)
+over SQLite, PDFKit for PDF text extraction, `NSAttributedString`'s Office
+Open XML reader for docx.
+
+## Building
+
+```sh
+swift build          # debug build
+swift test           # run the test suite
+./build.sh           # release build, packaged and signed into build/GRASP.app
+```
+
+`build.sh` produces a universal (Apple Silicon + Intel) signed `.app`
+bundle. Point the app at a folder of class notes via Settings, or use the
+default vault path as a starting example.
