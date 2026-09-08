@@ -4,7 +4,10 @@ import GRASPCore
 /// One Quizlet-style Learn round: multiple choice / true-false / written
 /// questions, escalating with each card's own ladder level. A miss doesn't
 /// drop the card -- it's requeued a few slots further back in this same
-/// round's live queue, so it comes back before the round ends.
+/// round's live queue, so it comes back before the round ends. A deck-wide
+/// mastery bar tracks progress live, and each round ends at a checkpoint
+/// -- a summary with the choice to keep going or stop, rather than
+/// silently starting another round or ending the session outright.
 struct LearnRoundView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -13,32 +16,37 @@ struct LearnRoundView: View {
 
     @State private var queue: [LearnEngine.RoundQuestion] = []
     @State private var completedCardIds: Set<String> = []
+    @State private var roundCorrect = 0
+    @State private var roundIncorrect = 0
+    @State private var deckMastery: (mastered: Int, total: Int) = (0, 0)
     @State private var selectedChoice: String?
     @State private var writtenAnswer = ""
     @State private var verdict: AnswerGrading.Verdict?
     @State private var isAnswered = false
-    @State private var isComplete = false
+    @State private var isAtCheckpoint = false
+    @State private var isEmpty = false
     @FocusState private var writtenFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             header
+            masteryBar
             Divider()
-            if isComplete {
-                completionView
-            } else if queue.isEmpty {
+            if isEmpty {
                 ContentUnavailableView(
                     "Nothing to learn", systemImage: "checkmark.circle",
-                    description: Text("Every card in \(deckName) is already mastered, or the deck has no active cards yet.")
+                    description: Text("Every card in \(deckName) is already understood, or the deck has no active cards yet.")
                 )
                 .frame(maxHeight: .infinity)
-            } else {
+            } else if isAtCheckpoint {
+                checkpointView
+            } else if !queue.isEmpty {
                 questionView(queue[0])
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 560, minHeight: 460)
-        .task { load() }
+        .frame(minWidth: 560, minHeight: 480)
+        .task { startRound() }
     }
 
     private var header: some View {
@@ -47,26 +55,61 @@ struct LearnRoundView: View {
             Spacer()
             Text(deckName).font(.headline)
             Spacer()
-            Text("\(completedCardIds.count) correct this round")
+            Text("\(roundCorrect + roundIncorrect)/\(LearnEngine.roundSize) this round")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
         .padding()
     }
 
-    private var completionView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "party.popper").font(.system(size: 40)).foregroundStyle(.tint)
-            Text("Round complete").font(.title2.bold())
-            Text("\(completedCardIds.count) card\(completedCardIds.count == 1 ? "" : "s") answered correctly.")
+    private var masteryBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ProgressBar(value: deckMastery.mastered, total: deckMastery.total)
+            Text("\(deckMastery.mastered)/\(deckMastery.total) cards understood")
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 12)
+    }
+
+    private var checkpointView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "flag.checkered.circle.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(GRASPColor.accent)
+            Text("Checkpoint").font(.title2.bold())
+            VStack(spacing: 4) {
+                Text("\(roundCorrect) correct, \(roundIncorrect) need more review this round")
+                    .foregroundStyle(.secondary)
+                Text("\(deckMastery.mastered) of \(deckMastery.total) cards understood overall")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                Button("Done for now") { dismiss() }
+                Button("Continue Studying") { startRound() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(GRASPColor.accent)
+                    .keyboardShortcut(.defaultAction)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func load() {
+    private func startRound() {
         queue = (try? store.learnRound(deckId: deckId)) ?? []
+        completedCardIds = []
+        roundCorrect = 0
+        roundIncorrect = 0
+        isAtCheckpoint = false
+        isEmpty = queue.isEmpty
+        refreshMastery()
+    }
+
+    private func refreshMastery() {
+        deckMastery = (try? store.deckMastery(deckId: deckId)) ?? (0, 0)
     }
 
     @ViewBuilder
@@ -93,7 +136,7 @@ struct LearnRoundView: View {
             Spacer()
 
             if isAnswered {
-                Button(queue.count == 1 ? "Finish" : "Next") { advance(question, wasCorrect: lastAnswerCorrect) }
+                Button(queue.count == 1 ? "Finish Round" : "Next") { advance(question, wasCorrect: lastAnswerCorrect) }
                     .keyboardShortcut(.defaultAction)
                     .padding(.bottom, 24)
             }
@@ -198,6 +241,9 @@ struct LearnRoundView: View {
 
     private func advance(_ question: LearnEngine.RoundQuestion, wasCorrect: Bool) {
         try? store.recordLearnAnswer(cardId: question.cardId, wasCorrect: wasCorrect)
+        if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
+        refreshMastery()
+
         queue.removeFirst()
         if wasCorrect {
             completedCardIds.insert(question.cardId)
@@ -211,6 +257,6 @@ struct LearnRoundView: View {
         writtenAnswer = ""
         verdict = nil
         isAnswered = false
-        if queue.isEmpty { isComplete = true }
+        if queue.isEmpty { isAtCheckpoint = true }
     }
 }

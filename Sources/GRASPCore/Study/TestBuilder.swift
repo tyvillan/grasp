@@ -14,10 +14,19 @@ public enum TestBuilder {
         public var allowTrueFalse: Bool
         public var shuffle: Bool
         public var timeLimitSeconds: Int?   // nil = untimed
+        /// When true, the card pool this test draws from excludes anything
+        /// already marked understood (`learnState.level == .mastered`) --
+        /// a test can be "quiz me only on what I haven't proven I know"
+        /// instead of re-testing cards already approved in Study. Applied
+        /// by the caller (`AppStore.startTest`) before the pool reaches
+        /// `build`, since mastery isn't part of the deterministic,
+        /// model-free data this type otherwise works with.
+        public var excludeMastered: Bool
 
         public init(
             questionCount: Int = 20, allowMultipleChoice: Bool = true, allowWritten: Bool = true,
-            allowTrueFalse: Bool = true, shuffle: Bool = true, timeLimitSeconds: Int? = nil
+            allowTrueFalse: Bool = true, shuffle: Bool = true, timeLimitSeconds: Int? = nil,
+            excludeMastered: Bool = false
         ) {
             self.questionCount = questionCount
             self.allowMultipleChoice = allowMultipleChoice
@@ -25,6 +34,7 @@ public enum TestBuilder {
             self.allowTrueFalse = allowTrueFalse
             self.shuffle = shuffle
             self.timeLimitSeconds = timeLimitSeconds
+            self.excludeMastered = excludeMastered
         }
 
         var enabledTypes: [LearnEngine.QuestionType] {

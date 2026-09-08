@@ -298,28 +298,6 @@ struct HomeView: View {
     }
 }
 
-private struct ProgressBar: View {
-    let value: Int
-    let total: Int
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(GRASPColor.stroke)
-                Capsule()
-                    .fill(GRASPColor.accent)
-                    .frame(width: max(0, min(1, fraction)) * geo.size.width)
-            }
-        }
-        .frame(height: 6)
-    }
-
-    private var fraction: Double {
-        guard total > 0 else { return 0 }
-        return Double(value) / Double(total)
-    }
-}
-
 private struct RecentRow: View {
     let deck: AppStore.DeckSummary
 

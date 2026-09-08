@@ -37,6 +37,7 @@ struct TestSetupSheet: View {
     @State private var allowWritten = true
     @State private var allowTrueFalse = true
     @State private var shuffle = true
+    @State private var excludeMastered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -53,6 +54,7 @@ struct TestSetupSheet: View {
             }
 
             Toggle("Shuffle order", isOn: $shuffle)
+            Toggle("Only cards I haven't marked as known", isOn: $excludeMastered)
 
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                 Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
@@ -64,7 +66,8 @@ struct TestSetupSheet: View {
                 Button("Start Test") {
                     let config = TestBuilder.Config(
                         questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
-                        allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle
+                        allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
+                        excludeMastered: excludeMastered
                     )
                     guard let (attemptId, questions) = try? store.startTest(deckId: deckId, config: config),
                           !questions.isEmpty else { return }

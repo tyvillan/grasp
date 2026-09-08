@@ -18,10 +18,26 @@ struct DeckDetailView: View {
     @State private var testPhase: TestPhase?
     @State private var isGeneratorAvailable = false
     @State private var isRefining = false
+    @State private var learnLevels: [String: LearnEngine.Level] = [:]
+    @State private var masteryFilter: MasteryFilter = .all
+
+    private enum MasteryFilter: String, CaseIterable, Identifiable {
+        case all = "All", needsReview = "Needs Review", understood = "Understood"
+        var id: String { rawValue }
+    }
 
     private var draftCount: Int { cards.filter { $0.status == .draft }.count }
     private var activeCount: Int { cards.filter { $0.status == .active }.count }
     private var dueCount: Int { (try? store.dueCards(inDeck: deckId).count) ?? 0 }
+
+    private var visibleCards: [Card] {
+        guard masteryFilter != .all else { return cards }
+        return cards.filter { card in
+            guard card.status == .active else { return false }
+            let isUnderstood = learnLevels[card.id] == .mastered
+            return masteryFilter == .understood ? isUnderstood : !isUnderstood
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,10 +99,21 @@ struct DeckDetailView: View {
                 .padding(.horizontal).padding(.vertical, 8)
                 .background(.thinMaterial)
             }
+            if activeCount > 0 {
+                Picker("", selection: $masteryFilter) {
+                    ForEach(MasteryFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal).padding(.vertical, 8)
+            }
             List {
-                ForEach(cards) { card in
+                ForEach(visibleCards) { card in
                     CardRow(
                         card: card,
+                        mastery: learnLevels[card.id] ?? .new,
                         onApprove: { setStatus(card, .active) },
                         onSuspend: { setStatus(card, card.status == .suspended ? .active : .suspended) },
                         onEdit: { editingCard = card },
@@ -158,6 +185,7 @@ struct DeckDetailView: View {
 
     private func load() {
         cards = (try? store.cards(inDeck: deckId)) ?? []
+        learnLevels = (try? store.learnLevels(forDeck: deckId)) ?? [:]
     }
 
     private func setStatus(_ card: Card, _ status: CardStatus) {
@@ -170,6 +198,7 @@ private struct MaterialIdentifier: Identifiable { let id: String }
 
 private struct CardRow: View {
     let card: Card
+    let mastery: LearnEngine.Level
     let onApprove: () -> Void
     let onSuspend: () -> Void
     let onEdit: () -> Void
@@ -183,6 +212,7 @@ private struct CardRow: View {
                 Text(card.back).font(.body).foregroundStyle(.secondary)
             }
             Spacer()
+            if card.status == .active { masteryBadge }
             statusBadge
             Menu {
                 if card.status == .draft {
@@ -220,6 +250,20 @@ private struct CardRow: View {
         case .active:
             EmptyView()
         }
+    }
+
+    private var masteryBadge: some View {
+        Group {
+            if mastery == .mastered {
+                Label("Understood", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(GRASPColor.success)
+            } else {
+                Label("Needs Review", systemImage: "circle")
+                    .foregroundStyle(GRASPColor.accent)
+            }
+        }
+        .labelStyle(.iconOnly)
+        .help(mastery == .mastered ? "Understood" : "Needs Review")
     }
 }
 

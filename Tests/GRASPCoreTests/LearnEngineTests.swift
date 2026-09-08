@@ -59,6 +59,36 @@ struct LearnEngineTests {
         #expect(LearnEngine.advance(level: .new, consecutiveCorrect: 0, wasCorrect: false).level == .new)
     }
 
+    @Test("with most of the deck still unmastered, a round only draws from the unmastered cards")
+    func targetsUnmasteredWhileMostRemain() {
+        var rng = SystemRandomNumberGenerator()
+        // 7 unmastered, 3 mastered -- 70% unmastered, well above the 20% threshold.
+        let mixed = Self.candidates(count: 7, level: .new, idPrefix: "new")
+            + Self.candidates(count: 3, level: .mastered, idPrefix: "mastered")
+        let round = LearnEngine.buildRound(from: mixed, using: &rng)
+        #expect(round.allSatisfy { $0.cardId.hasPrefix("new-") })
+    }
+
+    @Test("once most of the deck is mastered, a round draws at random from the whole deck")
+    func reinforcesRandomlyOnceMostlyMastered() {
+        var rng = SystemRandomNumberGenerator()
+        // 1 unmastered, 9 mastered -- 10% unmastered, at/below the 20% threshold.
+        let mixed = Self.candidates(count: 1, level: .new, idPrefix: "new")
+            + Self.candidates(count: 9, level: .mastered, idPrefix: "mastered")
+        let round = LearnEngine.buildRound(from: mixed, using: &rng)
+        // The round should be able to include mastered cards now, not
+        // just the single straggler.
+        #expect(round.contains { $0.cardId.hasPrefix("mastered-") })
+    }
+
+    @Test("a fully mastered deck still gets quizzed, not left empty")
+    func fullyMasteredDeckStillProducesARound() {
+        var rng = SystemRandomNumberGenerator()
+        let allMastered = Self.candidates(count: 10, level: .mastered)
+        let round = LearnEngine.buildRound(from: allMastered, using: &rng)
+        #expect(round.count == 7)
+    }
+
     @Test("distractors never include the card's own answer")
     func distractorsExcludeSelf() {
         var rng = SystemRandomNumberGenerator()

@@ -413,37 +413,42 @@ final class AppStore {
         reload()
     }
 
-    /// Builds one Learn round for a deck: every active card not yet
-    /// mastered, least-recently-seen first, escalating question type per
-    /// card via `LearnEngine`.
+    /// Builds one Learn round for a deck: cards not yet mastered,
+    /// least-recently-seen first, escalating question type per card via
+    /// `LearnEngine` -- and once most of the deck is mastered, the round
+    /// switches to a random reinforcement sample of the whole deck rather
+    /// than being stuck cycling the last few stragglers forever (see
+    /// `LearnEngine.buildRound`).
     func learnRound(deckId: String) throws -> [LearnEngine.RoundQuestion] {
         try database.queue.read { db in
-            let cardIds = try DeckCard.filter(Column("deckId") == deckId).fetchAll(db).map(\.cardId)
-            guard !cardIds.isEmpty else { return [] }
-            let cards = try Card
-                .filter(cardIds.contains(Column("id")))
-                .filter(Column("deletedAt") == nil)
-                .filter(Column("status") == CardStatus.active.rawValue)
-                .fetchAll(db)
-            let states = try LearnState
-                .filter(cardIds.contains(Column("cardId")))
-                .fetchAll(db)
-            let stateByCard = Dictionary(uniqueKeysWithValues: states.map { ($0.cardId, $0) })
-
-            let candidates = cards
-                .map { card -> LearnEngine.Candidate in
-                    let state = stateByCard[card.id]
-                    let level = LearnEngine.Level(rawValue: state?.level ?? 0) ?? .new
-                    return LearnEngine.Candidate(cardId: card.id, front: card.front, back: card.back, level: level)
-                }
+            let candidates = try Self.learnCandidates(forDeck: deckId, db: db)
                 .sorted { a, b in
-                    let seenA = stateByCard[a.cardId]?.lastSeenAt ?? .distantPast
-                    let seenB = stateByCard[b.cardId]?.lastSeenAt ?? .distantPast
-                    return seenA < seenB
+                    a.lastSeenAt ?? .distantPast < b.lastSeenAt ?? .distantPast
                 }
-
+                .map(\.candidate)
             var rng = SystemRandomNumberGenerator()
             return LearnEngine.buildRound(from: candidates, using: &rng)
+        }
+    }
+
+    private static func learnCandidates(
+        forDeck deckId: String, db: Database
+    ) throws -> [(candidate: LearnEngine.Candidate, lastSeenAt: Date?)] {
+        let cardIds = try DeckCard.filter(Column("deckId") == deckId).fetchAll(db).map(\.cardId)
+        guard !cardIds.isEmpty else { return [] }
+        let cards = try Card
+            .filter(cardIds.contains(Column("id")))
+            .filter(Column("deletedAt") == nil)
+            .filter(Column("status") == CardStatus.active.rawValue)
+            .fetchAll(db)
+        let states = try LearnState.filter(cardIds.contains(Column("cardId"))).fetchAll(db)
+        let stateByCard = Dictionary(uniqueKeysWithValues: states.map { ($0.cardId, $0) })
+
+        return cards.map { card in
+            let state = stateByCard[card.id]
+            let level = LearnEngine.Level(rawValue: state?.level ?? 0) ?? .new
+            let candidate = LearnEngine.Candidate(cardId: card.id, front: card.front, back: card.back, level: level)
+            return (candidate, state?.lastSeenAt)
         }
     }
 
@@ -459,6 +464,48 @@ final class AppStore {
             try LearnState(cardId: cardId, level: nextLevel.rawValue, consecutiveCorrect: streak, lastSeenAt: now)
                 .save(db)
         }
+        reload()
+    }
+
+    /// How much of a deck has been proven understood -- the same
+    /// `learnState.level == mastered` signal `markCard`, Learn mode, and
+    /// test filtering all share, surfaced here for progress bars.
+    func deckMastery(deckId: String) throws -> (mastered: Int, total: Int) {
+        try database.queue.read { db in
+            let candidates = try Self.learnCandidates(forDeck: deckId, db: db).map(\.candidate)
+            let mastered = candidates.filter { $0.level == .mastered }.count
+            return (mastered, candidates.count)
+        }
+    }
+
+    /// Every card in a deck's current Learn ladder level, for the review
+    /// queue's "Needs Review" / "Understood" badges. A card absent from
+    /// the result has no `learnState` row yet, i.e. level 0 / new.
+    func learnLevels(forDeck deckId: String) throws -> [String: LearnEngine.Level] {
+        try database.queue.read { db in
+            let candidates = try Self.learnCandidates(forDeck: deckId, db: db)
+            return Dictionary(uniqueKeysWithValues: candidates.map { ($0.candidate.cardId, $0.candidate.level) })
+        }
+    }
+
+    /// The Study screen's simplified two-option grading: "Needs Review" or
+    /// "I Know This" stands in for FSRS's four-grade scale in the UI, but
+    /// FSRS still schedules under the hood (mapped to Again/Good) so due
+    /// dates stay meaningful. The mastery signal itself -- shared with
+    /// Learn mode and test filtering via `learnState.level` -- moves
+    /// straight to its end state (mastered, or reset to new) rather than
+    /// Learn mode's gradual step-by-step ladder: a flashcard swipe is a
+    /// direct, final call the user is making, not an escalating quiz.
+    func markCard(_ cardId: String, understood: Bool, source: String = "flashcards", now: Date = Date()) throws {
+        try gradeCard(cardId, grade: understood ? .good : .again, source: source, now: now)
+        try database.queue.write { db in
+            try LearnState(
+                cardId: cardId,
+                level: understood ? LearnEngine.Level.mastered.rawValue : LearnEngine.Level.new.rawValue,
+                consecutiveCorrect: understood ? 1 : 0, lastSeenAt: now
+            ).save(db)
+        }
+        reload()
     }
 
     /// Starts a test: builds questions from every active card in the deck,
@@ -467,14 +514,12 @@ final class AppStore {
     /// attempt id alongside the in-memory questions the UI drives from.
     func startTest(deckId: String, config: TestBuilder.Config) throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion]) {
         try database.queue.write { db in
-            let cardIds = try DeckCard.filter(Column("deckId") == deckId).fetchAll(db).map(\.cardId)
-            let cards = cardIds.isEmpty ? [] : try Card
-                .filter(cardIds.contains(Column("id")))
-                .filter(Column("deletedAt") == nil)
-                .filter(Column("status") == CardStatus.active.rawValue)
-                .fetchAll(db)
+            var cards = try Self.learnCandidates(forDeck: deckId, db: db).map(\.candidate)
+            if config.excludeMastered {
+                cards = cards.filter { $0.level != .mastered }
+            }
             var rng = SystemRandomNumberGenerator()
-            let pool = cards.map { (cardId: $0.id, front: $0.front, back: $0.back) }
+            let pool = cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
             let questions = TestBuilder.build(from: pool, config: config, using: &rng)
 
             let attempt = TestAttempt(deckId: deckId, configJSON: "{}", startedAt: Date())

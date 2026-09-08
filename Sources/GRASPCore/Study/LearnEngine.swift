@@ -46,15 +46,32 @@ public enum LearnEngine {
 
     public static let roundSize = 7
 
-    /// Builds up to `roundSize` questions, one per not-yet-mastered
-    /// candidate (callers pass candidates pre-ordered least-recently-seen
-    /// first), escalating question type with each card's own level. A
-    /// missed question is the caller's job to requeue within the live
-    /// session -- this only builds the initial set.
+    /// Below this fraction of a deck still unmastered, a round stops
+    /// targeting the stragglers and starts reinforcing at random across
+    /// the whole deck instead -- otherwise a nearly-mastered deck ends in
+    /// endless rounds over the same last handful of cards.
+    public static let randomReinforcementThreshold = 0.2
+
+    /// Builds up to `roundSize` questions. While meaningfully more than
+    /// `randomReinforcementThreshold` of the deck is still unmastered, the
+    /// round draws only from those cards (not-yet-mastered candidates,
+    /// callers pass them pre-ordered least-recently-seen first) -- Learn
+    /// mode should only ask what the user hasn't proven they know. Once
+    /// most of the deck is mastered, the round instead draws at random
+    /// from every candidate, mastered or not, as spaced reinforcement.
+    /// Question type still escalates with each card's own level. A missed
+    /// question is the caller's job to requeue within the live session --
+    /// this only builds the initial set.
     public static func buildRound<R: RandomNumberGenerator>(
         from candidates: [Candidate], using rng: inout R
     ) -> [RoundQuestion] {
-        let pool = candidates.filter { $0.level != .mastered }
+        let unmastered = candidates.filter { $0.level != .mastered }
+        let pool: [Candidate]
+        if !candidates.isEmpty && Double(unmastered.count) / Double(candidates.count) <= randomReinforcementThreshold {
+            pool = candidates.shuffled(using: &rng)
+        } else {
+            pool = unmastered
+        }
         let selected = Array(pool.prefix(roundSize))
         return selected.enumerated().map { index, candidate in
             question(for: candidate, allCandidates: candidates, ordinal: index, using: &rng)
