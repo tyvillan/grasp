@@ -16,29 +16,56 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selectedCourseId) {
-            Label("Home", systemImage: "house.fill")
-                .tag(ContentView.homeRoute)
-                .padding(.vertical, 2)
+            HStack(spacing: 7) {
+                Image(systemName: "house.fill")
+                    .font(.system(size: 12))
+                    .frame(width: 16)
+                Text("Home").graspType(.rowTitle)
+                Spacer(minLength: 0)
+            }
+            .tag(ContentView.homeRoute)
+            .padding(.vertical, 3)
 
             ForEach(store.semesters.reversed()) { semester in
                 let courses = store.courses(inSemester: semester.id)
                 if !courses.isEmpty {
-                    Section(semester.name) {
+                    Section {
                         ForEach(courses) { course in
                             courseRow(course)
                         }
+                    } header: {
+                        SectionLabel(semester.name).padding(.top, 6)
                     }
                 }
             }
             if !store.unfiledCourses.isEmpty {
-                Section("This Semester") {
+                Section {
                     ForEach(store.unfiledCourses) { course in
                         courseRow(course)
                     }
+                } header: {
+                    SectionLabel("This semester").padding(.top, 6)
                 }
             }
         }
         .listStyle(.sidebar)
+        // The sidebar keeps real vibrancy -- it should sample what's
+        // behind the window, as every Mac sidebar does -- but tinted
+        // toward GRASP's own ground so it reads as part of this app
+        // rather than a stock panel bolted to a black detail pane. The
+        // material also resolves from the SwiftUI environment, which
+        // keeps it in step with the detail pane's appearance instead of
+        // drifting light while the content stays dark.
+        .scrollContentBackground(.hidden)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(GRASPColor.canvas.opacity(0.45))
+                .ignoresSafeArea()
+        }
+        // Row selection draws from the tint, so the selected course reads
+        // in GRASP's amber instead of the stock grey pill.
+        .tint(GRASPColor.accent)
         .navigationTitle("GRASP")
         .sheet(item: $editingCourse) { course in
             CourseEditSheet(course: course)
@@ -96,21 +123,30 @@ struct SidebarView: View {
     }
 }
 
+/// The color dot sits in a fixed-width slot whether or not the course has
+/// a color, so every course name starts on the same x -- a ragged left
+/// edge is the fastest way to make a sidebar look unconsidered.
 private struct CourseRow: View {
     let course: Course
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let hex = course.colorHex {
-                Circle().fill(Color(hex: hex)).frame(width: 8, height: 8)
-            }
+        HStack(spacing: 7) {
+            Circle()
+                .fill(course.colorHex.map { Color(hex: $0) } ?? GRASPColor.hairlineStrong)
+                .frame(width: 7, height: 7)
+                .frame(width: 16)
             Text(course.name)
-            Spacer()
+                .graspType(.rowTitle)
+                .lineLimit(1)
+            Spacer(minLength: 6)
             if let code = course.code {
                 Text(code)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
+        .padding(.vertical, 2)
     }
 }

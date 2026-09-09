@@ -28,7 +28,6 @@ struct FlashcardStudyView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if queue.isEmpty {
                 ContentUnavailableView(
                     "Nothing due", systemImage: "checkmark.circle",
@@ -43,7 +42,8 @@ struct FlashcardStudyView: View {
                 footer
             }
         }
-        .frame(minWidth: 520, minHeight: 420)
+        .background(GRASPColor.canvas)
+        .frame(minWidth: 620, minHeight: 520)
         .task {
             queue = (try? store.dueCards(inDeck: deckId)) ?? []
             isFocused = true
@@ -60,76 +60,174 @@ struct FlashcardStudyView: View {
         }
     }
 
+    /// Deck name and position on one line, with the queue's progress drawn
+    /// as a hairline directly beneath -- the bar doubles as the rule
+    /// separating the chrome from the card canvas, instead of stacking a
+    /// separate progress row and a `Divider()` on top of each other.
     private var header: some View {
-        HStack {
-            Button("Close") { dismiss() }
-            Spacer()
-            Text(deckName).font(.headline)
-            Spacer()
-            Text("\(min(index, queue.count))/\(queue.count)")
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(GRASPColor.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("End session (Esc)")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(deckName)
+                        .graspType(.title)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
+                    Text("Flashcards")
+                        .graspType(.meta)
+                        .textCase(.uppercase)
+                        .tracking(0.7)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+
+                Spacer(minLength: 12)
+
+                Text("\(min(index, queue.count)) / \(queue.count)")
+                    .graspType(.numeralSmall)
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+
+            ProgressBar(value: min(index, queue.count), total: queue.count, height: 2)
         }
-        .padding()
     }
 
     private var completionView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "party.popper").font(.system(size: 40)).foregroundStyle(.tint)
-            Text("Session complete").font(.title2.bold())
-            Text("\(understoodCount) you know, \(reviewCount) marked for review.")
-                .foregroundStyle(.secondary)
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        VStack(spacing: 0) {
+            Text("Session complete")
+                .font(.system(size: 22, weight: .semibold))
+                .tracking(-0.4)
+                .foregroundStyle(GRASPColor.textPrimary)
+
+            HStack(spacing: 0) {
+                tally(understoodCount, "understood", GRASPColor.success)
+                Rectangle()
+                    .fill(GRASPColor.hairline)
+                    .frame(width: 1, height: 32)
+                    .padding(.horizontal, 26)
+                tally(reviewCount, "to review", GRASPColor.accent)
+            }
+            .padding(.top, 24)
+
+            Button("Done") { dismiss() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+                .padding(.top, 30)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func tally(_ value: Int, _ label: String, _ tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)").graspType(.numeral).foregroundStyle(tint)
+            Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+        }
+    }
+
+    /// The card gets the whole canvas. Front and back share one surface --
+    /// flipping reveals the answer *below* the prompt rather than swapping
+    /// the face, so the question stays readable while the answer is judged,
+    /// which is what the two-verdict decision actually needs.
     @ViewBuilder
     private func cardView(_ card: Card) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             Text(card.front)
-                .font(.title.weight(.medium))
+                .graspType(.studyPrompt)
+                .foregroundStyle(GRASPColor.textPrimary)
                 .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: 560)
+
             if isFlipped {
-                Divider().frame(width: 200)
+                Rectangle()
+                    .fill(GRASPColor.hairlineStrong)
+                    .frame(width: 40, height: 1)
+                    .padding(.vertical, 24)
+
                 Text(card.back)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .graspType(.studyAnswer)
+                    .foregroundStyle(GRASPColor.textSecondary)
                     .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 560)
             }
         }
-        .padding(40)
+        .padding(.horizontal, 44)
+        .padding(.vertical, 52)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(GRASPColor.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+                )
+                .padding(.horizontal, 24)
+                .padding(.vertical, 22)
+        )
         .contentShape(Rectangle())
         .onTapGesture { isFlipped.toggle() }
     }
 
+    /// Controls group tight against the bottom edge so the canvas above
+    /// stays open. The unflipped hint occupies the same height as the
+    /// verdict row, so flipping doesn't shift the card underneath.
     private var footer: some View {
-        VStack(spacing: 8) {
+        Group {
             if isFlipped {
-                HStack(spacing: 12) {
-                    markButton("Needs Review", "1", .red, understood: false)
+                HStack(spacing: 10) {
+                    markButton("Needs Review", "1", GRASPColor.accent, understood: false)
                     markButton("I Know This", "2", GRASPColor.success, understood: true)
                 }
             } else {
-                Text("Space to flip").font(.callout).foregroundStyle(.secondary)
+                Button {
+                    isFlipped = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Reveal answer").graspType(.body)
+                        Text("Space")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding()
+        .padding(.horizontal, 24)
+        .padding(.bottom, 20)
     }
 
     private func markButton(_ title: String, _ key: String, _ color: Color, understood: Bool) -> some View {
         Button {
             submitMastery(understood)
         } label: {
-            VStack(spacing: 2) {
+            HStack(spacing: 7) {
                 Text(title)
-                Text(key).font(.caption).foregroundStyle(.secondary)
+                Text(key)
+                    .graspType(.meta)
+                    .foregroundStyle(color.opacity(0.7))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
-            .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
-        .tint(color)
+        .buttonStyle(GRASPVerdictButton(tint: color))
     }
 
     private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {

@@ -18,6 +18,8 @@ struct DeckListView: View {
                     .tag(deck.id)
             }
         }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
         .overlay {
             if decks.isEmpty {
                 ContentUnavailableView(
@@ -48,25 +50,33 @@ struct DeckListView: View {
     }
 }
 
+/// Card count is set in tabular digits and right-aligned in a fixed slot,
+/// so the column of numbers down the list lines up instead of wandering
+/// with each deck's name length.
 private struct DeckRow: View {
     let name: String
     let cardCount: Int
     let dueCount: Int
 
     var body: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(name)
-            Spacer()
+                .graspType(.rowTitle)
+                .lineLimit(1)
+            Spacer(minLength: 4)
             if dueCount > 0 {
                 Text("\(dueCount)")
-                    .font(.caption.bold())
+                    .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(GRASPColor.accent)
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.tint, in: Capsule())
-                    .foregroundStyle(.white)
+                    .background(GRASPColor.accentSoft, in: Capsule())
             }
             Text("\(cardCount)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .graspType(.meta)
+                .monospacedDigit()
+                .foregroundStyle(GRASPColor.textTertiary)
+                .frame(minWidth: 26, alignment: .trailing)
         }
+        .padding(.vertical, 2)
     }
 }

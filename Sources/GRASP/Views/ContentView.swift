@@ -28,10 +28,19 @@ struct ContentView: View {
                 if selectedCourseId == Self.homeRoute || selectedCourseId == nil {
                     HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
                 } else {
+                    // Three tiers of ground, narrowest to widest: the
+                    // vibrant sidebar, then the deck list on a lifted
+                    // surface, then the card canvas on the app's darkest
+                    // ground. Depth increases as the panes get wider, so
+                    // the eye lands on the content pane rather than
+                    // treating all three as equal columns.
                     HStack(spacing: 0) {
                         DeckListView(courseId: selectedCourseId!, selectedDeckId: $selectedDeckId)
                             .frame(minWidth: 220, idealWidth: 260, maxWidth: 300)
-                        Divider()
+                            .background(GRASPColor.surface)
+                        Rectangle()
+                            .fill(GRASPColor.hairlineStrong)
+                            .frame(width: 1)
                         if let deckId = selectedDeckId {
                             DeckDetailView(deckId: deckId)
                         } else {
@@ -40,7 +49,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .background(GRASPColor.background)
+            .background(GRASPColor.canvas)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -64,6 +73,12 @@ struct ContentView: View {
                 ProfileMenuButton()
             }
         }
+        // Set at the window root rather than per-view: sidebar selection,
+        // segmented controls, focus rings and every system control in the
+        // window all draw from the tint, so one declaration here is what
+        // keeps them from reverting to the OS accent (which is usually
+        // blue, and reads as a stock app).
+        .tint(GRASPColor.accent)
         .sheet(isPresented: $showingAddCourse) {
             AddCourseSheet()
         }

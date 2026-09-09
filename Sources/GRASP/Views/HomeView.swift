@@ -1,11 +1,14 @@
 import SwiftUI
 import GRASPCore
 
-/// The dashboard shown before a course is picked: a "Jump back in" card
-/// for whatever deck was most recently studied (or most due, if nothing
-/// has been studied yet), a due-today/total-cards/course-count stat row,
-/// recent study activity, and every course as a tile -- the same shape as
-/// Quizlet's home screen, in GRASP's own palette.
+/// The dashboard shown before a course is picked.
+///
+/// Laid out asymmetrically on purpose: a wide left column carries the one
+/// thing worth acting on (the deck to continue) and the course shelf,
+/// while a narrow right rail holds reference material -- the day's figures
+/// and recent activity. An even grid of same-sized cards would give equal
+/// visual weight to "resume studying" and "you have 10 courses", which is
+/// not how the screen is actually used.
 struct HomeView: View {
     @Environment(AppStore.self) private var store
     @Binding var selectedCourseId: String?
@@ -16,6 +19,11 @@ struct HomeView: View {
     @State private var editingCourse: Course?
     @State private var deletingCourse: Course?
     @State private var deletionImpact: (materials: Int, cards: Int, reviews: Int)?
+
+    /// Below this the rail would squeeze both columns rather than help, so
+    /// it folds under the main column instead.
+    private let railBreakpoint: CGFloat = 860
+    private let railWidth: CGFloat = 260
 
     struct StudyTarget: Identifiable {
         let id: String
@@ -41,7 +49,7 @@ struct HomeView: View {
         decks
             .filter { $0.lastReviewedAt != nil && $0.deckId != jumpBackIn?.deckId }
             .sorted { $0.lastReviewedAt! > $1.lastReviewedAt! }
-            .prefix(5)
+            .prefix(6)
             .map { $0 }
     }
 
@@ -55,6 +63,11 @@ struct HomeView: View {
             return CourseRollup(
                 id: course.id,
                 name: course.name,
+                // Falls back to the semester rather than a literal
+                // "Course" label -- an eyebrow repeating the same word on
+                // every tile carries no information and just adds noise
+                // to the shelf.
+                eyebrow: course.code ?? semesterName(course.semesterId),
                 dueCount: courseDecks.reduce(0) { $0 + $1.dueCount },
                 cardCount: courseDecks.reduce(0) { $0 + $1.cardCount },
                 colorHex: course.colorHex
@@ -70,31 +83,49 @@ struct HomeView: View {
         store.coursesBySemester.values.flatMap { $0 }.filter { !$0.isArchived }
     }
 
+    private func semesterName(_ semesterId: String?) -> String? {
+        guard let semesterId else { return nil }
+        return store.semesters.first { $0.id == semesterId }?.name
+    }
+
     struct CourseRollup: Identifiable {
         let id: String
         let name: String
+        let eyebrow: String?
         let dueCount: Int
         let cardCount: Int
         let colorHex: String?
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                statsRow
-                if let jumpBackIn {
-                    jumpBackInCard(jumpBackIn)
+        GeometryReader { geo in
+            let showsRail = geo.size.width >= railBreakpoint
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    statStrip
+                        .padding(.top, 26)
+                    if showsRail {
+                        HStack(alignment: .top, spacing: 32) {
+                            mainColumn
+                            rail.frame(width: railWidth)
+                        }
+                        .padding(.top, 32)
+                    } else {
+                        VStack(alignment: .leading, spacing: 36) {
+                            mainColumn
+                            rail
+                        }
+                        .padding(.top, 32)
+                    }
                 }
-                if !recents.isEmpty {
-                    recentsSection
-                }
-                coursesGrid
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+                .padding(.bottom, 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(GRASPColor.background)
+        .background(GRASPColor.canvas)
         .task { load() }
         .onChange(of: store.deckCounts.count) { load() }
         .sheet(item: $studyingDeck, onDismiss: load) { target in
@@ -125,41 +156,45 @@ struct HomeView: View {
         decks = (try? store.dashboardDecks()) ?? []
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
             wordmark
-                .padding(.bottom, 6)
-            Text("Welcome back, \(firstName)")
-                .font(.graspHeading(28))
-                .foregroundStyle(GRASPColor.textPrimary)
-            Text(Date().formatted(date: .complete, time: .omitted))
-                .font(.callout)
-                .foregroundStyle(GRASPColor.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Welcome back, \(firstName)")
+                    .graspType(.display)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
         }
     }
 
     /// The name spelled out, with each source letter carried in the accent
     /// so the acronym explains itself rather than needing a legend.
     private var wordmark: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Text("G.R.A.S.P")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .tracking(2)
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.6)
                 .foregroundStyle(GRASPColor.accent)
-            Text("—")
-                .font(.caption)
-                .foregroundStyle(GRASPColor.stroke)
+            Rectangle()
+                .fill(GRASPColor.hairlineStrong)
+                .frame(width: 14, height: 1)
             expansion
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .regular))
+                .tracking(0.3)
         }
     }
 
     private var expansion: Text {
         let lead = { (letter: String) in
-            Text(letter).foregroundStyle(GRASPColor.accent).fontWeight(.heavy)
+            Text(letter).foregroundStyle(GRASPColor.accentMuted).fontWeight(.bold)
         }
         let rest = { (text: String) in
-            Text(text).foregroundStyle(GRASPColor.textSecondary)
+            Text(text).foregroundStyle(GRASPColor.textTertiary)
         }
         return lead("G") + rest("ather ")
             + lead("R") + rest("esources, ")
@@ -172,106 +207,168 @@ struct HomeView: View {
         store.profile.name.split(separator: " ").first.map(String.init) ?? store.profile.name
     }
 
-    private var statsRow: some View {
-        HStack(spacing: 16) {
-            StatTile(title: "Due Today", value: totalDue, icon: "clock.fill", tint: GRASPColor.accent)
-            StatTile(title: "Total Cards", value: totalCards, icon: "rectangle.stack.fill", tint: GRASPColor.success)
-            StatTile(title: "Courses", value: courseCount, icon: "books.vertical.fill", tint: GRASPColor.accent)
+    /// Three figures on one baseline, separated by hairlines -- the shape
+    /// a Mac app uses for a status line. Three equally-sized bordered
+    /// tiles would claim the same visual weight as the study card below,
+    /// which is the thing actually worth clicking.
+    private var statStrip: some View {
+        HStack(spacing: 0) {
+            StatFigure(value: totalDue, label: "Due today", tint: totalDue > 0 ? GRASPColor.accent : nil)
+            statDivider
+            StatFigure(value: totalCards, label: "Cards", tint: nil)
+            statDivider
+            StatFigure(value: courseCount, label: "Courses", tint: nil)
+            Spacer(minLength: 0)
         }
     }
 
-    private func jumpBackInCard(_ deck: AppStore.DeckSummary) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Jump back in")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(GRASPColor.textSecondary)
+    /// The stronger hairline: on the black canvas the default edge tone
+    /// disappears entirely, and a divider nobody can see is just a gap.
+    private var statDivider: some View {
+        Rectangle()
+            .fill(GRASPColor.hairlineStrong)
+            .frame(width: 1, height: 26)
+            .padding(.horizontal, 22)
+    }
 
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(deck.deckName).font(.graspHeading(22)).foregroundStyle(GRASPColor.textPrimary)
-                    Text(deck.courseName).font(.callout).foregroundStyle(GRASPColor.textSecondary)
-                }
-                Spacer()
-                if deck.dueCount > 0 {
-                    VStack(spacing: 0) {
-                        Text("\(deck.dueCount)").font(.graspNumber(22)).foregroundStyle(GRASPColor.accent)
-                        Text("due").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+    // MARK: - Columns
+
+    private var mainColumn: some View {
+        VStack(alignment: .leading, spacing: 34) {
+            if let jumpBackIn {
+                continueCard(jumpBackIn)
+            }
+            coursesShelf
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var rail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Recent")
+            if recents.isEmpty {
+                Text("Decks you study will collect here.")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .padding(.top, 2)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(recents.enumerated()), id: \.element.id) { index, deck in
+                        if index > 0 {
+                            Rectangle().fill(GRASPColor.hairlineStrong).frame(height: 1)
+                        }
+                        Button {
+                            selectedCourseId = deck.courseId
+                            selectedDeckId = deck.deckId
+                        } label: {
+                            RecentRow(deck: deck)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
+        }
+    }
 
-            ProgressBar(value: deck.reviewedCount, total: deck.cardCount)
-            Text("\(deck.reviewedCount)/\(deck.cardCount) cards reviewed")
-                .font(.caption)
-                .foregroundStyle(GRASPColor.textSecondary)
+    // MARK: - Continue card
 
-            HStack(spacing: 10) {
+    /// The one raised element on the dashboard. It gets the elevation, the
+    /// larger radius and the only shadow, so "where was I?" is answered
+    /// before anything else on the screen is read.
+    private func continueCard(_ deck: AppStore.DeckSummary) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(deck.dueCount > 0 ? "Pick up where you left off" : "Last studied")
+
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(deck.deckName)
+                        .font(.system(size: 24, weight: .semibold))
+                        .tracking(-0.5)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    Text(deck.courseName)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                }
+                Spacer(minLength: 12)
+                if deck.dueCount > 0 {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("\(deck.dueCount)")
+                            .graspType(.numeral)
+                            .foregroundStyle(GRASPColor.accent)
+                        Text("due")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                    }
+                }
+            }
+            .padding(.top, 14)
+
+            VStack(alignment: .leading, spacing: 7) {
+                ProgressBar(value: deck.reviewedCount, total: deck.cardCount)
+                Text("\(deck.reviewedCount) of \(deck.cardCount) cards reviewed")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            .padding(.top, 20)
+
+            HStack(spacing: 8) {
                 Button("Continue") {
                     studyingDeck = StudyTarget(id: deck.deckId, name: deck.deckName)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(GRASPColor.accent)
+                .buttonStyle(GRASPProminentButton())
                 .disabled(deck.dueCount == 0)
 
                 Button("Open deck") {
                     selectedCourseId = deck.courseId
                     selectedDeckId = deck.deckId
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(GRASPQuietButton())
             }
+            .padding(.top, 20)
         }
-        .padding(20)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(GRASPColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(GRASPColor.stroke, lineWidth: 1))
+        .background(GRASPColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
     }
 
-    private var recentsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Recents").font(.graspHeading(18)).foregroundStyle(GRASPColor.textPrimary)
-            VStack(spacing: 8) {
-                ForEach(recents) { deck in
-                    Button {
-                        selectedCourseId = deck.courseId
-                        selectedDeckId = deck.deckId
-                    } label: {
-                        RecentRow(deck: deck)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
+    // MARK: - Courses
 
-    private var coursesGrid: some View {
+    private var coursesShelf: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Your Courses").font(.graspHeading(18)).foregroundStyle(GRASPColor.textPrimary)
+            SectionLabel("Your courses")
             if courseRollups.isEmpty {
                 Text("Import the vault to populate your courses.")
-                    .font(.callout)
-                    .foregroundStyle(GRASPColor.textSecondary)
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textTertiary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 16)], spacing: 16) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 172, maximum: 230), spacing: 10)],
+                    spacing: 10
+                ) {
                     ForEach(courseRollups) { rollup in
-                        CourseTile(
-                            name: rollup.name,
-                            cardCount: rollup.cardCount,
-                            dueCount: rollup.dueCount,
-                            colorHex: rollup.colorHex
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) { if let course = course(for: rollup.id) { editingCourse = course } }
-                        .onTapGesture { selectedCourseId = rollup.id }
-                        .contextMenu {
-                            if let course = course(for: rollup.id) {
-                                CourseContextMenu(
-                                    course: course,
-                                    onEdit: { editingCourse = course },
-                                    onArchive: { try? store.setCourseArchived(course.id, archived: !course.isArchived) },
-                                    onDelete: { beginDelete(course) }
-                                )
+                        CourseTile(rollup: rollup)
+                            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .onTapGesture(count: 2) {
+                                if let course = course(for: rollup.id) { editingCourse = course }
                             }
-                        }
+                            .onTapGesture { selectedCourseId = rollup.id }
+                            .contextMenu {
+                                if let course = course(for: rollup.id) {
+                                    CourseContextMenu(
+                                        course: course,
+                                        onEdit: { editingCourse = course },
+                                        onArchive: {
+                                            try? store.setCourseArchived(course.id, archived: !course.isArchived)
+                                        },
+                                        onDelete: { beginDelete(course) }
+                                    )
+                                }
+                            }
                     }
                 }
             }
@@ -298,91 +395,132 @@ struct HomeView: View {
     }
 }
 
+// MARK: - Pieces
+
+/// Small uppercase label that opens a section. Tracked positive, because
+/// capitals at 11pt jam together at default spacing.
+struct SectionLabel: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .graspType(.eyebrow)
+            .textCase(.uppercase)
+            .foregroundStyle(GRASPColor.textTertiary)
+    }
+}
+
+private struct StatFigure: View {
+    let value: Int
+    let label: String
+    let tint: Color?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("\(value)")
+                .graspType(.numeralSmall)
+                .foregroundStyle(tint ?? GRASPColor.textPrimary)
+            Text(label)
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        }
+        .fixedSize()
+    }
+}
+
 private struct RecentRow: View {
     let deck: AppStore.DeckSummary
+    @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(GRASPColor.accentSoft)
-                .frame(width: 36, height: 36)
-                .overlay(
-                    Image(systemName: "rectangle.on.rectangle")
-                        .font(.system(size: 15))
-                        .foregroundStyle(GRASPColor.accent)
-                )
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(deck.deckName).font(.body.weight(.medium)).foregroundStyle(GRASPColor.textPrimary)
-                Text("\(deck.cardCount) cards · \(deck.courseName)")
-                    .font(.caption)
-                    .foregroundStyle(GRASPColor.textSecondary)
+                Text(deck.deckName)
+                    .graspType(.rowTitle)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .lineLimit(1)
+                Text(deck.courseName)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 8)
             if let last = deck.lastReviewedAt {
-                Text(last.formatted(.relative(presentation: .named)))
-                    .font(.caption)
-                    .foregroundStyle(GRASPColor.textSecondary)
+                Text(last.formatted(.relative(presentation: .numeric, unitsStyle: .narrow)))
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize()
             }
         }
-        .padding(12)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(GRASPColor.stroke, lineWidth: 1))
+        .padding(.vertical, 9)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovering ? GRASPColor.surface : .clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 }
 
-private struct StatTile: View {
-    let title: String
-    let value: Int
-    let icon: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.title3).foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(value)").font(.graspNumber(20)).foregroundStyle(GRASPColor.textPrimary)
-                Text(title).font(.caption).foregroundStyle(GRASPColor.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(GRASPColor.stroke, lineWidth: 1))
-    }
-}
-
+/// A course tile carries no border at rest -- it separates from the ground
+/// by value alone -- and gains one on hover. That keeps a shelf of ten
+/// courses from reading as ten outlined boxes while still giving each one
+/// a real pointer state, the way a Mac collection view behaves.
 private struct CourseTile: View {
-    let name: String
-    let cardCount: Int
-    let dueCount: Int
-    let colorHex: String?
+    let rollup: HomeView.CourseRollup
+    @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "book.closed.fill")
-                    .foregroundStyle(colorHex.map { Color(hex: $0) } ?? GRASPColor.accent)
-                Spacer()
-                if dueCount > 0 {
-                    Text("\(dueCount)")
-                        .font(.caption.weight(.bold))
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(GRASPColor.accent, in: Capsule())
-                        .foregroundStyle(.black)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(rollup.colorHex.map { Color(hex: $0) } ?? GRASPColor.accentMuted)
+                    .frame(width: 6, height: 6)
+                if let eyebrow = rollup.eyebrow {
+                    Text(eyebrow)
+                        .graspType(.eyebrow)
+                        .textCase(.uppercase)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
-            Text(name)
-                .font(.body.weight(.semibold))
+            .frame(height: 13)
+
+            Text(rollup.name)
+                .graspType(.title)
                 .foregroundStyle(GRASPColor.textPrimary)
                 .lineLimit(2)
-                .frame(minHeight: 36, alignment: .top)
-            Text("\(cardCount) cards")
-                .font(.caption)
-                .foregroundStyle(GRASPColor.textSecondary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+
+            Spacer(minLength: 10)
+
+            HStack(spacing: 5) {
+                Text("\(rollup.cardCount) cards")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                if rollup.dueCount > 0 {
+                    Text("·").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                    Text("\(rollup.dueCount) due")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.accent)
+                }
+            }
         }
-        .padding(16)
-        .frame(height: 130, alignment: .top)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(GRASPColor.stroke, lineWidth: 1))
+        .padding(13)
+        .frame(height: 112, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovering ? GRASPColor.surfaceRaised : GRASPColor.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(isHovering ? GRASPColor.hairlineStrong : .clear, lineWidth: 1)
+        )
+        .onHover { isHovering = $0 }
     }
 }

@@ -34,8 +34,6 @@ struct LearnRoundView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            progressBars
-            Divider()
             if isEmpty {
                 ContentUnavailableView(
                     "Nothing to learn", systemImage: "checkmark.circle",
@@ -49,70 +47,143 @@ struct LearnRoundView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 560, minHeight: 500)
+        .background(GRASPColor.canvas)
+        .frame(minWidth: 620, minHeight: 540)
         .task { startRound() }
     }
 
-    private var header: some View {
-        HStack {
-            Button("Close") { dismiss() }
-            Spacer()
-            Text(deckName).font(.headline)
-            Spacer()
-            Text("\(roundCorrect + roundIncorrect)/\(LearnEngine.roundSize) this round")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .padding()
-    }
-
+    /// Two progress readings sit in the chrome, and they answer different
+    /// questions -- "how far through this round" (immediate, segmented by
+    /// question) and "how much of the deck is understood" (the long arc).
+    /// They're deliberately drawn at different weights and tints so they
+    /// aren't mistaken for the same measurement stacked twice.
+    ///
     /// `queue.count + completedCardIds.count` is invariant across a round:
     /// a miss requeues (removes one, reinserts one) and a correct answer
     /// only removes -- so completed-so-far divided by that sum is exactly
     /// how far through the round's original cards this is, reaching 1.0
     /// precisely when the round ends.
-    private var progressBars: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                ProgressBar(value: completedCardIds.count, total: roundTotal)
-                Text("Question \(min(completedCardIds.count + 1, roundTotal)) of \(roundTotal)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var header: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(GRASPColor.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Leave this round")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(deckName)
+                        .graspType(.title)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
+                    Text("Learn")
+                        .graspType(.meta)
+                        .textCase(.uppercase)
+                        .tracking(0.7)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+
+                Spacer(minLength: 12)
+
+                if !isEmpty && !isAtCheckpoint {
+                    Text("Question \(min(completedCardIds.count + 1, roundTotal)) of \(roundTotal)")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .monospacedDigit()
+                }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                ProgressBar(value: deckMastery.mastered, total: deckMastery.total)
-                Text("\(deckMastery.mastered)/\(deckMastery.total) cards understood")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+            if !isEmpty {
+                VStack(spacing: 8) {
+                    ProgressBar(
+                        value: completedCardIds.count, total: roundTotal,
+                        checkpoints: roundTotal, height: 7
+                    )
+                    HStack(spacing: 8) {
+                        ProgressBar(
+                            value: deckMastery.mastered, total: deckMastery.total,
+                            tint: GRASPColor.success, height: 3
+                        )
+                        Text("\(deckMastery.mastered)/\(deckMastery.total) understood")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .monospacedDigit()
+                            .fixedSize()
+                    }
+                }
             }
         }
-        .padding(.horizontal)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        .background(alignment: .bottom) {
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+        }
     }
 
     private var checkpointView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "flag.checkered.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(GRASPColor.accent)
-            Text("Checkpoint").font(.title2.bold())
-            VStack(spacing: 4) {
-                Text("\(roundCorrect) correct, \(roundIncorrect) need more review this round")
-                    .foregroundStyle(.secondary)
-                Text("\(deckMastery.mastered) of \(deckMastery.total) cards understood overall")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            SectionLabel("Checkpoint")
+            Text(checkpointHeadline)
+                .font(.system(size: 22, weight: .semibold))
+                .tracking(-0.4)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .padding(.top, 8)
+
+            HStack(spacing: 0) {
+                tally(roundCorrect, "correct", GRASPColor.success)
+                Rectangle()
+                    .fill(GRASPColor.hairline)
+                    .frame(width: 1, height: 32)
+                    .padding(.horizontal, 26)
+                tally(roundIncorrect, "to revisit", GRASPColor.accent)
             }
-            HStack(spacing: 12) {
+            .padding(.top, 26)
+
+            VStack(spacing: 7) {
+                ProgressBar(
+                    value: deckMastery.mastered, total: deckMastery.total,
+                    tint: GRASPColor.success
+                )
+                Text("\(deckMastery.mastered) of \(deckMastery.total) cards in this deck understood")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            .frame(maxWidth: 320)
+            .padding(.top, 30)
+
+            HStack(spacing: 8) {
                 Button("Done for now") { dismiss() }
-                Button("Continue Studying") { startRound() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(GRASPColor.accent)
+                    .buttonStyle(GRASPQuietButton())
+                Button("Keep going") { startRound() }
+                    .buttonStyle(GRASPProminentButton())
                     .keyboardShortcut(.defaultAction)
             }
+            .padding(.top, 30)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Names what just happened rather than repeating the word already
+    /// used as the section label above it.
+    private var checkpointHeadline: String {
+        if roundIncorrect == 0 { return "Clean round" }
+        if roundCorrect == 0 { return "Rough round -- worth another pass" }
+        return "Round complete"
+    }
+
+    private func tally(_ value: Int, _ label: String, _ tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)").graspType(.numeral).foregroundStyle(tint)
+            Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+        }
     }
 
     private func startRound() {
@@ -131,33 +202,42 @@ struct LearnRoundView: View {
         deckMastery = (try? store.deckMastery(deckId: deckId)) ?? (0, 0)
     }
 
+    /// The prompt gets the top third of the canvas to itself and the
+    /// answer controls group tightly beneath it, rather than everything
+    /// sharing one evenly-spaced stack -- the question is what's being
+    /// read, the choices are what's being operated.
     @ViewBuilder
     private func questionView(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 0) {
             Text(question.prompt)
-                .font(.title2.weight(.medium))
+                .graspType(.studyPrompt)
+                .foregroundStyle(GRASPColor.textPrimary)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
-                .padding(.top, 24)
+                .frame(maxWidth: 560)
+                .padding(.top, 42)
 
-            switch question.type {
-            case .multipleChoice:
-                multipleChoiceBody(question)
-            case .trueFalse:
-                trueFalseBody(question)
-            case .written:
-                writtenBody(question)
+            Spacer(minLength: 28)
+
+            VStack(spacing: 14) {
+                switch question.type {
+                case .multipleChoice:
+                    multipleChoiceBody(question)
+                case .trueFalse:
+                    trueFalseBody(question)
+                case .written:
+                    writtenBody(question)
+                }
+
+                if let verdict {
+                    verdictBanner(verdict)
+                }
+
+                actionButton(question)
             }
-
-            if let verdict {
-                verdictBanner(verdict)
-            }
-
-            Spacer()
-
-            actionButton(question)
-                .padding(.bottom, 24)
+            .padding(.bottom, 28)
         }
+        .padding(.horizontal, 32)
     }
 
     @State private var lastAnswerCorrect = false
@@ -165,10 +245,14 @@ struct LearnRoundView: View {
     @ViewBuilder
     private func actionButton(_ question: LearnEngine.RoundQuestion) -> some View {
         if isAnswered {
-            Button(queue.count == 1 ? "Finish Round" : "Next") { advance(question, wasCorrect: lastAnswerCorrect) }
-                .keyboardShortcut(.defaultAction)
+            Button(queue.count == 1 ? "Finish round" : "Next question") {
+                advance(question, wasCorrect: lastAnswerCorrect)
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
         } else {
             Button("Submit") { trySubmit(question) }
+                .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit(question))
         }
@@ -196,28 +280,69 @@ struct LearnRoundView: View {
         }
     }
 
+    /// Each choice is lettered. The letter sits in a fixed slot so every
+    /// answer's text starts on the same x, and once graded the slot swaps
+    /// to a check or cross -- the row's state reads from its shape, not
+    /// from a tint alone.
     private func multipleChoiceBody(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 8) {
-            ForEach(question.choices ?? [], id: \.self) { choice in
+        VStack(spacing: 7) {
+            ForEach(Array((question.choices ?? []).enumerated()), id: \.element) { index, choice in
                 Button {
                     toggleSelection(choice)
                 } label: {
-                    HStack {
-                        Text(choice).textSelection(.enabled)
-                        Spacer()
+                    HStack(alignment: .top, spacing: 11) {
+                        choiceMarker(choice, index: index, correct: question.correctAnswer)
+                        Text(choice)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textPrimary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 0)
                     }
-                    .padding(10)
-                    .background(choiceBackground(choice, correct: question.correctAnswer), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(choiceBackground(choice, correct: question.correctAnswer))
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isPendingSelection(choice) ? GRASPColor.accent : .clear, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(
+                                choiceBorder(choice, correct: question.correctAnswer),
+                                lineWidth: 1
+                            )
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(isAnswered)
             }
         }
-        .padding(.horizontal, 40)
+        .frame(maxWidth: 560)
+    }
+
+    @ViewBuilder
+    private func choiceMarker(_ choice: String, index: Int, correct: String) -> some View {
+        let letter = String(UnicodeScalar(65 + min(index, 25))!)
+        Group {
+            if isAnswered && choice == correct {
+                Image(systemName: "checkmark").foregroundStyle(GRASPColor.success)
+            } else if isAnswered && choice == selectedChoice {
+                Image(systemName: "xmark").foregroundStyle(GRASPColor.accent)
+            } else {
+                Text(letter)
+                    .foregroundStyle(
+                        isPendingSelection(choice) ? GRASPColor.accent : GRASPColor.textTertiary
+                    )
+            }
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .frame(width: 17, height: 17)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(isPendingSelection(choice) ? GRASPColor.accentSoft : GRASPColor.inset)
+        )
+        .padding(.top, 1)
     }
 
     /// Tapping the already-selected choice deselects it -- picking an
@@ -231,50 +356,83 @@ struct LearnRoundView: View {
         !isAnswered && selectedChoice == choice
     }
 
+    /// Correctness uses the palette's own success teal and accent amber
+    /// rather than raw system green/red, so a graded question still looks
+    /// like it belongs to this app.
     private func choiceBackground(_ choice: String, correct: String) -> Color {
         if isAnswered {
-            if choice == correct { return .green.opacity(0.3) }
-            if choice == selectedChoice { return .red.opacity(0.3) }
-            return .secondary.opacity(0.1)
+            if choice == correct { return GRASPColor.successSoft }
+            if choice == selectedChoice { return GRASPColor.accentSoft }
+            return GRASPColor.surface
         }
-        return choice == selectedChoice ? GRASPColor.accentSoft : Color.secondary.opacity(0.1)
+        return choice == selectedChoice ? GRASPColor.accentSoft : GRASPColor.surface
+    }
+
+    private func choiceBorder(_ choice: String, correct: String) -> Color {
+        if isAnswered {
+            if choice == correct { return GRASPColor.success.opacity(0.55) }
+            if choice == selectedChoice { return GRASPColor.accent.opacity(0.55) }
+            return GRASPColor.hairline
+        }
+        return isPendingSelection(choice) ? GRASPColor.accent : GRASPColor.hairline
     }
 
     private func trueFalseBody(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
             Text(question.statement ?? "")
-                .font(.title3)
+                .graspType(.studyAnswer)
+                .foregroundStyle(GRASPColor.textSecondary)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
-                .padding(.horizontal, 40)
-            HStack(spacing: 12) {
+                .frame(maxWidth: 520)
+            HStack(spacing: 10) {
                 trueFalseButton("True")
                 trueFalseButton("False")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .frame(maxWidth: 340)
         }
     }
 
     private func trueFalseButton(_ label: String) -> some View {
         Button(label) { toggleSelection(label) }
-            .tint(isPendingSelection(label) ? GRASPColor.accent : nil)
+            .buttonStyle(
+                GRASPVerdictButton(
+                    tint: isPendingSelection(label) ? GRASPColor.accent : GRASPColor.textSecondary
+                )
+            )
             .disabled(isAnswered)
     }
 
     private func writtenBody(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             TextField("Type the answer", text: $writtenAnswer)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .padding(.horizontal, 13)
+                .frame(height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(GRASPColor.inset)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(
+                            writtenFieldFocused ? GRASPColor.accent : GRASPColor.hairlineStrong,
+                            lineWidth: 1
+                        )
+                )
                 .focused($writtenFieldFocused)
                 .disabled(isAnswered)
                 .onSubmit { trySubmit(question) }
-                .padding(.horizontal, 40)
+                .frame(maxWidth: 420)
             if isAnswered, verdict != .correct {
-                Text("Correct answer: \(question.correctAnswer)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                HStack(spacing: 5) {
+                    Text("Answer").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                    Text(question.correctAnswer)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .textSelection(.enabled)
+                }
             }
         }
         .task { writtenFieldFocused = true }
@@ -284,12 +442,20 @@ struct LearnRoundView: View {
     private func verdictBanner(_ verdict: AnswerGrading.Verdict) -> some View {
         switch verdict {
         case .correct:
-            Label("Correct", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            verdictLabel("Correct", "checkmark.circle.fill", GRASPColor.success)
         case .close:
-            Label("Close -- check your spelling", systemImage: "checkmark.circle").foregroundStyle(.orange)
+            verdictLabel("Close -- check your spelling", "checkmark.circle", GRASPColor.accent)
         case .incorrect:
-            Label("Not quite", systemImage: "xmark.circle.fill").foregroundStyle(.red)
+            verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.accent)
         }
+    }
+
+    private func verdictLabel(_ text: String, _ symbol: String, _ tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 12))
+            Text(text).graspType(.body)
+        }
+        .foregroundStyle(tint)
     }
 
     private func submit(_ correct: Bool, question: LearnEngine.RoundQuestion) {

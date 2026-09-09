@@ -100,99 +100,215 @@ struct TestRunView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if index < questions.count {
                 questionBody(questions[index])
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 560, minHeight: 460)
+        .background(GRASPColor.canvas)
+        .frame(minWidth: 620, minHeight: 520)
     }
 
     private var header: some View {
-        HStack {
-            Button("Cancel") { dismiss() }
-            Spacer()
-            Text(deckName).font(.headline)
-            Spacer()
-            Text("\(index + 1)/\(questions.count)").foregroundStyle(.secondary).monospacedDigit()
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(GRASPColor.surface, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Cancel this test")
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(deckName)
+                        .graspType(.title)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
+                    Text("Test")
+                        .graspType(.meta)
+                        .textCase(.uppercase)
+                        .tracking(0.7)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+
+                Spacer(minLength: 12)
+
+                Text("\(index + 1) / \(questions.count)")
+                    .graspType(.numeralSmall)
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+
+            ProgressBar(value: index, total: questions.count, height: 2)
         }
-        .padding()
     }
 
     @ViewBuilder
     private func questionBody(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 20) {
-            Text(question.prompt).font(.title2.weight(.medium)).multilineTextAlignment(.center).padding(.top, 24)
-            switch question.type {
-            case .multipleChoice:
-                VStack(spacing: 8) {
-                    ForEach(question.choices ?? [], id: \.self) { choice in
-                        Button {
-                            guard !isAnswered else { return }
-                            selectedChoice = choice
-                            submit(choice == question.correctAnswer, given: choice, question: question)
-                        } label: {
-                            HStack { Text(choice); Spacer() }
-                                .padding(10)
-                                .background(background(choice, correct: question.correctAnswer), in: RoundedRectangle(cornerRadius: 8))
+        VStack(spacing: 0) {
+            Text(question.prompt)
+                .graspType(.studyPrompt)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: 560)
+                .padding(.top, 42)
+
+            Spacer(minLength: 28)
+
+            VStack(spacing: 14) {
+                switch question.type {
+                case .multipleChoice:
+                    choiceList(question)
+                case .trueFalse:
+                    VStack(spacing: 18) {
+                        Text(question.statement ?? "")
+                            .graspType(.studyAnswer)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: 520)
+                        HStack(spacing: 10) {
+                            trueFalseButton("True", question)
+                            trueFalseButton("False", question)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: 340)
+                    }
+                case .written:
+                    TextField("Type the answer", text: $writtenAnswer)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 15))
+                        .padding(.horizontal, 13)
+                        .frame(height: 38)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(GRASPColor.inset)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(
+                                    writtenFieldFocused ? GRASPColor.accent : GRASPColor.hairlineStrong,
+                                    lineWidth: 1
+                                )
+                        )
+                        .focused($writtenFieldFocused)
                         .disabled(isAnswered)
-                    }
+                        .onSubmit {
+                            guard !isAnswered, !writtenAnswer.isEmpty else { return }
+                            let verdict = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
+                            submit(verdict != .incorrect, given: writtenAnswer, question: question)
+                        }
+                        .frame(maxWidth: 420)
+                        .task { writtenFieldFocused = true }
                 }
-                .padding(.horizontal, 40)
-            case .trueFalse:
-                VStack(spacing: 16) {
-                    Text(question.statement ?? "").font(.title3).multilineTextAlignment(.center).padding(.horizontal, 40)
-                    HStack(spacing: 12) {
-                        Button("True") {
-                            guard !isAnswered else { return }
-                            submit(question.correctAnswer == "True", given: "True", question: question)
-                        }.disabled(isAnswered)
-                        Button("False") {
-                            guard !isAnswered else { return }
-                            submit(question.correctAnswer == "False", given: "False", question: question)
-                        }.disabled(isAnswered)
+
+                if isAnswered {
+                    HStack(spacing: 6) {
+                        Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .font(.system(size: 12))
+                        Text(lastCorrect ? "Correct" : "Not quite -- \(question.correctAnswer)")
+                            .graspType(.body)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)
+
+                    Button(index == questions.count - 1 ? "Finish test" : "Next question") { advance() }
+                        .buttonStyle(GRASPProminentButton())
+                        .keyboardShortcut(.defaultAction)
                 }
-            case .written:
-                TextField("Type the answer", text: $writtenAnswer)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($writtenFieldFocused)
-                    .disabled(isAnswered)
-                    .onSubmit {
-                        guard !isAnswered, !writtenAnswer.isEmpty else { return }
-                        let verdict = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
-                        submit(verdict != .incorrect, given: writtenAnswer, question: question)
+            }
+            .padding(.bottom, 28)
+        }
+        .padding(.horizontal, 32)
+    }
+
+    private func choiceList(_ question: LearnEngine.RoundQuestion) -> some View {
+        VStack(spacing: 7) {
+            ForEach(Array((question.choices ?? []).enumerated()), id: \.element) { position, choice in
+                Button {
+                    guard !isAnswered else { return }
+                    selectedChoice = choice
+                    submit(choice == question.correctAnswer, given: choice, question: question)
+                } label: {
+                    HStack(alignment: .top, spacing: 11) {
+                        marker(choice, position: position, correct: question.correctAnswer)
+                        Text(choice)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textPrimary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                        Spacer(minLength: 0)
                     }
-                    .padding(.horizontal, 40)
-                    .task { writtenFieldFocused = true }
-            }
-
-            if isAnswered {
-                Label(lastCorrect ? "Correct" : "Not quite (\(question.correctAnswer))",
-                      systemImage: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(lastCorrect ? .green : .red)
-            }
-
-            Spacer()
-
-            if isAnswered {
-                Button(index == questions.count - 1 ? "Finish" : "Next") { advance() }
-                    .keyboardShortcut(.defaultAction)
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(background(choice, correct: question.correctAnswer))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(border(choice, correct: question.correctAnswer), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isAnswered)
             }
         }
+        .frame(maxWidth: 560)
+    }
+
+    @ViewBuilder
+    private func marker(_ choice: String, position: Int, correct: String) -> some View {
+        Group {
+            if isAnswered && choice == correct {
+                Image(systemName: "checkmark").foregroundStyle(GRASPColor.success)
+            } else if isAnswered && choice == selectedChoice {
+                Image(systemName: "xmark").foregroundStyle(GRASPColor.accent)
+            } else {
+                Text(String(UnicodeScalar(65 + min(position, 25))!))
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .frame(width: 17, height: 17)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(GRASPColor.inset))
+        .padding(.top, 1)
+    }
+
+    private func trueFalseButton(_ label: String, _ question: LearnEngine.RoundQuestion) -> some View {
+        Button(label) {
+            guard !isAnswered else { return }
+            selectedChoice = label
+            submit(question.correctAnswer == label, given: label, question: question)
+        }
+        .buttonStyle(GRASPVerdictButton(tint: tint(for: label, question: question)))
+        .disabled(isAnswered)
+    }
+
+    private func tint(for label: String, question: LearnEngine.RoundQuestion) -> Color {
+        guard isAnswered else { return GRASPColor.textSecondary }
+        if label == question.correctAnswer { return GRASPColor.success }
+        return label == selectedChoice ? GRASPColor.accent : GRASPColor.textTertiary
     }
 
     private func background(_ choice: String, correct: String) -> Color {
-        guard isAnswered else { return .secondary.opacity(0.1) }
-        if choice == correct { return .green.opacity(0.3) }
-        if choice == selectedChoice { return .red.opacity(0.3) }
-        return .secondary.opacity(0.1)
+        guard isAnswered else { return GRASPColor.surface }
+        if choice == correct { return GRASPColor.successSoft }
+        if choice == selectedChoice { return GRASPColor.accentSoft }
+        return GRASPColor.surface
+    }
+
+    private func border(_ choice: String, correct: String) -> Color {
+        guard isAnswered else { return GRASPColor.hairline }
+        if choice == correct { return GRASPColor.success.opacity(0.55) }
+        if choice == selectedChoice { return GRASPColor.accent.opacity(0.55) }
+        return GRASPColor.hairline
     }
 
     private func submit(_ correct: Bool, given: String, question: LearnEngine.RoundQuestion) {
@@ -221,26 +337,73 @@ struct TestResultsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 8) {
-                Text("Test Results").font(.title2.bold())
-                Text(deckName).foregroundStyle(.secondary)
-                Text("\(correct) / \(total)")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(correct == total ? .green : .primary)
-                Text("Missed questions were added back to your flashcard queue.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(24)
-            Divider()
-            List(questions) { question in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(question.prompt).font(.body.weight(.medium))
-                    Text(question.correctAnswer).font(.callout).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                SectionLabel("Test results")
+                Text(deckName)
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(-0.4)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .padding(.top, 6)
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(correct)")
+                        .font(.system(size: 44, weight: .semibold)).monospacedDigit()
+                        .tracking(-1.4)
+                        .foregroundStyle(correct == total ? GRASPColor.success : GRASPColor.textPrimary)
+                    Text("/ \(total)")
+                        .font(.system(size: 20, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(GRASPColor.textTertiary)
                 }
+                .padding(.top, 14)
+
+                ProgressBar(
+                    value: correct, total: total,
+                    tint: correct == total ? GRASPColor.success : GRASPColor.accent
+                )
+                .frame(maxWidth: 260)
+                .padding(.top, 14)
+
+                Text("Missed questions were added back to your flashcard queue.")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .padding(.top, 12)
             }
-            Divider()
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).padding()
+            .padding(.horizontal, 24)
+            .padding(.vertical, 26)
+            .frame(maxWidth: .infinity)
+            .background(alignment: .bottom) {
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+            }
+
+            List(questions) { question in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(question.prompt)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(question.correctAnswer)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 5)
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .buttonStyle(GRASPProminentButton())
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(alignment: .top) {
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+            }
         }
-        .frame(minWidth: 480, minHeight: 480)
+        .background(GRASPColor.canvas)
+        .frame(minWidth: 520, minHeight: 520)
     }
 }

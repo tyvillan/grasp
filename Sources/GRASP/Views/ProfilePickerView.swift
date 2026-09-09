@@ -16,17 +16,20 @@ struct ProfilePickerView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            VStack(spacing: 8) {
-                Image(systemName: "text.book.closed.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(GRASPColor.accent)
+            // The wordmark is set wide-tracked rather than large: this is
+            // a doorway, not a splash screen, and the profiles below are
+            // what the eye should land on.
+            VStack(spacing: 10) {
                 Text("GRASP")
-                    .font(.graspHeading(34))
-                    .foregroundStyle(GRASPColor.textPrimary)
+                    .font(.system(size: 15, weight: .bold))
+                    .tracking(5)
+                    .foregroundStyle(GRASPColor.accent)
                 Text("Who's studying?")
-                    .foregroundStyle(GRASPColor.textSecondary)
+                    .font(.system(size: 26, weight: .semibold))
+                    .tracking(-0.5)
+                    .foregroundStyle(GRASPColor.textPrimary)
             }
-            .padding(.top, 32)
+            .padding(.top, 40)
 
             if let loadError {
                 Text(loadError).font(.caption).foregroundStyle(.red)
@@ -43,15 +46,28 @@ struct ProfilePickerView: View {
                             }
                         }
                     }
+                    // Dashed, unfilled: it's an empty slot to fill, not
+                    // another profile sitting alongside the real ones.
                     Button {
                         showingNewProfile = true
                     } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "plus.circle.fill").font(.system(size: 36))
-                            Text("New Profile")
+                        VStack(spacing: 10) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                                .frame(width: 64, height: 64)
+                            Text("New profile")
+                                .graspType(.rowTitle)
+                                .foregroundStyle(GRASPColor.textTertiary)
                         }
                         .frame(width: 140, height: 140)
-                        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(GRASPColor.stroke, lineWidth: 1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(
+                                    GRASPColor.hairlineStrong,
+                                    style: StrokeStyle(lineWidth: 1, dash: [4, 4])
+                                )
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -92,22 +108,36 @@ struct ProfilePickerView: View {
 private struct ProfileTile: View {
     let profile: Profile
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Avatar(name: profile.name, size: 64, fontSize: 22)
                 HStack(spacing: 4) {
-                    Text(profile.name).lineLimit(1)
+                    Text(profile.name)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
                     if profile.pinHash != nil {
-                        Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(GRASPColor.textTertiary)
                     }
                 }
             }
             .frame(width: 140, height: 140)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(GRASPColor.stroke, lineWidth: 1))
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isHovering ? GRASPColor.surfaceRaised : GRASPColor.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isHovering ? GRASPColor.accent : GRASPColor.hairline, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
     }
 }
 
