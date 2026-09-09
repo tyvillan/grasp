@@ -699,4 +699,31 @@ final class AppStore {
         }
         reload()
     }
+
+    /// The manual counterpart to `runImport()`: files or folders the user
+    /// picked by hand -- anywhere on disk, not necessarily under the vault
+    /// -- imported straight into one course. This is what makes a
+    /// manually-created course (no vault folder for `runImport()` to ever
+    /// find) actually usable, and lets any course pick up a one-off file
+    /// that never lived in Obsidian.
+    @discardableResult
+    func importFiles(_ urls: [URL], intoCourse courseId: String) async -> ImportSummary {
+        guard !isImporting else { return ImportSummary() }
+        isImporting = true
+        importError = nil
+        defer { isImporting = false }
+        let summary: ImportSummary
+        do {
+            summary = try await scanner.importPaths(urls, intoCourse: courseId)
+            lastImportSummary = summary
+            if !summary.errors.isEmpty {
+                importError = summary.errors.first
+            }
+        } catch {
+            summary = ImportSummary()
+            importError = "Import failed: \(error)"
+        }
+        reload()
+        return summary
+    }
 }

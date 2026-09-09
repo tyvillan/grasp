@@ -12,6 +12,25 @@ public struct ImportSummary: Sendable, Equatable {
     public var semesterCount = 0
     public var courseCount = 0
     public var errors: [String] = []
+
+    // The synthesized memberwise init is only as public as the struct's
+    // properties make it, which defaults to internal -- callers outside
+    // GRASPCore (the app target's error-path fallbacks) need a real one.
+    public init(
+        filesScanned: Int = 0, filesUnchanged: Int = 0, filesImportedOrUpdated: Int = 0,
+        filesSkippedAsset: Int = 0, filesSkippedEmpty: Int = 0, cardsCreated: Int = 0,
+        semesterCount: Int = 0, courseCount: Int = 0, errors: [String] = []
+    ) {
+        self.filesScanned = filesScanned
+        self.filesUnchanged = filesUnchanged
+        self.filesImportedOrUpdated = filesImportedOrUpdated
+        self.filesSkippedAsset = filesSkippedAsset
+        self.filesSkippedEmpty = filesSkippedEmpty
+        self.cardsCreated = cardsCreated
+        self.semesterCount = semesterCount
+        self.courseCount = courseCount
+        self.errors = errors
+    }
 }
 
 /// Walks `<vaultRoot>/College/<Semester>/<Course>/[Lecture Notes/]*`, maps
@@ -187,6 +206,156 @@ public actor VaultScanner {
         }
         guard let courseId = resolvedCourseId else { return }
 
+        try importNoteBody(
+            fileURL: fileURL, relativePath: relativePath, contentHash: contentHash,
+            frontmatter: frontmatter, rawBody: rawBody, courseId: courseId, db: db, summary: &summary
+        )
+    }
+
+    /// PDF/docx/ipynb: no frontmatter to read, so semester resolution
+    /// falls back to the folder name alone, and there is no asset-sidecar
+    /// or empty-stub concept -- an extraction failure or empty result is
+    /// its own distinct state instead.
+    private func importBinaryMaterial(
+        _ fileURL: URL, kind: MaterialKind, courseName: String, courseFolderPath: String,
+        fallbackSemesterFolderName: String, resolvedCourseId: inout String?,
+        db: Database, summary: inout ImportSummary
+    ) throws {
+        let data = try Data(contentsOf: fileURL)
+        let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let relativePath = fileURL.path
+
+        if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
+           existing.contentHash == contentHash {
+            summary.filesUnchanged += 1
+            return
+        }
+
+        if resolvedCourseId == nil {
+            let (semSlug, semName, semSortKey) = SemesterSlug.resolve(tags: [], folderName: fallbackSemesterFolderName)
+            var semesterId: String?
+            if !fallbackSemesterFolderName.isEmpty {
+                let semester = try findOrCreateSemester(slug: semSlug, name: semName, sortKey: semSortKey, db: db)
+                semesterId = semester.id
+            }
+            let course = try findOrCreateCourse(
+                name: courseName, folderPath: courseFolderPath, semesterId: semesterId, db: db
+            )
+            resolvedCourseId = course.id
+        }
+        guard let courseId = resolvedCourseId else { return }
+
+        try importBinaryBody(
+            fileURL: fileURL, kind: kind, relativePath: relativePath, contentHash: contentHash,
+            courseId: courseId, db: db, summary: &summary
+        )
+    }
+
+    // MARK: - Manual import (files/folders picked by hand, not under the vault)
+
+    /// The manual counterpart to `scan(vaultRoot:)`: imports files or
+    /// whole folders the user picked by hand -- via a file picker, not
+    /// necessarily anywhere near the vault -- directly into an
+    /// already-known course. Every file runs through the exact same
+    /// clean/reflow/parse pipeline a vault-discovered file does; the only
+    /// difference is that the course is given rather than inferred from a
+    /// `College/<Semester>/<Course>` folder position. This is what makes a
+    /// manually-created course (no `folderPath`, nothing for the vault
+    /// scan to ever find) actually usable, and lets any course pick up a
+    /// one-off file -- a homework PDF, a scanned handout -- that never
+    /// lived in Obsidian at all.
+    public func importPaths(_ urls: [URL], intoCourse courseId: String) throws -> ImportSummary {
+        var summary = ImportSummary()
+        try database.queue.write { db in
+            guard try Course.fetchOne(db, key: courseId) != nil else {
+                summary.errors.append("Course no longer exists")
+                return
+            }
+            for url in urls {
+                try importPathEntry(url, courseId: courseId, db: db, summary: &summary)
+            }
+            summary.semesterCount = try Semester.fetchCount(db)
+            summary.courseCount = try Course.fetchCount(db)
+        }
+        return summary
+    }
+
+    /// `url` may be a single file or a folder -- a folder is walked
+    /// recursively exactly like a vault course folder is, including the
+    /// same ignored-directory list, so pointing this at a whole "Lecture
+    /// Notes" folder behaves like pointing the vault scanner at one.
+    private func importPathEntry(
+        _ url: URL, courseId: String, db: Database, summary: inout ImportSummary
+    ) throws {
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+        guard isDirectory else {
+            try importSingleFile(url, courseId: courseId, db: db, summary: &summary)
+            return
+        }
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) else { return }
+        for case let fileURL as URL in enumerator {
+            if let isDir = (try? fileURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory, isDir {
+                if Self.ignoredDirectoryNames.contains(fileURL.lastPathComponent) {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            try importSingleFile(fileURL, courseId: courseId, db: db, summary: &summary)
+        }
+    }
+
+    private func importSingleFile(
+        _ fileURL: URL, courseId: String, db: Database, summary: inout ImportSummary
+    ) throws {
+        let ext = fileURL.pathExtension.lowercased()
+        guard let kind = Self.importableKinds[ext] else { return }
+        summary.filesScanned += 1
+        do {
+            if kind == .markdown {
+                let raw = try String(contentsOf: fileURL, encoding: .utf8)
+                let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
+                let relativePath = fileURL.path
+                if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
+                   existing.contentHash == contentHash {
+                    summary.filesUnchanged += 1
+                    return
+                }
+                let (frontmatter, rawBody) = FrontmatterParser.split(raw)
+                try importNoteBody(
+                    fileURL: fileURL, relativePath: relativePath, contentHash: contentHash,
+                    frontmatter: frontmatter, rawBody: rawBody, courseId: courseId, db: db, summary: &summary
+                )
+            } else {
+                let data = try Data(contentsOf: fileURL)
+                let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                let relativePath = fileURL.path
+                if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
+                   existing.contentHash == contentHash {
+                    summary.filesUnchanged += 1
+                    return
+                }
+                try importBinaryBody(
+                    fileURL: fileURL, kind: kind, relativePath: relativePath, contentHash: contentHash,
+                    courseId: courseId, db: db, summary: &summary
+                )
+            }
+        } catch {
+            summary.errors.append("\(fileURL.lastPathComponent): \(error)")
+        }
+    }
+
+    // MARK: - Shared per-file tail (course already resolved)
+
+    /// Builds/updates the `material` row for a markdown note and hands its
+    /// body to the shared cleaning tail, once a course id is in hand --
+    /// shared by the vault scan (which resolves the course from folder
+    /// position) and manual import (which is handed the course directly).
+    private func importNoteBody(
+        fileURL: URL, relativePath: String, contentHash: String, frontmatter: Frontmatter,
+        rawBody: String, courseId: String, db: Database, summary: inout ImportSummary
+    ) throws {
         let fileName = (fileURL.lastPathComponent as NSString).deletingPathExtension
         let parsedName = FilenameParsing.parse(fileNameWithoutExtension: fileName)
 
@@ -226,39 +395,14 @@ public actor VaultScanner {
         )
     }
 
-    /// PDF/docx/ipynb: no frontmatter to read, so semester resolution
-    /// falls back to the folder name alone, and there is no asset-sidecar
-    /// or empty-stub concept -- an extraction failure or empty result is
-    /// its own distinct state instead.
-    private func importBinaryMaterial(
-        _ fileURL: URL, kind: MaterialKind, courseName: String, courseFolderPath: String,
-        fallbackSemesterFolderName: String, resolvedCourseId: inout String?,
-        db: Database, summary: inout ImportSummary
+    /// The binary equivalent of `importNoteBody` -- extracts text by kind,
+    /// then hands off to the same shared tail. No frontmatter, so no
+    /// asset-sidecar or empty-stub concept; an extraction failure or empty
+    /// result is its own distinct state instead.
+    private func importBinaryBody(
+        fileURL: URL, kind: MaterialKind, relativePath: String, contentHash: String,
+        courseId: String, db: Database, summary: inout ImportSummary
     ) throws {
-        let data = try Data(contentsOf: fileURL)
-        let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let relativePath = fileURL.path
-
-        if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-           existing.contentHash == contentHash {
-            summary.filesUnchanged += 1
-            return
-        }
-
-        if resolvedCourseId == nil {
-            let (semSlug, semName, semSortKey) = SemesterSlug.resolve(tags: [], folderName: fallbackSemesterFolderName)
-            var semesterId: String?
-            if !fallbackSemesterFolderName.isEmpty {
-                let semester = try findOrCreateSemester(slug: semSlug, name: semName, sortKey: semSortKey, db: db)
-                semesterId = semester.id
-            }
-            let course = try findOrCreateCourse(
-                name: courseName, folderPath: courseFolderPath, semesterId: semesterId, db: db
-            )
-            resolvedCourseId = course.id
-        }
-        guard let courseId = resolvedCourseId else { return }
-
         let fileName = (fileURL.lastPathComponent as NSString).deletingPathExtension
         let parsedName = FilenameParsing.parse(fileNameWithoutExtension: fileName)
 
@@ -269,9 +413,6 @@ public actor VaultScanner {
         material.contentHash = contentHash
         material.title = fileName
         material.topic = parsedName.topic
-        // A unit taken straight from the filename ("Week 2", "Module 1")
-        // beats inferring one from the topic text: it is stated rather than
-        // guessed, and it is what the course itself is organised by.
         material.chapter = parsedName.unitLabel
             ?? parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
         material.updatedAt = Date()
@@ -301,7 +442,9 @@ public actor VaultScanner {
 
         try finishImportingBody(
             &material, courseId: courseId, rawBody: extracted,
-            filenameDate: parsedName.dateFromFilename, db: db, summary: &summary
+            filenameDate: parsedName.dateFromFilename,
+            hasLectureIdentity: parsedName.dateFromFilename != nil && parsedName.unitLabel != nil,
+            db: db, summary: &summary
         )
     }
 
