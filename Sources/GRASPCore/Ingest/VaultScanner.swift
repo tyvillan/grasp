@@ -180,7 +180,8 @@ public actor VaultScanner {
                 semesterId = semester.id
             }
             let course = try findOrCreateCourse(
-                name: courseName, folderPath: courseFolderPath, semesterId: semesterId, db: db
+                name: courseName, folderPath: courseFolderPath, semesterId: semesterId,
+                code: frontmatter.courseCode, db: db
             )
             resolvedCourseId = course.id
         }
@@ -195,7 +196,11 @@ public actor VaultScanner {
         material.contentHash = contentHash
         material.title = fileName
         material.topic = parsedName.topic
-        material.chapter = parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
+        // A unit taken straight from the filename ("Week 2", "Module 1")
+        // beats inferring one from the topic text: it is stated rather than
+        // guessed, and it is what the course itself is organised by.
+        material.chapter = parsedName.unitLabel
+            ?? parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
         material.updatedAt = Date()
 
         if frontmatter.isAssetSidecar {
@@ -215,7 +220,9 @@ public actor VaultScanner {
 
         try finishImportingBody(
             &material, courseId: courseId, rawBody: rawBody,
-            filenameDate: parsedName.dateFromFilename, db: db, summary: &summary
+            filenameDate: parsedName.dateFromFilename,
+            hasLectureIdentity: parsedName.dateFromFilename != nil && parsedName.unitLabel != nil,
+            db: db, summary: &summary
         )
     }
 
@@ -262,7 +269,11 @@ public actor VaultScanner {
         material.contentHash = contentHash
         material.title = fileName
         material.topic = parsedName.topic
-        material.chapter = parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
+        // A unit taken straight from the filename ("Week 2", "Module 1")
+        // beats inferring one from the topic text: it is stated rather than
+        // guessed, and it is what the course itself is organised by.
+        material.chapter = parsedName.unitLabel
+            ?? parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
         material.updatedAt = Date()
 
         let extracted: String?
@@ -305,12 +316,38 @@ public actor VaultScanner {
     /// card generation is skipped.
     private static let maxWordsForPairParsing = 8000
 
+    /// Course-logistics documents: a syllabus, a course index, a schedule,
+    /// a roadmap, a practice-tools page. They are worth importing -- they
+    /// hold exam dates, grading weights and office hours, and should be
+    /// searchable -- but they are not worth drilling, and the parser
+    /// happily turns them into cards like "Test 1 / 20%" or "§1.4 / every
+    /// 4th of the first 20". Detected from the filename alone, which is
+    /// where the vault states a document's role: a leading underscore or
+    /// `00_` prefix marks an index in this vault's convention.
+    private static let referenceTitleMarkers = [
+        "syllabus", "course index", "course-index", "schedule", "roadmap",
+        "practice-tools", "practice tools", "assessments", "course-info",
+    ]
+
+    /// `hasLectureIdentity` is the escape hatch: a note stamped with a date
+    /// *and* a unit is a specific class session, whatever words are in its
+    /// topic. Without it, "2026-08-25_Module-01_First-Day-Syllabus-Overview"
+    /// -- a real 419-word lecture -- gets thrown out for containing the
+    /// word "syllabus", while the identical first-day lecture in another
+    /// course is kept because its topic happens to say "Course-Mechanics".
+    static func isReferenceDocument(title: String, hasLectureIdentity: Bool = false) -> Bool {
+        if title.hasPrefix("_") || title.hasPrefix("00_") { return true }
+        guard !hasLectureIdentity else { return false }
+        let lower = title.lowercased()
+        return referenceTitleMarkers.contains { lower.contains($0) }
+    }
+
     /// Shared tail for every material kind once its plain-text body is in
     /// hand: clean, reflow, decide study-worthiness, persist the note text,
     /// and (re)parse deterministic cards.
     private func finishImportingBody(
         _ material: inout Material, courseId: String, rawBody: String, filenameDate: Date?,
-        db: Database, summary: inout ImportSummary
+        hasLectureIdentity: Bool = false, db: Database, summary: inout ImportSummary
     ) throws {
         let cleaned = TextCleaning.clean(rawBody)
         let (dateFromBody, bodyWithoutDate) = TextCleaning.extractDateLine(cleaned)
@@ -319,7 +356,11 @@ public actor VaultScanner {
         let hasMath = reflowed.contains("\\(") || reflowed.contains("\\[")
 
         material.noteDate = dateFromBody ?? filenameDate
-        material.isStudyWorthy = wordCount >= 30 && wordCount <= Self.maxWordsForPairParsing
+        material.isStudyWorthy = wordCount >= 30
+            && wordCount <= Self.maxWordsForPairParsing
+            && !Self.isReferenceDocument(
+                title: material.title, hasLectureIdentity: hasLectureIdentity
+            )
         material.extractionState = .ok
         material.importedAt = Date()
         try material.save(db)
@@ -362,13 +403,21 @@ public actor VaultScanner {
         return semester
     }
 
+    /// An existing course picks up a code the first time one is seen, but
+    /// a code already on the row is never overwritten -- the user can edit
+    /// it by hand in the course sheet, and a re-import must not undo that.
     private func findOrCreateCourse(
-        name: String, folderPath: String, semesterId: String?, db: Database
+        name: String, folderPath: String, semesterId: String?, code: String? = nil, db: Database
     ) throws -> Course {
-        if let existing = try Course.filter(Column("folderPath") == folderPath).fetchOne(db) {
+        if var existing = try Course.filter(Column("folderPath") == folderPath).fetchOne(db) {
+            if existing.code == nil, let code {
+                existing.code = code
+                existing.updatedAt = Date()
+                try existing.update(db)
+            }
             return existing
         }
-        let course = Course(semesterId: semesterId, name: name, folderPath: folderPath)
+        let course = Course(semesterId: semesterId, name: name, code: code, folderPath: folderPath)
         try course.insert(db)
         return course
     }

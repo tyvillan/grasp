@@ -68,6 +68,14 @@ struct RealVaultVerificationTests {
         // entirely before binary extraction existed) now create a course
         // under the current semester, which didn't exist as a row before.
         #expect(summary.semesterCount == 5)
-        #expect(summary.courseCount == 15)
+        // 20, not 15: Fall 2026-2027 gained five real courses (Intro to
+        // Software Design, Introduction to Anthropology, Matrix Theory,
+        // Microeconomic Principles, Systems Programming with C++). Those
+        // notes use a different convention from every earlier semester --
+        // nested 01_Lectures/02_Readings folders and
+        // "YYYY-MM-DD_Unit-NN_Topic" filenames -- and are written prose
+        // rather than slide dumps, which is what the bold-term and
+        // heading/quote shapes in `PairParser` were added for.
+        #expect(summary.courseCount == 20)
     }
 }

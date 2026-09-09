@@ -9,6 +9,19 @@ public struct Frontmatter: Sendable {
     public var tags: [String]
     public var type: String?
     public var sourceFile: String?
+    /// The Fall 2026 notes carry `course: "CEN 3062C / Intro to Software
+    /// Design"` -- the only place in the vault the official course code
+    /// appears at all.
+    public var course: String?
+
+    /// The code half of that field, when present. Split on "/" rather than
+    /// pattern-matching a course-code shape, since the vault writes codes
+    /// inconsistently ("CEN 3062C", "MAS 2103-002").
+    public var courseCode: String? {
+        guard let course, let slash = course.firstIndex(of: "/") else { return nil }
+        let code = course[..<slash].trimmingCharacters(in: .whitespaces)
+        return code.isEmpty ? nil : code
+    }
 
     /// True when this note is an asset sidecar (an Obsidian stub that only
     /// embeds a binary, e.g. `Original file: [[AND_GATE.png]]`). Keying off
@@ -16,7 +29,7 @@ public struct Frontmatter: Sendable {
     /// verified exact match against the corpus (149 of 280 files).
     public var isAssetSidecar: Bool { sourceFile != nil }
 
-    public static let empty = Frontmatter(tags: [], type: nil, sourceFile: nil)
+    public static let empty = Frontmatter(tags: [], type: nil, sourceFile: nil, course: nil)
 }
 
 public enum FrontmatterParser {
@@ -39,6 +52,7 @@ public enum FrontmatterParser {
         var tags: [String] = []
         var type: String?
         var sourceFile: String?
+        var course: String?
         var inTagsList = false
 
         for rawLine in lines {
@@ -81,8 +95,12 @@ public enum FrontmatterParser {
                 sourceFile = stripQuotes(v.trimmingCharacters(in: .whitespaces))
                 continue
             }
+            if let v = matchKey(line, "course") {
+                course = stripQuotes(v.trimmingCharacters(in: .whitespaces))
+                continue
+            }
         }
-        return Frontmatter(tags: tags, type: type, sourceFile: sourceFile)
+        return Frontmatter(tags: tags, type: type, sourceFile: sourceFile, course: course)
     }
 
     private static func matchKey(_ line: String, _ key: String) -> String? {

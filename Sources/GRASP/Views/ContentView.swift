@@ -22,7 +22,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedCourseId: $selectedCourseId)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 255)
         } detail: {
             Group {
                 if selectedCourseId == Self.homeRoute || selectedCourseId == nil {

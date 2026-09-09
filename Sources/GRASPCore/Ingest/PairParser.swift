@@ -18,17 +18,35 @@ public struct CandidatePair: Sendable, Equatable {
 }
 
 /// Deterministic term/definition extraction over reflowed note text.
-/// Recognizes two shapes, matching the corpus:
+/// Recognizes four shapes, matching the corpus:
 ///   1. A short bare term line followed by a longer definition paragraph
-///      (the dominant shape -- lecture-slide definition dumps).
+///      (the dominant shape in the older courses -- slide definition dumps).
 ///   2. "Term: definition" on a single line.
-/// Ported and validated against the real vault corpus (857 pairs from the
-/// reflowed text, spot-checked for quality) before being written in Swift.
+///   3. "**Term** - definition", as a bullet or a paragraph.
+///   4. A heading whose next line is a blockquote stating the idea.
+///
+/// Shapes 1 and 2 were ported and validated against the original vault
+/// corpus (857 pairs, spot-checked for quality). Shapes 3 and 4 were added
+/// for the Fall 2026 notes, which are written prose rather than slide
+/// dumps: nearly every definition there is a markdown bullet with a bold
+/// term, which shapes 1 and 2 discarded outright as structural markup.
+/// Measured on that corpus: 154 bold-term bullets and 63 heading/quote
+/// pairs that were previously producing roughly one card per note.
 public enum PairParser {
     private static let inlineTermRegex = try! NSRegularExpression(
         pattern: #"^([A-Z][A-Za-z0-9 /'\-]{2,45}):\s+(.{25,})$"#
     )
     private static let numberedListRegex = try! NSRegularExpression(pattern: #"^\d+[.)]"#)
+
+    /// `- **Term** - definition` / `**Term**: definition`. The bullet marker
+    /// is optional so the same rule catches a paragraph that opens with a
+    /// bold term. `TextCleaning` has already folded en/em dashes to "-", so
+    /// only "-" and ":" need matching here.
+    private static let boldTermRegex = try! NSRegularExpression(
+        pattern: #"^(?:[-*+]\s+)?\*\*([^*]{2,60}?)\*\*\s*[-:]\s+(.{20,})$"#
+    )
+    private static let headingRegex = try! NSRegularExpression(pattern: #"^#{2,6}\s+(.+)$"#)
+    private static let quoteRegex = try! NSRegularExpression(pattern: #"^>\s*(.+)$"#)
 
     public static func parse(_ reflowedText: String) -> [CandidatePair] {
         let lines = reflowedText.components(separatedBy: "\n")
@@ -38,7 +56,20 @@ public enum PairParser {
         while i < lines.count {
             let s = lines[i].trimmingCharacters(in: .whitespaces)
             defer { i += 1 }
-            if s.isEmpty || isStructural(s) || s.hasPrefix("*Date:") { continue }
+            if s.isEmpty || s.hasPrefix("*Date:") { continue }
+
+            // Bold-term pairs are checked before the structural filter,
+            // because the marker that makes the line "structural" (a
+            // leading bullet) is exactly where these definitions live.
+            if let pair = boldTermPair(s, line: i + 1) {
+                out.append(pair)
+                continue
+            }
+            if let pair = headingQuotePair(lines, at: i) {
+                out.append(pair)
+                continue
+            }
+            if isStructural(s) { continue }
 
             let words = s.split(separator: " ")
             let isBareTermLine = (1...6).contains(words.count)
@@ -63,12 +94,119 @@ public enum PairParser {
             if let match = inlineTermRegex.firstMatch(in: s, range: range),
                let frontRange = Range(match.range(at: 1), in: s),
                let backRange = Range(match.range(at: 2), in: s) {
-                out.append(CandidatePair(
-                    front: String(s[frontRange]), back: String(s[backRange]), sourceLine: i + 1
-                ))
+                let front = String(s[frontRange])
+                let rawBack = String(s[backRange])
+                if isUsableTerm(front), !isLinksOnly(rawBack) {
+                    out.append(CandidatePair(
+                        front: front, back: stripMarkdown(rawBack), sourceLine: i + 1
+                    ))
+                }
             }
         }
         return out
+    }
+
+    /// A bold term and its definition on one line. The definition must
+    /// still read as a definition rather than a pointer -- a bare
+    /// cross-reference ("see Chapter 4") or a bullet that is really a
+    /// homework assignment ("§1.4 - every 4th of the first 20") makes a
+    /// useless card, so terms that are only a section number are rejected.
+    private static func boldTermPair(_ s: String, line: Int) -> CandidatePair? {
+        let range = NSRange(s.startIndex..., in: s)
+        guard let m = boldTermRegex.firstMatch(in: s, range: range),
+              let frontRange = Range(m.range(at: 1), in: s),
+              let backRange = Range(m.range(at: 2), in: s) else { return nil }
+
+        let front = stripMarkdown(String(s[frontRange]))
+        let rawBack = String(s[backRange])
+        let back = stripMarkdown(rawBack)
+        guard isUsableTerm(front), !isLinksOnly(rawBack),
+              back.split(separator: " ").count >= 4 else { return nil }
+        return CandidatePair(front: front, back: back, sourceLine: line)
+    }
+
+    /// A `###` heading immediately followed by a blockquote -- the shape the
+    /// Fall 2026 notes use to state a principle under its own name, e.g.
+    /// "### S - Single Responsibility Principle" over
+    /// "> **A class should have only one responsibility.**".
+    private static func headingQuotePair(_ lines: [String], at index: Int) -> CandidatePair? {
+        let heading = lines[index].trimmingCharacters(in: .whitespaces)
+        let hRange = NSRange(heading.startIndex..., in: heading)
+        guard let hm = headingRegex.firstMatch(in: heading, range: hRange),
+              let titleRange = Range(hm.range(at: 1), in: heading) else { return nil }
+
+        var j = index + 1
+        while j < lines.count && lines[j].trimmingCharacters(in: .whitespaces).isEmpty { j += 1 }
+        guard j < lines.count else { return nil }
+
+        let quote = lines[j].trimmingCharacters(in: .whitespaces)
+        let qRange = NSRange(quote.startIndex..., in: quote)
+        guard let qm = quoteRegex.firstMatch(in: quote, range: qRange),
+              let bodyRange = Range(qm.range(at: 1), in: quote) else { return nil }
+
+        let front = stripMarkdown(String(heading[titleRange]))
+        let rawBack = String(quote[bodyRange])
+        let back = stripMarkdown(rawBack)
+        guard isUsableTerm(front), !isLinksOnly(rawBack),
+              back.split(separator: " ").count >= 5 else { return nil }
+        return CandidatePair(front: front, back: back, sourceLine: index + 1)
+    }
+
+    /// Rejects "terms" that are really locators -- a bare section or
+    /// chapter reference (`§1.4`, `Ch. 2`, `Week 3`) names where something
+    /// is, not what it means, and pairs from those are course logistics
+    /// rather than anything worth drilling.
+    private static let locatorRegex = try! NSRegularExpression(
+        pattern: #"^(§|Ch\.?|Chapter|Week|Module|Lecture|Lab|Section|Unit|Test|Exam)\s*[\d.\-–]*$"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Discourse leads, not terms. These open a *section* of a note ("Note:
+    /// the Module 3 essay is on Chapter 5") rather than naming a concept,
+    /// so the card they make asks "what is Note?" -- unanswerable, and one
+    /// of them appears in most notes.
+    private static let discourseLeads: Set<String> = [
+        "related", "note", "notes", "reading", "readings", "assessment", "assessments",
+        "homework", "office hours", "announcement", "announcements", "recap", "summary",
+        "next", "deadline", "due", "reminder", "example", "examples", "source", "sources",
+        "bad", "good", "todo", "warning", "tip", "important", "aside", "context",
+    ]
+
+    /// A back made of nothing but wiki-links and separators -- the
+    /// `Related: [[_Course Index]] · [[...]]` footer every Fall 2026 note
+    /// carries. It matches "Term: definition" perfectly and is pure
+    /// navigation, so it would otherwise add one dead card per note.
+    private static let linksOnlyRegex = try! NSRegularExpression(
+        pattern: #"^\s*(?:\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]*\))\s*(?:[·|,;/•-]\s*(?:\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]*\))\s*)*$"#
+    )
+
+    private static func isUsableTerm(_ term: String) -> Bool {
+        guard term.count >= 3, term.contains(where: { $0.isLetter }) else { return false }
+        if discourseLeads.contains(term.lowercased()) { return false }
+        let range = NSRange(term.startIndex..., in: term)
+        return locatorRegex.firstMatch(in: term, range: range) == nil
+    }
+
+    private static func isLinksOnly(_ back: String) -> Bool {
+        let range = NSRange(back.startIndex..., in: back)
+        return linksOnlyRegex.firstMatch(in: back, range: range) != nil
+    }
+
+    /// Cards are shown as plain text, so markdown emphasis, code ticks and
+    /// wiki-link brackets would otherwise be read out literally on the
+    /// front of a flashcard.
+    static func stripMarkdown(_ s: String) -> String {
+        var t = s
+        t = t.replacingOccurrences(
+            of: #"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]"#, with: "$1", options: .regularExpression
+        )
+        t = t.replacingOccurrences(
+            of: #"\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression
+        )
+        t = t.replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "*", with: "")
+        return t.trimmingCharacters(in: .whitespaces)
     }
 
     private static func isStructural(_ s: String) -> Bool {

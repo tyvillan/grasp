@@ -126,6 +126,12 @@ struct SidebarView: View {
 /// The color dot sits in a fixed-width slot whether or not the course has
 /// a color, so every course name starts on the same x -- a ragged left
 /// edge is the fastest way to make a sidebar look unconsidered.
+///
+/// The course code is deliberately not shown here. Now that the Fall 2026
+/// notes actually carry codes, a trailing "COP 3275C" costs enough width
+/// to truncate the names beside it ("Systems Progr..."), and a sidebar
+/// exists to be scanned by name. The code still appears on the dashboard
+/// course tiles, which have room for it, and in the tooltip here.
 private struct CourseRow: View {
     let course: Course
 
@@ -138,15 +144,10 @@ private struct CourseRow: View {
             Text(course.name)
                 .graspType(.rowTitle)
                 .lineLimit(1)
-            Spacer(minLength: 6)
-            if let code = course.code {
-                Text(code)
-                    .graspType(.meta)
-                    .foregroundStyle(GRASPColor.textTertiary)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
+        .help(course.code.map { "\(course.name) (\($0))" } ?? course.name)
     }
 }
