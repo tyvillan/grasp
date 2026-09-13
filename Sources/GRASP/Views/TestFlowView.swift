@@ -28,7 +28,7 @@ enum TestPhase: Identifiable {
 struct TestSetupSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    let deckId: String
+    let deckIds: [String]
     let deckName: String
     let onStart: (String, [LearnEngine.RoundQuestion]) -> Void
 
@@ -69,7 +69,7 @@ struct TestSetupSheet: View {
                         allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
                         excludeMastered: excludeMastered
                     )
-                    guard let (attemptId, questions) = try? store.startTest(deckId: deckId, config: config),
+                    guard let (attemptId, questions) = try? store.startTest(deckIds: deckIds, config: config),
                           !questions.isEmpty else { return }
                     onStart(attemptId, questions)
                 }

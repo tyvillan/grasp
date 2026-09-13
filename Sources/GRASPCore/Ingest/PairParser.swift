@@ -103,7 +103,24 @@ public enum PairParser {
                 }
             }
         }
-        return out
+
+        // A single terminal quality gate rather than threading it through
+        // every branch above: the bare-term-line branch (the dominant
+        // shape in the older courses) never called `isUsableTerm` or
+        // `stripMarkdown` on its own -- the only one of the four that
+        // didn't -- so a section-locator "term" or a literal "**bold**"
+        // front could slip through untouched. Running every pair through
+        // the same gate here closes that for all four shapes at once.
+        return out.compactMap { pair in
+            // Must run on the *raw* back, before stripMarkdown -- the
+            // wiki-link/markdown-link syntax `isLinksOnly` matches is
+            // exactly what stripMarkdown removes.
+            guard !isLinksOnly(pair.back) else { return nil }
+            let front = stripMarkdown(pair.front)
+            let back = stripMarkdown(pair.back)
+            guard isUsableTerm(front), isSelfContained(back) else { return nil }
+            return CandidatePair(front: front, back: back, sourceLine: pair.sourceLine)
+        }
     }
 
     /// A bold term and its definition on one line. The definition must
@@ -180,11 +197,56 @@ public enum PairParser {
         pattern: #"^\s*(?:\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]*\))\s*(?:[·|,;/•-]\s*(?:\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]*\))\s*)*$"#
     )
 
+    /// Bare pronouns/demonstratives with no antecedent -- "It", "This",
+    /// "They" -- name nothing on their own, and are the same words
+    /// `isSelfContained` rejects when they open a *back* instead of being
+    /// the whole *front*.
+    private static let danglingPronouns: Set<String> = [
+        "it", "its", "they", "them", "their", "theirs",
+        "he", "him", "his", "she", "her", "hers",
+    ]
+    private static let danglingDemonstratives: Set<String> = [
+        "this", "that", "these", "those", "such", "there",
+        "one", "some", "others", "both", "each",
+    ]
+
+    /// Verbs/adverbs that, immediately after a demonstrative, mean the
+    /// sentence is restating something from its paragraph rather than
+    /// defining it -- "This is the process by which..." vs. "This pattern
+    /// decouples..." (a noun follows, so the term itself anchors it).
+    private static let referentialFollowers: Set<String> = [
+        "is", "are", "was", "were", "means", "refers", "allows", "makes",
+        "provides", "has", "have", "can", "will", "also", "includes",
+        "describes", "happens", "occurs", "becomes", "gives", "causes",
+    ]
+
     private static func isUsableTerm(_ term: String) -> Bool {
         guard term.count >= 3, term.contains(where: { $0.isLetter }) else { return false }
         if discourseLeads.contains(term.lowercased()) { return false }
+        let normalized = AnswerGrading.normalize(term)
+        if danglingPronouns.contains(normalized) || danglingDemonstratives.contains(normalized) {
+            return false
+        }
         let range = NSRange(term.startIndex..., in: term)
         return locatorRegex.firstMatch(in: term, range: range) == nil
+    }
+
+    /// A back that opens on a dangling pronoun or demonstrative reads fine
+    /// inside its paragraph but means nothing lifted onto a flashcard by
+    /// itself -- "This is the process by which..." names nothing without
+    /// the sentence before it. Deliberately conservative: it only rejects
+    /// the specific pronoun-then-verb shape, not every sentence that
+    /// happens to start with "This".
+    private static func isSelfContained(_ back: String) -> Bool {
+        let words = AnswerGrading.normalize(back).split(separator: " ").map(String.init)
+        guard words.count >= 4 else { return false }
+        guard let first = words.first else { return false }
+        if danglingPronouns.contains(first) { return false }
+        if danglingDemonstratives.contains(first), words.count >= 2,
+           referentialFollowers.contains(words[1]) {
+            return false
+        }
+        return true
     }
 
     private static func isLinksOnly(_ back: String) -> Bool {

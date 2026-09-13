@@ -9,6 +9,7 @@ public struct ImportSummary: Sendable, Equatable {
     public var filesSkippedAsset = 0
     public var filesSkippedEmpty = 0
     public var cardsCreated = 0
+    public var duplicatesSkipped = 0
     public var semesterCount = 0
     public var courseCount = 0
     public var errors: [String] = []
@@ -19,7 +20,7 @@ public struct ImportSummary: Sendable, Equatable {
     public init(
         filesScanned: Int = 0, filesUnchanged: Int = 0, filesImportedOrUpdated: Int = 0,
         filesSkippedAsset: Int = 0, filesSkippedEmpty: Int = 0, cardsCreated: Int = 0,
-        semesterCount: Int = 0, courseCount: Int = 0, errors: [String] = []
+        duplicatesSkipped: Int = 0, semesterCount: Int = 0, courseCount: Int = 0, errors: [String] = []
     ) {
         self.filesScanned = filesScanned
         self.filesUnchanged = filesUnchanged
@@ -27,6 +28,7 @@ public struct ImportSummary: Sendable, Equatable {
         self.filesSkippedAsset = filesSkippedAsset
         self.filesSkippedEmpty = filesSkippedEmpty
         self.cardsCreated = cardsCreated
+        self.duplicatesSkipped = duplicatesSkipped
         self.semesterCount = semesterCount
         self.courseCount = courseCount
         self.errors = errors
@@ -72,6 +74,7 @@ public actor VaultScanner {
         }
 
         try database.queue.write { db in
+            let excludedFolders = Set(try ExcludedFolder.fetchAll(db).map(\.folderPath))
             for entry in topLevel.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
                 let name = entry.lastPathComponent
@@ -79,14 +82,17 @@ public actor VaultScanner {
                 let isSemesterFolder = Self.semesterFolderRegex.firstMatch(in: name, range: range) != nil
 
                 if isSemesterFolder {
-                    try scanSemesterFolder(entry, folderName: name, db: db, summary: &summary)
+                    try scanSemesterFolder(
+                        entry, folderName: name, excludedFolders: excludedFolders, db: db, summary: &summary
+                    )
                 } else {
                     // A non-semester top-level directory (e.g. "Side
                     // Lectures") becomes its own pseudo-course with no
                     // semester -- it holds real substantive notes that
                     // don't fit the semester/course pattern.
                     try scanCourseFolder(
-                        entry, semesterId: nil, courseNameOverride: name, db: db, summary: &summary
+                        entry, semesterId: nil, courseNameOverride: name,
+                        excludedFolders: excludedFolders, db: db, summary: &summary
                     )
                 }
             }
@@ -97,7 +103,8 @@ public actor VaultScanner {
     }
 
     private func scanSemesterFolder(
-        _ semesterDir: URL, folderName: String, db: Database, summary: inout ImportSummary
+        _ semesterDir: URL, folderName: String, excludedFolders: Set<String>,
+        db: Database, summary: inout ImportSummary
     ) throws {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
@@ -114,15 +121,24 @@ public actor VaultScanner {
             // folder names are known to sort incorrectly.
             try scanCourseFolder(
                 entry, semesterId: nil, courseNameOverride: nil,
-                fallbackSemesterFolderName: folderName, db: db, summary: &summary
+                fallbackSemesterFolderName: folderName, excludedFolders: excludedFolders, db: db, summary: &summary
             )
         }
     }
 
     private func scanCourseFolder(
         _ courseDir: URL, semesterId: String?, courseNameOverride: String?,
-        fallbackSemesterFolderName: String = "", db: Database, summary: inout ImportSummary
+        fallbackSemesterFolderName: String = "", excludedFolders: Set<String>,
+        db: Database, summary: inout ImportSummary
     ) throws {
+        // Checked before anything else in this folder is even looked at --
+        // no file walking, no `Material`/`Card` rows, no `findOrCreateCourse`
+        // call. This is what makes excluding a folder different from
+        // archiving a course: archiving still reuses the existing row on
+        // rescan, but a course whose folder is excluded is never touched
+        // at all, so it's also safe to have hard-deleted it beforehand.
+        guard !excludedFolders.contains(courseDir.path) else { return }
+
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: courseDir,
@@ -272,12 +288,31 @@ public actor VaultScanner {
                 return
             }
             for url in urls {
+                try liftExclusions(matching: url, db: db)
                 try importPathEntry(url, courseId: courseId, db: db, summary: &summary)
             }
             summary.semesterCount = try Semester.fetchCount(db)
             summary.courseCount = try Course.fetchCount(db)
         }
         return summary
+    }
+
+    /// A manual "Add Files or Folder…" is a deliberate choice to bring
+    /// specific content back in, so it overrides an earlier exclusion
+    /// rather than silently honoring it -- unlike `scan(vaultRoot:)`'s own
+    /// automatic walk, which must never resurrect an excluded folder on
+    /// its own. Matches an excluded folder that equals, contains, or sits
+    /// inside `url`, so pointing this at the excluded folder itself, a
+    /// file within it, or a parent folder that contains it all un-exclude
+    /// it the same way.
+    private func liftExclusions(matching url: URL, db: Database) throws {
+        let path = url.path
+        for excluded in try ExcludedFolder.fetchAll(db) {
+            let folderPath = excluded.folderPath
+            if folderPath == path || path.hasPrefix(folderPath + "/") || folderPath.hasPrefix(path + "/") {
+                _ = try ExcludedFolder.deleteOne(db, key: folderPath)
+            }
+        }
     }
 
     /// `url` may be a single file or a folder -- a folder is walked
@@ -525,7 +560,23 @@ public actor VaultScanner {
         if material.isStudyWorthy {
             let deck = try findOrCreateDeck(courseId: courseId, chapter: material.chapter, db: db)
             let pairs = PairParser.parse(reflowed)
+
+            // Seeded from every card already in the deck -- deliberately
+            // including soft-deleted ones, so a card the user explicitly
+            // deleted stops resurrecting on every subsequent re-import
+            // (the same fix already applied to deleted decks). Grown as
+            // each new card is created, so two duplicate bullets inside
+            // this same note also collapse, not just cross-note dupes.
+            let existingCards = try Card
+                .filter(sql: "id IN (SELECT cardId FROM deckCard WHERE deckId = ?)", arguments: [deck.id])
+                .fetchAll(db)
+            var duplicateIndex = DuplicateDetector.Index(existingCards)
+
             for pair in pairs {
+                if duplicateIndex.matchId(front: pair.front, back: pair.back) != nil {
+                    summary.duplicatesSkipped += 1
+                    continue
+                }
                 let card = Card(
                     materialId: material.id, front: pair.front, back: pair.back,
                     hasMath: pair.back.contains("\\(") || pair.back.contains("\\["),
@@ -533,14 +584,28 @@ public actor VaultScanner {
                 )
                 try card.save(db)
                 try DeckCard(deckId: deck.id, cardId: card.id).save(db)
+                duplicateIndex.insert(id: card.id, front: pair.front, back: pair.back)
                 summary.cardsCreated += 1
             }
         }
         summary.filesImportedOrUpdated += 1
     }
 
+    /// A freeform, hand-typed timeline (`AppStore.findOrCreateSemester(name:)`)
+    /// only ever gets a placeholder `sortKey` -- a small sequential counter,
+    /// not the real `year*10 + termOrder` scheme this scanner derives from
+    /// an actual tag or folder name. Reconciled here whenever the slug
+    /// already matches: without this, a timeline typed by hand before the
+    /// vault ever imports that same term stays sorted by its placeholder
+    /// forever, even after the real chronological position is known.
     private func findOrCreateSemester(slug: String, name: String, sortKey: Int, db: Database) throws -> Semester {
-        if let existing = try Semester.filter(Column("slug") == slug).fetchOne(db) { return existing }
+        if var existing = try Semester.filter(Column("slug") == slug).fetchOne(db) {
+            if existing.sortKey != sortKey {
+                existing.sortKey = sortKey
+                try existing.update(db)
+            }
+            return existing
+        }
         let semester = Semester(name: name, slug: slug, sortKey: sortKey)
         try semester.insert(db)
         return semester
@@ -567,9 +632,14 @@ public actor VaultScanner {
 
     private func findOrCreateDeck(courseId: String, chapter: String?, db: Database) throws -> Deck {
         let deckName = chapter ?? "General"
+        // Excludes soft-deleted decks: without this, re-importing after a
+        // user deletes a deck by hand would find and silently reuse that
+        // same tombstoned row for new cards -- into a deck every query
+        // already filters out everywhere else.
         if let existing = try Deck
             .filter(Column("courseId") == courseId)
             .filter(Column("name") == deckName)
+            .filter(Column("deletedAt") == nil)
             .fetchOne(db) {
             return existing
         }

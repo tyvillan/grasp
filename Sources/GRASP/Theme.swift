@@ -29,6 +29,11 @@ enum GRASPColor {
     static let accentMuted = dynamic(light: 0xC79A4A, dark: 0x8A6B2A)
     static let success = dynamic(light: 0x14705E, dark: 0x5FC9B5)
     static let successSoft = dynamic(light: 0xDBEDE8, dark: 0x112824)
+    /// A muted terracotta-red, reserved for a card's "Rejected" (suspended)
+    /// state -- distinct from `accent` so pending and rejected never read
+    /// as the same color at a glance.
+    static let rejected = dynamic(light: 0xB2453F, dark: 0xE08A83)
+    static let rejectedSoft = dynamic(light: 0xF5DEDA, dark: 0x2E1714)
 
     static let textPrimary = dynamic(light: 0x1A1B24, dark: 0xEFEEF6)
     static let textSecondary = dynamic(light: 0x5F5E6D, dark: 0x9695A6)

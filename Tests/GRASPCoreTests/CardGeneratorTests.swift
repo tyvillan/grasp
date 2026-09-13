@@ -32,6 +32,12 @@ struct CardGeneratorTests {
         #expect(await generator.isAvailable == false)
     }
 
+    @Test("Ollama's installedModels returns no models when the server is unreachable")
+    func ollamaInstalledModelsEmptyWithoutServer() async {
+        let models = await OllamaGenerator().installedModels()
+        #expect(models.isEmpty)
+    }
+
     @Test("Ollama's refine falls back to untouched candidates when the server is unreachable")
     func ollamaRefineFallsBackWithoutServer() async {
         let candidates = [
@@ -58,6 +64,58 @@ struct CardGeneratorTests {
         let prompt = OllamaGenerator.distractorPrompt(correctAnswer: "Permeability", deckContext: ["X", "Y"], count: 3)
         #expect(prompt.contains("Generate 3 plausible"))
         #expect(prompt.contains("Permeability"))
+    }
+
+    @Test("NoGenerator proposes no additional cards")
+    func noGeneratorGeneratesNothingAdditional() async {
+        let candidates = [CandidatePair(front: "Permeability", back: "Ability to transmit fluids", sourceLine: 1)]
+        let result = await NoGenerator().generateAdditional(
+            existing: candidates, noteContext: "context", maxCount: 3, topic: nil
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("Ollama's generateAdditional falls back to an empty array when the server is unreachable")
+    func ollamaGenerateAdditionalFallsBackWithoutServer() async {
+        let candidates = [CandidatePair(front: "Porosity", back: "Percentage of open space", sourceLine: 1)]
+        let result = await OllamaGenerator().generateAdditional(
+            existing: candidates, noteContext: "Some geology notes.", maxCount: 3, topic: nil
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("Ollama's generateAdditional prompt stays grounded and caps the count")
+    func ollamaGenerateAdditionalPromptShape() {
+        let existing = [CandidatePair(front: "Porosity", back: "Open space fraction", sourceLine: 1)]
+        let prompt = OllamaGenerator.generateAdditionalPrompt(existing: existing, noteContext: "context", maxCount: 2)
+        #expect(prompt.contains("at most 2"))
+        #expect(prompt.contains("Do not add outside knowledge"))
+        #expect(prompt.contains("Porosity: Open space fraction"))
+        #expect(prompt.contains("Return [] if there is nothing worth adding"))
+    }
+
+    @Test("Ollama's generateAdditional prompt notes when no cards exist yet for this note")
+    func ollamaGenerateAdditionalPromptEmptyExisting() {
+        let prompt = OllamaGenerator.generateAdditionalPrompt(existing: [], noteContext: "context", maxCount: 3)
+        #expect(prompt.contains("(none yet)"))
+    }
+
+    @Test("Ollama's generateAdditional prompt steers toward a given topic without dropping the grounding rule")
+    func ollamaGenerateAdditionalPromptWithTopic() {
+        let existing = [CandidatePair(front: "Porosity", back: "Open space fraction", sourceLine: 1)]
+        let prompt = OllamaGenerator.generateAdditionalPrompt(
+            existing: existing, noteContext: "context", maxCount: 2, topic: "permeability"
+        )
+        #expect(prompt.contains("Focus especially on: permeability"))
+        #expect(prompt.contains("Do not add outside knowledge"))
+    }
+
+    @Test("Ollama's generateAdditional prompt omits the focus line when the topic is blank")
+    func ollamaGenerateAdditionalPromptBlankTopic() {
+        let prompt = OllamaGenerator.generateAdditionalPrompt(
+            existing: [], noteContext: "context", maxCount: 3, topic: "   "
+        )
+        #expect(!prompt.contains("Focus especially on"))
     }
 
     @Test("Foundation Models availability check completes without throwing, regardless of Apple Intelligence state")

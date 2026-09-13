@@ -30,4 +30,48 @@ struct PairParserTests {
         let pairs = PairParser.parse("Term\nToo short")
         #expect(pairs.isEmpty)
     }
+
+    @Test("rejects a definition that opens on a dangling pronoun")
+    func rejectsDanglingPronounBack() {
+        let pairs = PairParser.parse(
+            "- **Polymorphism** - It also lets a subclass override its parent's behavior at runtime."
+        )
+        #expect(pairs.isEmpty)
+    }
+
+    @Test("rejects a definition that opens on a referential demonstrative")
+    func rejectsReferentialDemonstrativeBack() {
+        let pairs = PairParser.parse(
+            "- **Encapsulation** - This is the process by which internal state is hidden from callers."
+        )
+        #expect(pairs.isEmpty)
+    }
+
+    @Test("keeps a definition where a demonstrative is followed by a noun, not a verb")
+    func keepsDemonstrativeFollowedByNoun() {
+        let pairs = PairParser.parse(
+            "- **Observer pattern** - This pattern decouples the publisher from anything listening to it."
+        )
+        #expect(pairs.contains { $0.front == "Observer pattern" })
+    }
+
+    @Test("a bare-term line whose term is a section locator produces no card")
+    func rejectsBareTermLocator() {
+        let pairs = PairParser.parse("Week 3\nRead the assigned chapter before class starts on Thursday morning")
+        #expect(pairs.isEmpty)
+    }
+
+    @Test("strips markdown embedded in a bare-term line's front")
+    func stripsMarkdownFromBareTermPair() {
+        // The line itself must still satisfy isBareTermLine's raw checks
+        // (starts with an uppercase letter, no trailing punctuation) --
+        // this is inline emphasis on part of the term, not the whole line
+        // wrapped in "**", which wouldn't match the bare-term shape at all.
+        let pairs = PairParser.parse(
+            "Client **Server** Model\nThe architecture where one program requests data and another provides it over a network"
+        )
+        let pair = pairs.first { $0.front.contains("Server") }
+        #expect(pair?.front == "Client Server Model")
+        #expect(pair?.back.contains("*") == false)
+    }
 }

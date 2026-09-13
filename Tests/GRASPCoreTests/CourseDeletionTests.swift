@@ -7,7 +7,11 @@ import GRDB
 /// cascade is verified against real imported content rather than trusted:
 /// `card.materialId` is ON DELETE SET NULL, which means cascading from the
 /// course alone would strand its cards instead of removing them. This
-/// mirrors the statements `AppStore.deleteCourse` runs.
+/// mirrors the statements `AppStore.removeCourseAndExclude` runs -- by
+/// current deck membership (`deckCard` -> `deck.courseId`), not
+/// `card.materialId` -> `material.courseId`, so a hand-typed card
+/// (`materialId` is nil for those) doesn't survive the course it's
+/// actually filed under.
 @Suite("CourseDeletion")
 struct CourseDeletionTests {
     private static let vaultRoot = URL(fileURLWithPath:
@@ -16,7 +20,9 @@ struct CourseDeletionTests {
     private func deleteCourse(_ courseId: String, db: GRASPDatabase) async throws {
         try await db.queue.write { conn in
             try conn.execute(sql: """
-                DELETE FROM card WHERE materialId IN (SELECT id FROM material WHERE courseId = ?)
+                DELETE FROM card WHERE id IN (
+                    SELECT cardId FROM deckCard WHERE deckId IN (SELECT id FROM deck WHERE courseId = ?)
+                )
                 """, arguments: [courseId])
             _ = try Course.deleteOne(conn, key: courseId)
         }
@@ -72,6 +78,34 @@ struct CourseDeletionTests {
                 SELECT COUNT(*) FROM card WHERE materialId IN (SELECT id FROM material WHERE courseId = ?)
                 """, arguments: [otherId]) ?? 0
             #expect(otherCards == before.otherCards)
+        }
+    }
+
+    @Test("deleting a course also removes hand-typed cards, which have no materialId to key off of")
+    func deletionRemovesManuallyCreatedCards() async throws {
+        let db = try await VaultFixture.database()
+
+        let (courseId, deckId) = try await db.queue.read { conn -> (String, String) in
+            let course = try #require(try Course.filter(Column("name") == "Physical Geology").fetchOne(conn))
+            let deck = try #require(try Deck.filter(Column("courseId") == course.id).fetchOne(conn))
+            return (course.id, deck.id)
+        }
+
+        // A card created by hand (e.g. via "New Card"): materialId is nil,
+        // so it has no path back to this course through `material` at all
+        // -- only through which deck it currently sits in.
+        let manualCardId = try await db.queue.write { conn -> String in
+            let card = Card(materialId: nil, front: "Q", back: "A", origin: .manual, status: .active)
+            try card.insert(conn)
+            try DeckCard(deckId: deckId, cardId: card.id).insert(conn)
+            return card.id
+        }
+
+        try await deleteCourse(courseId, db: db)
+
+        try await db.queue.read { conn in
+            let survivor = try Card.fetchOne(conn, key: manualCardId)
+            #expect(survivor == nil)
         }
     }
 

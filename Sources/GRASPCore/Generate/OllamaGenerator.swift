@@ -37,6 +37,25 @@ public struct OllamaGenerator: CardGenerator {
         }
     }
 
+    private struct TagsResponse: Decodable {
+        let models: [ModelEntry]
+        struct ModelEntry: Decodable { let name: String }
+    }
+
+    /// The model names actually pulled on this server, for Settings'
+    /// status section -- an empty array (never a thrown error) whether
+    /// that's because the server is unreachable, in the 2-second budget
+    /// every check in this type keeps, or reachable but genuinely bare.
+    public func installedModels() async -> [String] {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
+        request.timeoutInterval = 2
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(TagsResponse.self, from: data)
+        else { return [] }
+        return decoded.models.map(\.name)
+    }
+
     /// Candidates are batched (per the design, ~15 at a time) so a single
     /// request/response stays small enough for a 7-8B local model to
     /// handle reliably; batches run sequentially to stay polite to a
@@ -62,6 +81,20 @@ public struct OllamaGenerator: CardGenerator {
               decoded.count == candidates.count
         else { return fallback }
         return decoded.map { GeneratedCard(front: $0.front, back: $0.back) }
+    }
+
+    public func generateAdditional(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> [GeneratedCard] {
+        guard maxCount > 0, !noteContext.isEmpty else { return [] }
+        let prompt = Self.generateAdditionalPrompt(
+            existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic
+        )
+        guard let content = try? await chat(prompt: prompt),
+              let data = content.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([RefinedPairDTO].self, from: data)
+        else { return [] }
+        return Array(decoded.prefix(maxCount)).map { GeneratedCard(front: $0.front, back: $0.back) }
     }
 
     public func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] {
@@ -127,6 +160,39 @@ public struct OllamaGenerator: CardGenerator {
 
         Respond with ONLY a JSON array of exactly \(candidates.count) objects, in the same order, \
         each shaped {"front": "...", "back": "..."}. No other text.
+        """
+    }
+
+    /// Deliberately more restrictive than `refinePrompt`: this one is
+    /// allowed to add cards the parser never produced, so the instruction
+    /// to stay grounded in the note text (and to prefer an empty array
+    /// over a forced answer) matters even more here than it does there.
+    /// `topic`, when given, narrows *where to look* -- it never relaxes
+    /// the "don't add outside knowledge" instruction below it.
+    static func generateAdditionalPrompt(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String? = nil
+    ) -> String {
+        let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")
+        let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusLine = (trimmedTopic?.isEmpty == false) ? "Focus especially on: \(trimmedTopic!).\n\n" : ""
+        return """
+        You are a student's study assistant. Below is one of their lecture notes, and the flashcards \
+        already made from it. Your job is to find, at most, \(maxCount) additional concept(s) this \
+        note itself mentions or clearly implies but that aren't covered by an existing card yet -- \
+        for example a term used in passing but never given its own definition, or a listed item \
+        without an example. Every fact on a new card must be directly supported by the note text \
+        below. Do not add outside knowledge, and do not invent an example, number, or date that \
+        isn't in the note. If you can't find any such gap, return an empty array -- that is a normal \
+        and expected result, not a failure.
+
+        \(focusLine)Note:
+        \(noteContext.prefix(3000))
+
+        Cards already made from this note:
+        \(covered.isEmpty ? "(none yet)" : covered)
+
+        Respond with ONLY a JSON array of at most \(maxCount) objects, each shaped \
+        {"front": "...", "back": "..."}. Return [] if there is nothing worth adding. No other text.
         """
     }
 

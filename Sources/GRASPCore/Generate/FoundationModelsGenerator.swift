@@ -63,6 +63,45 @@ public struct FoundationModelsGenerator: CardGenerator {
         #endif
     }
 
+    #if canImport(FoundationModels)
+    @Generable
+    fileprivate struct AdditionalCards {
+        @Guide(description: "Additional flashcards for concepts this note implies but doesn't already have a card for. Empty if there are none.")
+        var cards: [RefinedCard]
+    }
+    #endif
+
+    public func generateAdditional(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> [GeneratedCard] {
+        #if canImport(FoundationModels)
+        guard await isAvailable, maxCount > 0, !noteContext.isEmpty else { return [] }
+        let instructions = """
+            You are a student's study assistant. Given one of their lecture notes and the flashcards \
+            already made from it, find at most a few additional concepts the note itself mentions or \
+            implies but that aren't covered yet. Every fact must be directly supported by the note \
+            text -- never add outside knowledge or invent an example, number, or date the note doesn't \
+            contain. An empty result is normal and expected when the note has no such gap.
+            """
+        let session = LanguageModelSession(instructions: instructions)
+        let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")
+        let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let focusLine = (trimmedTopic?.isEmpty == false) ? "Focus especially on: \(trimmedTopic!).\n" : ""
+        let prompt = """
+        \(focusLine)Note: \(noteContext.prefix(1500))
+        Cards already made from this note:
+        \(covered.isEmpty ? "(none yet)" : covered)
+        Propose at most \(maxCount) additional card(s).
+        """
+        guard let response = try? await session.respond(to: prompt, generating: AdditionalCards.self) else {
+            return []
+        }
+        return response.content.cards.prefix(maxCount).map { GeneratedCard(front: $0.front, back: $0.back) }
+        #else
+        return []
+        #endif
+    }
+
     public func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] {
         // Distractor generation is left to the deterministic fallback even
         // when Foundation Models is available -- the quality gain over

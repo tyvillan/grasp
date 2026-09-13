@@ -14,7 +14,7 @@ import GRASPCore
 struct FlashcardStudyView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    let deckId: String
+    let deckIds: [String]
     let deckName: String
 
     @State private var queue: [Card] = []
@@ -45,7 +45,7 @@ struct FlashcardStudyView: View {
         .background(GRASPColor.canvas)
         .frame(minWidth: 620, minHeight: 520)
         .task {
-            queue = (try? store.dueCards(inDeck: deckId)) ?? []
+            queue = (try? store.dueCards(inDecks: deckIds)) ?? []
             isFocused = true
         }
         .focusable()

@@ -24,5 +24,18 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Tyler Villanueva</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.tyvillan.grasp.card</string>
+            <key>UTTypeDescription</key>
+            <string>GRASP Card</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

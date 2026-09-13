@@ -12,7 +12,6 @@ struct SidebarView: View {
 
     @State private var editingCourse: Course?
     @State private var deletingCourse: Course?
-    @State private var deletionImpact: (materials: Int, cards: Int, reviews: Int)?
 
     var body: some View {
         List(selection: $selectedCourseId) {
@@ -44,7 +43,7 @@ struct SidebarView: View {
                         courseRow(course)
                     }
                 } header: {
-                    SectionLabel("This semester").padding(.top, 6)
+                    SectionLabel("No Timeline").padding(.top, 6)
                 }
             }
         }
@@ -70,21 +69,8 @@ struct SidebarView: View {
         .sheet(item: $editingCourse) { course in
             CourseEditSheet(course: course)
         }
-        .alert(
-            "Delete \(deletingCourse?.name ?? "course")?",
-            isPresented: Binding(
-                get: { deletingCourse != nil },
-                set: { if !$0 { deletingCourse = nil } }
-            ),
-            presenting: deletingCourse
-        ) { course in
-            Button("Delete", role: .destructive) {
-                if selectedCourseId == course.id { selectedCourseId = ContentView.homeRoute }
-                try? store.deleteCourse(course.id)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { course in
-            Text(deletionMessage(for: course))
+        .courseDeleteConfirmation($deletingCourse) { deletedId in
+            if selectedCourseId == deletedId { selectedCourseId = ContentView.homeRoute }
         }
     }
 
@@ -96,30 +82,22 @@ struct SidebarView: View {
                 CourseContextMenu(
                     course: course,
                     onEdit: { editingCourse = course },
-                    onArchive: { try? store.setCourseArchived(course.id, archived: !course.isArchived) },
-                    onDelete: { beginDelete(course) }
+                    onArchive: {
+                        // Matches `courseDeleteConfirmation`'s own fallback
+                        // below: archiving hides a course from both the
+                        // sidebar and the dashboard, so leaving it selected
+                        // would strand `ContentView` still showing an
+                        // archived course's deck list with no matching row
+                        // anywhere in the sidebar to show it as selected.
+                        let isArchiving = !course.isArchived
+                        try? store.setCourseArchived(course.id, archived: isArchiving)
+                        if isArchiving, selectedCourseId == course.id {
+                            selectedCourseId = ContentView.homeRoute
+                        }
+                    },
+                    onDelete: { deletingCourse = course }
                 )
             }
-    }
-
-    private func beginDelete(_ course: Course) {
-        deletionImpact = try? store.courseDeletionImpact(course.id)
-        deletingCourse = course
-    }
-
-    private func deletionMessage(for course: Course) -> String {
-        let impact = deletionImpact
-        let cards = impact?.cards ?? 0
-        let reviews = impact?.reviews ?? 0
-        var message = "Removes \(cards) card\(cards == 1 ? "" : "s")"
-        if reviews > 0 { message += " and \(reviews) review\(reviews == 1 ? "" : "s") of study history" }
-        message += ". Your notes in the vault are never touched"
-        if course.folderPath != nil {
-            message += " -- importing again will bring this course back."
-        } else {
-            message += "."
-        }
-        return message
     }
 }
 

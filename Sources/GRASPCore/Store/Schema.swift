@@ -99,7 +99,7 @@ enum Schema {
                 t.column("hasMath", .boolean).notNull().defaults(to: false)
                 t.column("imagePath", .text)
                 t.column("sourceLine", .integer)
-                t.column("origin", .text).notNull() // parser | ollama | manual
+                t.column("origin", .text).notNull() // parser | ollama | manual | aiGenerated
                 t.column("status", .text).notNull() // draft | active | suspended
                 // FSRS scheduler state, inline: the due-queue query runs on
                 // every card flip, so it must never require a join.
@@ -194,6 +194,21 @@ enum Schema {
                 t.column("filesSkippedEmpty", .integer)
                 t.column("cardsCreated", .integer)
                 t.column("errorsJSON", .text)
+            }
+        }
+
+        // A folder the scanner should never turn into a course, keyed by
+        // its exact `Course.folderPath` string. Separate from `isArchived`
+        // deliberately: archiving hides a course but still leaves its row
+        // in place for `findOrCreateCourse` to find and reuse on rescan,
+        // which is what makes it safe and reversible. This table is what
+        // makes a *delete* safe too -- without an entry here, deleting a
+        // vault-backed course's row just means the very next scan finds no
+        // match and creates a brand new one.
+        migrator.registerMigration("v2_excluded_folder") { db in
+            try db.create(table: "excludedFolder") { t in
+                t.column("folderPath", .text).primaryKey()
+                t.column("excludedAt", .datetime).notNull()
             }
         }
 

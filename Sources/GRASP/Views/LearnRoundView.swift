@@ -14,7 +14,7 @@ import GRASPCore
 struct LearnRoundView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    let deckId: String
+    let deckIds: [String]
     let deckName: String
 
     @State private var queue: [LearnEngine.RoundQuestion] = []
@@ -187,7 +187,7 @@ struct LearnRoundView: View {
     }
 
     private func startRound() {
-        queue = (try? store.learnRound(deckId: deckId)) ?? []
+        queue = (try? store.learnRound(deckIds: deckIds)) ?? []
         roundTotal = queue.count
         completedCardIds = []
         roundCorrect = 0
@@ -199,7 +199,7 @@ struct LearnRoundView: View {
     }
 
     private func refreshMastery() {
-        deckMastery = (try? store.deckMastery(deckId: deckId)) ?? (0, 0)
+        deckMastery = (try? store.deckMastery(deckIds: deckIds)) ?? (0, 0)
     }
 
     /// The prompt gets the top third of the canvas to itself and the

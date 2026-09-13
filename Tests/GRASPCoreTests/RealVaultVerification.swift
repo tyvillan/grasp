@@ -36,6 +36,7 @@ struct RealVaultVerificationTests {
         skipped (asset sidecar):  \(summary.filesSkippedAsset)
         skipped (empty stub):     \(summary.filesSkippedEmpty)
         cards created:            \(summary.cardsCreated)
+        duplicates skipped:       \(summary.duplicatesSkipped)
         semesters:                \(summary.semesterCount)
         courses:                  \(summary.courseCount)
         errors:                   \(summary.errors.count)
@@ -76,6 +77,9 @@ struct RealVaultVerificationTests {
         // "YYYY-MM-DD_Unit-NN_Topic" filenames -- and are written prose
         // rather than slide dumps, which is what the bold-term and
         // heading/quote shapes in `PairParser` were added for.
-        #expect(summary.courseCount == 20)
+        // 21, not 20: a "Claude outputs" folder appeared directly under
+        // College/ (not inside any semester folder), matching the same
+        // non-semester pseudo-course branch "Side Lectures" already uses.
+        #expect(summary.courseCount == 21)
     }
 }

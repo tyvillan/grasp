@@ -45,6 +45,21 @@ public struct Course: Codable, FetchableRecord, PersistableRecord, Identifiable,
     }
 }
 
+/// A vault folder the scanner must skip entirely -- never walked, never
+/// given a `Course` row, on every future `scan(vaultRoot:)`. Keyed by the
+/// exact string a `Course.folderPath` would carry, so a folder can be
+/// excluded whether or not a course currently exists for it.
+public struct ExcludedFolder: Codable, FetchableRecord, PersistableRecord, Sendable {
+    public static let databaseTableName = "excludedFolder"
+    public var folderPath: String
+    public var excludedAt: Date
+
+    public init(folderPath: String, excludedAt: Date = Date()) {
+        self.folderPath = folderPath
+        self.excludedAt = excludedAt
+    }
+}
+
 public enum MaterialKind: String, Codable, Sendable {
     case markdown, pdf, docx, pptx, ipynb, image
 }
@@ -122,6 +137,14 @@ public struct Deck: Codable, FetchableRecord, PersistableRecord, Identifiable, S
 
 public enum CardOrigin: String, Codable, Sendable {
     case parser, ollama, manual
+    /// A card the AI proposed outright -- not a parser-extracted pair the
+    /// AI rewrote (that's still `.ollama`), but one the parser's fixed
+    /// shapes never produced at all. Distinct and permanent (never
+    /// rewritten to another case on approval) so a card that came straight
+    /// from the student's own notes stays visibly different, forever, from
+    /// one the AI filled in -- the AI-generated ones are the ones worth a
+    /// second look against a textbook before an exam.
+    case aiGenerated
 }
 
 public enum CardStatus: String, Codable, Sendable {

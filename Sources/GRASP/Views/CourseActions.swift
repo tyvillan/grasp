@@ -17,6 +17,83 @@ struct CourseContextMenu: View {
     }
 }
 
+/// The "Delete Course" confirmation, identical wherever a course can be
+/// deleted from (the sidebar, the dashboard's course tiles) -- previously
+/// two copies of the same alert and impact-counting logic that would only
+/// have drifted further apart the next time either needed a change, this
+/// one included.
+///
+/// One button, not two: an earlier version offered a plain delete alongside
+/// a "Delete & Exclude Folder" option, but a course silently coming back on
+/// the next import is a surprise nobody wants, so permanence isn't
+/// something to opt into separately -- every delete now excludes the vault
+/// folder too (`AppStore.removeCourseAndExclude`). The escape hatch is
+/// `VaultScanner.importPaths`'s own un-exclude step: manually adding files
+/// back to that folder is the deliberate "undo" this leaves reachable,
+/// rather than a second destructive button in this same dialog.
+extension View {
+    func courseDeleteConfirmation(_ course: Binding<Course?>, onDeleted: @escaping (String) -> Void) -> some View {
+        modifier(CourseDeleteConfirmationModifier(course: course, onDeleted: onDeleted))
+    }
+}
+
+private struct CourseDeleteConfirmationModifier: ViewModifier {
+    @Environment(AppStore.self) private var store
+    @Binding var course: Course?
+    let onDeleted: (String) -> Void
+    @State private var impact: (materials: Int, cards: Int, reviews: Int)?
+
+    func body(content: Content) -> some View {
+        content
+            // Synchronous, unlike the `.task` below -- clearing `impact`
+            // here happens in the same update as `course` changing, before
+            // the alert's message can render. Without it, right-clicking a
+            // second course's "Delete…" fast enough after canceling the
+            // first could show the alert for the new course while
+            // `impact` still holds the previous course's numbers, since
+            // the async fetch that would replace it hasn't started yet.
+            .onChange(of: course?.id) { impact = nil }
+            .task(id: course?.id) {
+                impact = course.flatMap { try? store.courseDeletionImpact($0.id) }
+            }
+            .alert(
+                "Delete \(course?.name ?? "course")?",
+                isPresented: Binding(get: { course != nil }, set: { if !$0 { course = nil } }),
+                presenting: course
+            ) { target in
+                Button("Delete", role: .destructive) {
+                    try? store.removeCourseAndExclude(target.id)
+                    onDeleted(target.id)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { target in
+                Text(message(for: target))
+            }
+    }
+
+    private func message(for course: Course) -> String {
+        var message: String
+        if let impact {
+            message = "Removes \(impact.cards) card\(impact.cards == 1 ? "" : "s")"
+            if impact.reviews > 0 {
+                message += " and \(impact.reviews) review\(impact.reviews == 1 ? "" : "s") of study history"
+            }
+        } else {
+            // The count hasn't loaded yet -- say nothing specific rather
+            // than a wrong "0 cards" while it's still in flight.
+            message = "Removes its cards and any study history for it"
+        }
+        message += ". Your notes in the vault are never touched"
+        if course.folderPath != nil {
+            message += ", and re-importing your vault won't bring this course back -- " +
+                "add its files to a course by hand again if you ever want it back."
+        } else {
+            message += "."
+        }
+        return message
+    }
+}
+
 /// Rename a course, give it a code and a color, and see where its
 /// material actually comes from. The vault folder is shown read-only:
 /// it's what the scanner matches on, so editing it here would silently
@@ -27,6 +104,7 @@ struct CourseEditSheet: View {
 
     @State private var course: Course
     @State private var noteCount: Int?
+    @State private var timelineText = ""
 
     init(course: Course) {
         _course = State(initialValue: course)
@@ -78,6 +156,15 @@ struct CourseEditSheet: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                TimelineField(text: $timelineText, allowsNoTimeline: true)
+                if course.folderPath != nil {
+                    Text("Changing this here sticks -- re-importing the vault never overwrites a course's timeline once it's set.")
+                        .font(.caption)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                }
+            }
+
             Divider()
 
             VStack(alignment: .leading, spacing: 4) {
@@ -106,6 +193,8 @@ struct CourseEditSheet: View {
                 Button("Cancel") { dismiss() }
                 Button("Save") {
                     course.name = course.name.trimmingCharacters(in: .whitespaces)
+                    let trimmedTimeline = timelineText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    course.semesterId = trimmedTimeline.isEmpty ? nil : (try? store.findOrCreateSemester(name: trimmedTimeline))
                     try? store.updateCourse(course)
                     dismiss()
                 }
@@ -115,7 +204,20 @@ struct CourseEditSheet: View {
         }
         .padding(20)
         .frame(width: 420)
-        .task { noteCount = try? store.materialCount(inCourse: course.id) }
+        // Split from the `noteCount` fetch below: `store.semesters` is
+        // already in memory (no I/O), so this must not wait behind that
+        // fetch (which reads through GRDB, and this project's database
+        // and vault both live under iCloud Drive, which can stall on an
+        // evicted file). The field is interactive from the very first
+        // frame -- a slow `noteCount` read must never leave it sitting
+        // blank while the user starts typing, only to have that typed
+        // text clobbered the moment the fetch finally resolves.
+        .onAppear {
+            timelineText = store.semesters.first { $0.id == course.semesterId }?.name ?? ""
+        }
+        .task {
+            noteCount = try? store.materialCount(inCourse: course.id)
+        }
     }
 }
 

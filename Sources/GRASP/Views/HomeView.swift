@@ -18,7 +18,6 @@ struct HomeView: View {
     @State private var studyingDeck: StudyTarget?
     @State private var editingCourse: Course?
     @State private var deletingCourse: Course?
-    @State private var deletionImpact: (materials: Int, cards: Int, reviews: Int)?
 
     /// Below this the rail would squeeze both columns rather than help, so
     /// it folds under the main column instead.
@@ -129,27 +128,12 @@ struct HomeView: View {
         .task { load() }
         .onChange(of: store.deckCounts.count) { load() }
         .sheet(item: $studyingDeck, onDismiss: load) { target in
-            FlashcardStudyView(deckId: target.id, deckName: target.name)
+            FlashcardStudyView(deckIds: [target.id], deckName: target.name)
         }
         .sheet(item: $editingCourse, onDismiss: load) { course in
             CourseEditSheet(course: course)
         }
-        .alert(
-            "Delete \(deletingCourse?.name ?? "course")?",
-            isPresented: Binding(
-                get: { deletingCourse != nil },
-                set: { if !$0 { deletingCourse = nil } }
-            ),
-            presenting: deletingCourse
-        ) { course in
-            Button("Delete", role: .destructive) {
-                try? store.deleteCourse(course.id)
-                load()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { course in
-            Text(deletionMessage(for: course))
-        }
+        .courseDeleteConfirmation($deletingCourse) { _ in load() }
     }
 
     private func load() {
@@ -365,7 +349,7 @@ struct HomeView: View {
                                         onArchive: {
                                             try? store.setCourseArchived(course.id, archived: !course.isArchived)
                                         },
-                                        onDelete: { beginDelete(course) }
+                                        onDelete: { deletingCourse = course }
                                     )
                                 }
                             }
@@ -379,20 +363,6 @@ struct HomeView: View {
         store.coursesBySemester.values.flatMap { $0 }.first { $0.id == id }
     }
 
-    private func beginDelete(_ course: Course) {
-        deletionImpact = try? store.courseDeletionImpact(course.id)
-        deletingCourse = course
-    }
-
-    private func deletionMessage(for course: Course) -> String {
-        let cards = deletionImpact?.cards ?? 0
-        let reviews = deletionImpact?.reviews ?? 0
-        var message = "Removes \(cards) card\(cards == 1 ? "" : "s")"
-        if reviews > 0 { message += " and \(reviews) review\(reviews == 1 ? "" : "s") of study history" }
-        message += ". Your notes in the vault are never touched"
-        message += course.folderPath != nil ? " -- importing again will bring this course back." : "."
-        return message
-    }
 }
 
 // MARK: - Pieces
