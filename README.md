@@ -9,16 +9,25 @@ Jupyter notebooks) and it organizes them into courses and decks
 automatically, then drills them with the study modes that actually work.
 
 > **Status: in development.** Built against one real Obsidian vault so
-> far; the core is solid (63 automated tests, most run against real
+> far; the core is solid (142 automated tests, most run against real
 > imported content) but it hasn't been used by anyone but its author yet.
 
 ## What it does today
 
 - **Imports** Markdown, PDF, docx, and `.ipynb` notes, organizing them into
-  courses and decks automatically from folder structure and filenames
+  courses and decks automatically from folder structure and filenames —
+  or add a course by hand and drop in one-off files/folders (a homework
+  PDF, a scanned handout) that never lived in the vault at all
 - **Deterministic flashcard generation** from lecture-style notes (term +
   definition pairs), with a review queue so nothing reaches study
   unapproved
+- **"All Cards"** — a course-wide view spanning every deck at once,
+  alongside each individual deck, with multi-select (shift/cmd-click),
+  batch approve/suspend/move/delete, and a hover preview that doesn't
+  disturb the list
+- **Near-duplicate detection** catches overlapping cards from two notes
+  covering the same material at import time, plus a review sheet for
+  cleaning up what's already in a deck
 - **Flashcards** on a real spaced-repetition schedule (a from-scratch
   FSRS-5 implementation, verified against the algorithm's own published
   reference test vectors)
@@ -31,12 +40,21 @@ automatically, then drills them with the study modes that actually work.
   before the exam, and the queue reorders by weakest retention in the
   final week
 - **Full-text search** across every note you've imported
+- **Freeform timelines** ("Fall 2026", "2026-2027", whatever you actually
+  call your terms) instead of a fixed dropdown, with autocomplete against
+  what you've already used
 - **Local profiles** — no accounts, no server, no network. Each profile's
   data lives in its own local database; share the app with someone and
   they get their own separate profile
-- **Optional AI card refinement** via a local Ollama server if you have
-  one running, or Apple's on-device model as a zero-setup fallback —
-  fully usable with neither; cards just come from the deterministic parser
+- **Optional local AI**, via a local Ollama server if you have one
+  running (with setup/status detection built into Settings) or Apple's
+  on-device model as a zero-setup fallback — refines parser output, and
+  can propose brand-new cards for concepts a note implies but never got
+  its own card, always grounded in that note's own text. Fully usable
+  with neither; cards just come from the deterministic parser
+- **Deleting a course is permanent** — its vault folder is excluded from
+  future imports rather than silently recreated on the next scan, with a
+  one-click undo (or just add its files to a course by hand again)
 
 ## What it doesn't do (yet)
 
