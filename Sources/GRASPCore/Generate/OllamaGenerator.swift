@@ -97,6 +97,40 @@ public struct OllamaGenerator: CardGenerator {
         return Array(decoded.prefix(maxCount)).map { GeneratedCard(front: $0.front, back: $0.back) }
     }
 
+    public func generateTestQuestions(
+        existing: [CandidatePair], noteContext: String, maxCount: Int
+    ) async -> [GeneratedTestQuestion] {
+        guard maxCount > 0, !noteContext.isEmpty else { return [] }
+        let prompt = Self.generateTestQuestionsPrompt(existing: existing, noteContext: noteContext, maxCount: maxCount)
+        guard let content = try? await chat(prompt: prompt),
+              let data = content.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([TestQuestionDTO].self, from: data)
+        else { return [] }
+        return Array(decoded.prefix(maxCount)).map { GeneratedTestQuestion(prompt: $0.prompt, correctAnswer: $0.answer) }
+    }
+
+    public func validateContext(
+        front: String, back: String, noteContext: String, courseName: String
+    ) async -> ContextValidation {
+        guard !noteContext.isEmpty else { return ContextValidation(.valid) }
+        let prompt = Self.validateContextPrompt(front: front, back: back, noteContext: noteContext, courseName: courseName)
+        guard let content = try? await chat(prompt: prompt),
+              let data = content.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ContextValidationDTO.self, from: data)
+        else { return ContextValidation(.valid) }
+        switch decoded.verdict.lowercased() {
+        case "refine":
+            guard let refined = decoded.refinedBack?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !refined.isEmpty
+            else { return ContextValidation(.valid) }
+            return ContextValidation(.refine(newBack: refined))
+        case "reject":
+            return ContextValidation(.reject)
+        default:
+            return ContextValidation(.valid)
+        }
+    }
+
     public func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] {
         let fallback = Array(deckContext.filter { $0 != correctAnswer }.shuffled().prefix(count))
         guard !deckContext.isEmpty else { return fallback }
@@ -114,6 +148,16 @@ public struct OllamaGenerator: CardGenerator {
     private struct RefinedPairDTO: Decodable {
         let front: String
         let back: String
+    }
+
+    private struct TestQuestionDTO: Decodable {
+        let prompt: String
+        let answer: String
+    }
+
+    private struct ContextValidationDTO: Decodable {
+        let verdict: String
+        let refinedBack: String?
     }
 
     private struct ChatRequest: Encodable {
@@ -193,6 +237,99 @@ public struct OllamaGenerator: CardGenerator {
 
         Respond with ONLY a JSON array of at most \(maxCount) objects, each shaped \
         {"front": "...", "back": "..."}. Return [] if there is nothing worth adding. No other text.
+        """
+    }
+
+    /// Same grounding contract as `generateAdditionalPrompt` (every fact
+    /// must come from `noteContext`, an empty array is a normal result),
+    /// but asks for a `{"prompt","answer"}` shape rather than
+    /// `{"front","back"}` -- deliberately different field names so the
+    /// model reads this as "ask a question, state its answer" rather than
+    /// "flashcard term/definition." These are test-only and never
+    /// persisted, so there's no `topic` steering parameter to plumb here.
+    static func generateTestQuestionsPrompt(
+        existing: [CandidatePair], noteContext: String, maxCount: Int
+    ) -> String {
+        let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")
+        return """
+        You are a student's study assistant, writing practice questions for a test. Below is one \
+        of their lecture notes, and the flashcards already made from it. Write, at most, \(maxCount) \
+        short free-response practice question(s) that test understanding of this note -- prefer \
+        something that requires connecting or applying an idea from the note over one that just \
+        restates an existing card word-for-word. Every fact in the question and its answer must be \
+        directly supported by the note text below. Do not add outside knowledge, and do not invent \
+        an example, number, or date that isn't in the note. If the note doesn't support any good \
+        question beyond what's already covered, return an empty array -- that is a normal and \
+        expected result, not a failure.
+
+        Note:
+        \(noteContext.prefix(3000))
+
+        Cards already made from this note:
+        \(covered.isEmpty ? "(none yet)" : covered)
+
+        Respond with ONLY a JSON array of at most \(maxCount) objects, each shaped \
+        {"prompt": "...", "answer": "..."}. Return [] if there is nothing worth asking. No other text.
+        """
+    }
+
+    /// Checks one already-extracted card's definition for the same
+    /// "assignment logistics, not a definition" shape `PairParser`'s own
+    /// deterministic filters catch by keyword/pattern -- this is the
+    /// semantic backstop for the cases those miss (a rubric mention
+    /// phrased as if it were content, a document-specific label, a vague
+    /// fragment that reads grammatically fine but explains nothing).
+    ///
+    /// Two judgments, kept explicitly separate, because collapsing them
+    /// into one is what caused a real bug: the model would take a bad
+    /// card and just smooth over/summarize whatever text it was given --
+    /// on Tyler's real College Writing course, "Con" (a garbled 3-point
+    /// list about animal testing) came back truncated to its first
+    /// clause, and "Topic Sentence"/"Thesis" came back nearly verbatim
+    /// unchanged, none of them an actual definition of the term. First
+    /// judge whether the TERM itself is a real, general course concept at
+    /// all (independent of how bad its extracted definition is) -- a
+    /// student's own essay-draft heading or an assignment instruction
+    /// isn't one, no matter how it's phrased. Only for a term that
+    /// passes that bar does a `refine` verdict ask for a *brand-new*
+    /// general definition from the model's own subject knowledge, with
+    /// summarizing/paraphrasing the specific extracted text explicitly
+    /// ruled out.
+    static func validateContextPrompt(
+        front: String, back: String, noteContext: String, courseName: String
+    ) -> String {
+        """
+        You are checking flashcards auto-extracted from a student's notes for the course \
+        "\(courseName)". A flashcard's front is a term and its back should be a general, \
+        academically accurate definition of that term -- the kind of definition that belongs in a \
+        course glossary, true regardless of which specific assignment or example it came from.
+
+        Term: \(front)
+        Extracted definition: \(back)
+
+        For reference, the note this was extracted from:
+        \(noteContext.prefix(2000))
+
+        First, decide: is "\(front)" itself a real, general concept a student in "\(courseName)" would \
+        need to know -- the kind of term that belongs in a glossary -- or is it just a label specific \
+        to this one document (a draft's section heading, an assignment instruction, a personal \
+        narrative, a fragment)? Judge the TERM itself, not the quality of its extracted definition -- a \
+        real term can still have a bad extracted definition.
+
+        If "\(front)" is NOT a real general concept -- it only makes sense as a label for this \
+        document's own specific content -- respond {"verdict": "reject"}.
+
+        If "\(front)" IS a real general concept:
+        - If the extracted definition already states the general concept accurately, respond \
+        {"verdict": "valid"}.
+        - Otherwise respond {"verdict": "refine", "refinedBack": "..."} with a brand-new, general, \
+        academically accurate definition of the concept, written from your own knowledge of the \
+        subject. Do NOT summarize, paraphrase, or shorten the extracted text or the note's specific \
+        example -- state what the term actually means in general, the way a glossary would, even if \
+        that differs from what the specific extracted text or note said.
+
+        Respond with ONLY one JSON object shaped {"verdict": "...", "refinedBack": "..."} \
+        ("refinedBack" only needed when verdict is "refine"). No other text.
         """
     }
 

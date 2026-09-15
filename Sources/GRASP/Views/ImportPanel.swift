@@ -39,7 +39,7 @@ struct ImportResultMessage: Identifiable {
         }
         if summary.filesScanned == 0 {
             title = "Nothing to import"
-            body = "No supported files were found. GRASP reads Markdown, PDF, Word (.docx), and Jupyter (.ipynb) files."
+            body = "No supported files were found. GRASP reads Markdown, PDF, Word (.docx), PowerPoint (.pptx), Jupyter (.ipynb), and PNG/JPEG image files."
             return
         }
         title = "Import complete"

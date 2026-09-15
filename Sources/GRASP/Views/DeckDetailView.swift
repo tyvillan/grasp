@@ -1,6 +1,28 @@
 import SwiftUI
 import GRASPCore
 
+/// A user-chosen display order for the card list, independent of
+/// `masteryFilter` (which decides *which* cards show, not what order they
+/// show in). `.deckOrder` passes `cards` through unchanged -- it's already
+/// fetched in `DeckCard.sortIndex` order by `AppStore.cards(inDecks:)`, the
+/// same per-deck order `bulkMoveCards` maintains when cards are dragged
+/// between decks. One global preference (`@AppStorage`, mirroring
+/// `DeckListView`'s own deck-sort control) rather than per-deck.
+private enum CardSortOption: String, CaseIterable, Identifiable {
+    case deckOrder, alphabetical, dateAdded, dueDate
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .deckOrder: return "Default (Deck Order)"
+        case .alphabetical: return "Alphabetical (A–Z)"
+        case .dateAdded: return "Date Added"
+        case .dueDate: return "Due Date"
+        }
+    }
+}
+
 /// The card review queue for a deck, or (via `scope: .course`) for every
 /// deck in a course at once -- the "All Cards" master category
 /// `DeckListView` pins above the real decks. Every parsed pair lands here
@@ -15,6 +37,12 @@ import GRASPCore
 struct DeckDetailView: View {
     @Environment(AppStore.self) private var store
     let scope: AppStore.DeckScope
+    /// Runs the shared file/folder picker for whichever course this deck
+    /// (or "All Cards") belongs to -- the actual `NSOpenPanel` + import
+    /// call and its result sheet live in `ContentView`, since that's also
+    /// what `CourseEmptyStateView` and "Upload Document to Course" share;
+    /// this view only needs to trigger it, not own it.
+    let onAddFiles: () -> Void
     /// Every deck `scope` spans -- one real deck, or (for `.course`) every
     /// deck in that course. Cached here rather than recomputed inline on
     /// every read, since `load()` already re-derives it on every
@@ -30,12 +58,15 @@ struct DeckDetailView: View {
     @State private var isLearning = false
     @State private var testPhase: TestPhase?
     @State private var isGeneratorAvailable = false
-    @State private var isRefining = false
+    @State private var isRefiningDeck = false
+    @State private var refineDeckResult: AppStore.RefineDeckSummary?
+    @State private var showingRefineDeckConfirmation = false
     @State private var isGeneratingCards = false
     @State private var fillGapsResult: Int?
     @State private var showingGenerateSheet = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
     @State private var masteryFilter: MasteryFilter = .all
+    @AppStorage("cardSortOption") private var cardSortOption: CardSortOption = .deckOrder
     @State private var courseId: String?
     @State private var siblingDecks: [Deck] = []
     @State private var isCreatingCard = false
@@ -74,11 +105,47 @@ struct DeckDetailView: View {
     }
 
     private var visibleCards: [Card] {
-        guard masteryFilter != .all else { return cards }
-        return cards.filter { card in
-            guard card.status == .active else { return false }
-            let isUnderstood = learnLevels[card.id] == .mastered
-            return masteryFilter == .understood ? isUnderstood : !isUnderstood
+        let filtered: [Card]
+        if masteryFilter == .all {
+            filtered = cards
+        } else {
+            filtered = cards.filter { card in
+                guard card.status == .active else { return false }
+                let isUnderstood = learnLevels[card.id] == .mastered
+                return masteryFilter == .understood ? isUnderstood : !isUnderstood
+            }
+        }
+        return sortedCards(filtered)
+    }
+
+    private var cardSortMenu: some View {
+        Menu {
+            Picker("Sort Cards", selection: $cardSortOption) {
+                ForEach(CardSortOption.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "arrow.up.arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(GRASPColor.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Sort cards: \(cardSortOption.label)")
+    }
+
+    private func sortedCards(_ cards: [Card]) -> [Card] {
+        switch cardSortOption {
+        case .deckOrder:
+            return cards
+        case .alphabetical:
+            return cards.sorted { $0.front.localizedStandardCompare($1.front) == .orderedAscending }
+        case .dateAdded:
+            return cards.sorted { $0.createdAt < $1.createdAt }
+        case .dueDate:
+            return cards.sorted { $0.due < $1.due }
         }
     }
 
@@ -106,16 +173,22 @@ struct DeckDetailView: View {
             deckHeader
             if draftCount > 0 { draftNotice }
             if !duplicateGroups.isEmpty { duplicateNotice }
-            if activeCount > 0 {
-                Picker("", selection: $masteryFilter) {
-                    ForEach(MasteryFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+            if !cards.isEmpty {
+                HStack {
+                    if activeCount > 0 {
+                        Picker("", selection: $masteryFilter) {
+                            ForEach(MasteryFilter.allCases) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .frame(maxWidth: 300, alignment: .leading)
                     }
+                    Spacer()
+                    cardSortMenu
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(maxWidth: 300, alignment: .leading)
                 .padding(.horizontal, 18)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
@@ -150,19 +223,18 @@ struct DeckDetailView: View {
                 previewCardId = nil
             }
         }
-        .alert(
-            "Delete \(pendingBulkDelete?.count ?? 0) cards?",
-            isPresented: Binding(get: { pendingBulkDelete != nil }, set: { if !$0 { pendingBulkDelete = nil } }),
-            presenting: pendingBulkDelete
-        ) { ids in
-            Button("Delete", role: .destructive) {
-                try? store.bulkDeleteCards(ids)
-                selectedCardIds.removeAll()
-                load()
+        .sheet(isPresented: Binding(get: { pendingBulkDelete != nil }, set: { if !$0 { pendingBulkDelete = nil } })) {
+            if let ids = pendingBulkDelete {
+                ConfirmationSheet(
+                    icon: "trash", title: "Delete \(ids.count) Card\(ids.count == 1 ? "" : "s")?",
+                    message: "Review history is kept, but \(ids.count == 1 ? "this card" : "these \(ids.count) cards") will no longer appear in this deck.",
+                    confirmTitle: "Delete"
+                ) {
+                    try? store.bulkDeleteCards(ids)
+                    selectedCardIds.removeAll()
+                    load()
+                }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { (ids: [String]) -> Text in
-            Text("Review history is kept, but these \(ids.count) cards will no longer appear in this deck.")
         }
         .task {
             await store.refreshGeneratorStatus()
@@ -177,16 +249,16 @@ struct DeckDetailView: View {
         .sheet(item: $testPhase, onDismiss: load) { phase in
             switch phase {
             case .setup:
-                TestSetupSheet(deckIds: scopeDeckIds, deckName: deckName) { attemptId, questions in
-                    testPhase = .running(attemptId: attemptId, questions: questions)
+                TestSetupSheet(deckIds: scopeDeckIds, deckName: deckName) { attemptId, questions, aiWarning in
+                    testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
                 }
-            case .running(let attemptId, let questions):
-                TestRunView(attemptId: attemptId, deckName: deckName, questions: questions) {
-                    let result = (try? store.finishTest(attemptId: attemptId)) ?? (0, questions.count)
-                    testPhase = .results(correct: result.correct, total: result.total, questions: questions)
+            case .running(let attemptId, let questions, let aiWarning):
+                TestRunView(attemptId: attemptId, deckName: deckName, questions: questions, aiWarning: aiWarning) { graded in
+                    _ = try? store.finishTest(attemptId: attemptId)
+                    testPhase = .results(attemptId: attemptId, graded: graded)
                 }
-            case .results(let correct, let total, let questions):
-                TestResultsView(deckName: deckName, correct: correct, total: total, questions: questions)
+            case .results(let attemptId, let graded):
+                TestResultsView(deckName: deckName, attemptId: attemptId, graded: graded)
             }
         }
         .sheet(item: $editingCard) { card in
@@ -204,8 +276,8 @@ struct DeckDetailView: View {
             }
         }
         .sheet(isPresented: $showingDuplicateReview, onDismiss: load) {
-            DuplicateReviewSheet(groups: duplicateGroups) { toRemove in
-                try? store.bulkDeleteCards(toRemove)
+            DuplicateReviewSheet(groups: duplicateGroups) { merges in
+                try? store.mergeDuplicates(merges)
             }
         }
         .sheet(item: Binding(
@@ -214,34 +286,58 @@ struct DeckDetailView: View {
         )) { wrapped in
             NoteViewerView(materialId: wrapped.id)
         }
-        .alert(
-            "Delete this card?",
-            isPresented: Binding(
-                get: { pendingDeleteCard != nil },
-                set: { if !$0 { pendingDeleteCard = nil } }
-            ),
-            presenting: pendingDeleteCard
-        ) { card in
-            Button("Delete", role: .destructive) {
+        .sheet(item: $pendingDeleteCard) { card in
+            ConfirmationSheet(
+                icon: "trash", title: "Delete This Card?",
+                message: "\"\(card.front)\" will no longer appear in this deck. Review history is kept.",
+                confirmTitle: "Delete"
+            ) {
                 try? store.deleteCard(card.id)
                 load()
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { card in
-            Text(card.front)
         }
-        .alert(
-            fillGapsResult == 0 ? "No Gaps Found" : "Cards Added",
-            isPresented: Binding(get: { fillGapsResult != nil }, set: { if !$0 { fillGapsResult = nil } })
-        ) {
-            Button("OK") {}
-        } message: {
-            if let fillGapsResult, fillGapsResult > 0 {
-                Text("Added \(fillGapsResult) new card\(fillGapsResult == 1 ? "" : "s"), marked as AI-generated and awaiting your review.")
-            } else {
-                Text("The AI didn't find any concepts in these notes that aren't already covered by an existing card.")
+        .sheet(isPresented: Binding(get: { fillGapsResult != nil }, set: { if !$0 { fillGapsResult = nil } })) {
+            if let fillGapsResult {
+                ResultSheet(
+                    icon: "sparkles",
+                    title: fillGapsResult == 0 ? "No Gaps Found" : "Cards Added",
+                    leadText: fillGapsResult > 0
+                        ? "Added \(fillGapsResult) new card\(fillGapsResult == 1 ? "" : "s"), marked as AI-generated and awaiting your review."
+                        : "The AI didn't find any concepts in these notes that aren't already covered by an existing card."
+                )
             }
         }
+        .sheet(isPresented: Binding(get: { refineDeckResult != nil }, set: { if !$0 { refineDeckResult = nil } })) {
+            if let refineDeckResult {
+                ResultSheet(
+                    icon: "checkmark.seal",
+                    title: "Refine Deck with AI Complete",
+                    leadText: refineDeckResult.isEmpty
+                        ? "Every draft checked out fine -- nothing looked like assignment text or an off-topic fragment, and nothing needed a wording cleanup."
+                        : (refineDeckResult.wordingRefinedCount > 0
+                           ? "Cleaned up wording on \(refineDeckResult.wordingRefinedCount) other card\(refineDeckResult.wordingRefinedCount == 1 ? "" : "s")."
+                           : nil),
+                    sections: refineDeckSections(refineDeckResult)
+                )
+            }
+        }
+    }
+
+    private func refineDeckSections(_ result: AppStore.RefineDeckSummary) -> [ResultSheet.Section] {
+        var sections: [ResultSheet.Section] = []
+        if !result.context.refined.isEmpty {
+            sections.append(.init(
+                icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success, title: "Rewrote",
+                items: result.context.refined.map(\.front)
+            ))
+        }
+        if !result.context.removed.isEmpty {
+            sections.append(.init(
+                icon: "trash", tint: GRASPColor.rejected, title: "Removed",
+                items: result.context.removed.map(\.front)
+            ))
+        }
+        return sections
     }
 
     /// Deck name, its one-line composition, and the four actions. Study,
@@ -272,6 +368,7 @@ struct DeckDetailView: View {
                 modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
                     .disabled(activeCount == 0)
                 modeButton("New Card", "plus", prominent: true) { isCreatingCard = true }
+                addFilesButton
                 if isGeneratorAvailable {
                     addCardsWithAIButton
                 }
@@ -322,6 +419,38 @@ struct DeckDetailView: View {
         }
     }
 
+    /// Moved here from the main window toolbar, where it used to sit right
+    /// beside "New Deck" -- close enough in icon and position that the two
+    /// were easy to mix up. Here it's scoped to the deck actually on
+    /// screen (or the whole course, for "All Cards"), same as every other
+    /// button in this row.
+    private var addFilesButton: some View {
+        // "to Course" for the "All Cards" scope -- the files land in the
+        // course as a whole (wherever the scanner/manual placement puts
+        // them), not literally inside a single deck, so the label should
+        // say what actually happens rather than overclaim scope it doesn't
+        // have when a single real deck is what's on screen.
+        let title: String = {
+            if case .deck = scope { return "Add Files to Deck" }
+            return "Add Files to Course"
+        }()
+        return Button {
+            onAddFiles()
+        } label: {
+            HStack(spacing: 5) {
+                if store.isImporting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "doc.badge.plus").font(.system(size: 11))
+                }
+                Text(title)
+            }
+        }
+        .buttonStyle(GRASPQuietButton())
+        .disabled(store.isImporting)
+        .help("Add specific files or a whole folder to this course, from anywhere on disk")
+    }
+
     /// Not `modeButton` -- this one swaps its icon for a spinner while a
     /// run is in flight, which a run over several notes' worth of
     /// sequential model round trips is slow enough to actually need.
@@ -341,6 +470,52 @@ struct DeckDetailView: View {
         .buttonStyle(GRASPQuietButton())
         .disabled(isGeneratingCards)
         .help("Ask the AI to propose cards for concepts your notes mention but never turned into a card")
+    }
+
+    /// The single unified action that replaced the separate "Refine with
+    /// AI" and "Check for Off-Topic Cards" buttons -- one pipeline, not
+    /// two: prune/rewrite off-topic drafts first, then clean up wording
+    /// on whatever survives (see `AppStore.refineDeckWithAI`). Placed up
+    /// here with the other AI actions rather than down in the draft
+    /// notice strip, so it's always visible near the deck's own header --
+    /// not just when drafts happen to be showing.
+    private var refineDeckWithAIButton: some View {
+        Button {
+            showingRefineDeckConfirmation = true
+        } label: {
+            HStack(spacing: 5) {
+                if isRefiningDeck {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "checkmark.seal").font(.system(size: 11))
+                }
+                Text("Refine Deck with AI")
+            }
+        }
+        .buttonStyle(GRASPQuietButton())
+        .disabled(isRefiningDeck || draftCount == 0)
+        .help(draftCount == 0
+              ? "No draft cards to refine right now"
+              : "Checks each draft against its own note -- rewrites or removes off-topic definitions, then cleans up wording on the rest")
+        .sheet(isPresented: $showingRefineDeckConfirmation) {
+            RefineDeckConfirmationSheet(draftCount: draftCount, onConfirm: startRefineDeckWithAI)
+        }
+    }
+
+    private func startRefineDeckWithAI() {
+        isRefiningDeck = true
+        let generation = scopeGeneration
+        let deckIds = scopeDeckIds
+        Task {
+            let result = await store.refineDeckWithAI(inDecks: deckIds)
+            isRefiningDeck = false
+            // Same guard as `runGenerate`: don't let a run started on a
+            // deck the user has since switched away from overwrite the
+            // deck now on screen.
+            guard generation == scopeGeneration else { return }
+            refineDeckResult = result
+            load()
+        }
     }
 
     /// `maxPerNote: nil` means "use `AppStore`'s own default cap" -- the
@@ -383,34 +558,18 @@ struct DeckDetailView: View {
                 .foregroundStyle(GRASPColor.textSecondary)
             Spacer(minLength: 8)
             if isGeneratorAvailable {
-                Button {
-                    isRefining = true
-                    let generation = scopeGeneration
-                    let deckIds = scopeDeckIds
-                    Task {
-                        _ = await store.refineDraftCards(inDecks: deckIds)
-                        isRefining = false
-                        // Same guard as `runGenerate`: don't let a refine
-                        // started on a deck the user has since switched
-                        // away from overwrite the deck now on screen.
-                        guard generation == scopeGeneration else { return }
-                        load()
-                    }
-                } label: {
-                    if isRefining {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Refine with AI")
-                    }
-                }
-                .buttonStyle(.link)
-                .disabled(isRefining)
+                refineDeckWithAIButton
             }
-            Button("Approve all") {
+            Button {
                 try? store.approveAllDrafts(inDecks: scopeDeckIds)
                 load()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle").font(.system(size: 11))
+                    Text("Approve all")
+                }
             }
-            .buttonStyle(.link)
+            .buttonStyle(GRASPQuietButton())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -474,6 +633,10 @@ struct DeckDetailView: View {
                     onDelete: { pendingDeleteCard = card },
                     onMove: { target in
                         try? store.moveCard(card.id, toDeck: target)
+                        load()
+                    },
+                    onRevertContextRefinement: {
+                        try? store.revertContextRefinement(card.id)
                         load()
                     }
                 )
@@ -663,6 +826,84 @@ struct DeckDetailView: View {
 }
 
 private struct MaterialIdentifier: Identifiable { let id: String }
+
+/// "Refine Deck with AI"'s confirmation -- a custom sheet rather than a
+/// system `.confirmationDialog`, since the three things this action can
+/// do to a card (remove, rewrite, tidy wording) read far more clearly as
+/// three short labeled rows than as one dense paragraph.
+private struct RefineDeckConfirmationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let draftCount: Int
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 26))
+                    .foregroundStyle(GRASPColor.accent)
+                Text("Refine \(draftCount) Draft Card\(draftCount == 1 ? "" : "s") with AI?")
+                    .font(.system(size: 18, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text("Checks every draft against its own note and this course.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                effectRow(
+                    icon: "trash", tint: GRASPColor.accent,
+                    text: "Removes cards that aren't real course concepts -- assignment text, a document-specific label."
+                )
+                effectRow(
+                    icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success,
+                    text: "Rewrites cards with an off-topic or inaccurate definition."
+                )
+                effectRow(
+                    icon: "text.badge.checkmark", tint: GRASPColor.textSecondary,
+                    text: "Cleans up wording on everything else."
+                )
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text("This can't be undone in bulk -- a removed card is gone, though a rewritten one can be reverted individually from its \"AI Refined\" badge afterward.")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Refine Deck") {
+                    onConfirm()
+                    dismiss()
+                }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .background(GRASPColor.canvas)
+    }
+
+    private func effectRow(icon: String, tint: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+                .padding(.top, 1)
+            Text(text)
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
 
 /// "Add More Cards with AI"'s config sheet, in the same
 /// Stepper-plus-footer shape as `TestSetupSheet`. "AI Suggested Amount"
@@ -954,11 +1195,13 @@ private struct CardRow: View {
     let onViewNote: () -> Void
     let onDelete: () -> Void
     let onMove: (String) -> Void
+    let onRevertContextRefinement: () -> Void
 
     // Reserved space, not conditionally inserted -- toggling opacity
     // rather than adding/removing the button from the tree keeps the
     // row's width from jumping the instant the pointer arrives.
     @State private var isHovering = false
+    @State private var showingContextRefinementDetail = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -986,6 +1229,7 @@ private struct CardRow: View {
             Spacer(minLength: 8)
             if card.status == .active { masteryBadge }
             previewButton
+            contextRefinedBadge
             originBadge
             Menu {
                 if card.status == .draft {
@@ -1083,6 +1327,62 @@ private struct CardRow: View {
                 .help("AI-generated -- not directly from your notes, worth double-checking")
         }
     }
+
+    /// Marks a card whose definition was rewritten by the context-check
+    /// pipeline (see `AppStore.verifyContext`) -- the original extraction
+    /// looked like assignment text or an off-topic fragment, and the AI
+    /// redrafted it from the same note. Tapping opens a small popover
+    /// showing both versions side by side, with a one-click revert, so
+    /// nothing the AI changed is hidden from view.
+    @ViewBuilder private var contextRefinedBadge: some View {
+        if card.isContextRefined {
+            Button {
+                showingContextRefinementDetail = true
+            } label: {
+                Label("AI Refined", systemImage: "checkmark.shield")
+                    .labelStyle(.iconOnly).foregroundStyle(GRASPColor.success)
+            }
+            .buttonStyle(.plain)
+            .help("This definition was rewritten by the context checker -- click to compare with the original")
+            .popover(isPresented: $showingContextRefinementDetail) {
+                contextRefinementDetail
+            }
+        }
+    }
+
+    private var contextRefinementDetail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("AI Refined", systemImage: "checkmark.shield")
+                .foregroundStyle(GRASPColor.success)
+                .font(.system(size: 12, weight: .semibold))
+
+            Text("The original extraction looked like assignment text or an off-topic fragment. The AI rewrote it using this card's own source note.")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("ORIGINAL").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                Text(card.originalBack ?? "")
+                    .graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("CURRENT").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                Text(card.back)
+                    .graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button("Revert to Original") {
+                onRevertContextRefinement()
+                showingContextRefinementDetail = false
+            }
+            .buttonStyle(GRASPQuietButton())
+        }
+        .padding(16)
+        .frame(width: 320)
+    }
 }
 
 /// Lets the new card target any course/deck, defaulting to whichever one
@@ -1095,16 +1395,16 @@ private struct CardRow: View {
 /// underlying delete is a soft one. One radio-style choice per group
 /// (which card survives, or "keep both" when the group's smart pick isn't
 /// confident enough to guess).
-private struct DuplicateReviewSheet: View {
+struct DuplicateReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     let groups: [AppStore.DuplicateGroup]
-    let onRemove: (_ cardIdsToRemove: [String]) -> Void
+    let onMerge: (_ merges: [AppStore.DuplicateMerge]) -> Void
 
-    /// Value per group: the id to keep (removing every other member), or
-    /// `nil` meaning "keep all of them, skip this group".
+    /// Value per group: the id to keep (folding every other member into
+    /// it), or `nil` meaning "keep all of them, skip this group".
     @State private var keepChoice: [String: String?] = [:]
 
-    private var totalToRemove: Int {
+    private var totalToMerge: Int {
         groups.reduce(0) { total, group in
             guard let choice = keepChoice[group.id, default: defaultChoice(for: group)] else { return total }
             return total + group.cards.filter { $0.id != choice }.count
@@ -1135,21 +1435,23 @@ private struct DuplicateReviewSheet: View {
             Divider()
 
             HStack {
-                Text("\(totalToRemove) card\(totalToRemove == 1 ? "" : "s") will be removed")
+                Text("\(totalToMerge) card\(totalToMerge == 1 ? "" : "s") will be merged into the one kept")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Remove \(totalToRemove) Cards", role: .destructive) {
-                    let toRemove = groups.flatMap { group -> [String] in
-                        guard let choice = keepChoice[group.id, default: defaultChoice(for: group)] else { return [] }
-                        return group.cards.filter { $0.id != choice }.map(\.id)
+                Button("Merge \(totalToMerge) Cards", role: .destructive) {
+                    let merges = groups.compactMap { group -> AppStore.DuplicateMerge? in
+                        guard let choice = keepChoice[group.id, default: defaultChoice(for: group)] else { return nil }
+                        let losers = group.cards.filter { $0.id != choice }.map(\.id)
+                        guard !losers.isEmpty else { return nil }
+                        return AppStore.DuplicateMerge(survivorId: choice, losingIds: losers)
                     }
-                    onRemove(toRemove)
+                    onMerge(merges)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(totalToRemove == 0)
+                .disabled(totalToMerge == 0)
             }
             .padding(20)
         }

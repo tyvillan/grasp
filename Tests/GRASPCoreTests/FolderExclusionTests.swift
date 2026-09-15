@@ -111,7 +111,13 @@ struct FolderExclusionTests {
             _ = try Course.deleteOne(conn, key: courseId)
         }
 
-        _ = try await VaultScanner(database: db).scan(vaultRoot: VaultFixture.root)
+        // Routed through the shared gate -- see `RealVaultScanGate`'s doc
+        // comment: this is a real, filesystem-walking re-scan of the same
+        // vault `VaultFixture`'s own cache scan (and other suites like
+        // this one) also touch, and must never overlap with one of those.
+        _ = try await RealVaultScanGate.shared.run {
+            try await VaultScanner(database: db).scan(vaultRoot: VaultFixture.root)
+        }
 
         try await db.queue.read { conn in
             let course = try Course.filter(Column("name") == "Physical Geology").fetchOne(conn)
@@ -139,7 +145,9 @@ struct FolderExclusionTests {
             #expect(course == nil)
         }
 
-        _ = try await VaultScanner(database: db).scan(vaultRoot: VaultFixture.root)
+        _ = try await RealVaultScanGate.shared.run {
+            try await VaultScanner(database: db).scan(vaultRoot: VaultFixture.root)
+        }
 
         try await db.queue.read { conn in
             let recreated = try Course.filter(Column("name") == "Physical Geology").fetchOne(conn)

@@ -23,7 +23,7 @@ struct LearnEngineTests {
             + Self.candidates(count: 3, level: .new, idPrefix: "new")
         let round = LearnEngine.buildRound(from: mixed, using: &rng)
         let masteredIds = Set(mixed.filter { $0.level == .mastered }.map(\.cardId))
-        #expect(round.allSatisfy { !masteredIds.contains($0.cardId) })
+        #expect(round.allSatisfy { $0.cardId != nil && !masteredIds.contains($0.cardId!) })
     }
 
     @Test("a new card gets a multiple-choice question with the correct answer among the choices")
@@ -66,7 +66,7 @@ struct LearnEngineTests {
         let mixed = Self.candidates(count: 7, level: .new, idPrefix: "new")
             + Self.candidates(count: 3, level: .mastered, idPrefix: "mastered")
         let round = LearnEngine.buildRound(from: mixed, using: &rng)
-        #expect(round.allSatisfy { $0.cardId.hasPrefix("new-") })
+        #expect(round.allSatisfy { $0.cardId?.hasPrefix("new-") == true })
     }
 
     @Test("once most of the deck is mastered, a round draws at random from the whole deck")
@@ -78,7 +78,7 @@ struct LearnEngineTests {
         let round = LearnEngine.buildRound(from: mixed, using: &rng)
         // The round should be able to include mastered cards now, not
         // just the single straggler.
-        #expect(round.contains { $0.cardId.hasPrefix("mastered-") })
+        #expect(round.contains { $0.cardId?.hasPrefix("mastered-") == true })
     }
 
     @Test("a fully mastered deck still gets quizzed, not left empty")
@@ -87,6 +87,13 @@ struct LearnEngineTests {
         let allMastered = Self.candidates(count: 10, level: .mastered)
         let round = LearnEngine.buildRound(from: allMastered, using: &rng)
         #expect(round.count == 7)
+    }
+
+    @Test("every question in a Learn round has a real backing card")
+    func everyQuestionHasACardId() {
+        var rng = SystemRandomNumberGenerator()
+        let round = LearnEngine.buildRound(from: Self.candidates(count: 10), using: &rng)
+        #expect(round.allSatisfy { $0.cardId != nil })
     }
 
     @Test("distractors never include the card's own answer")

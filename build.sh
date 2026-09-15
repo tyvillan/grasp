@@ -58,8 +58,14 @@ SIGNING_IDENTITY="$(security find-identity -v -p codesigning | awk -F'"' '/Apple
 SIGN_OK=0
 for attempt in 1 2 3 4 5; do
   xattr -cr "$APP_DIR"
+  # No --options runtime: Hardened Runtime is meant to pair with Developer
+  # ID signing plus notarization for distribution. This build never leaves
+  # the machine, so hardening it buys nothing -- and actively costs
+  # something real: an unnotarized hardened binary gets silently denied by
+  # TCC for privacy-gated APIs (Calendar, Contacts, ...) with no prompt at
+  # all, which is exactly the bug that sent us here.
   if [ -n "$SIGNING_IDENTITY" ]; then
-    if codesign --force --options runtime -s "$SIGNING_IDENTITY" "$APP_DIR" 2>/tmp/grasp-codesign-err; then
+    if codesign --force -s "$SIGNING_IDENTITY" "$APP_DIR" 2>/tmp/grasp-codesign-err; then
       echo "Signed with: $SIGNING_IDENTITY (attempt $attempt)"
       SIGN_OK=1
       break

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import GRDB
+import ZIPFoundation
 @testable import GRASPCore
 
 /// `VaultScanner.importPaths(_:intoCourse:)` -- the manual counterpart to
@@ -132,6 +133,56 @@ struct ManualImportTests {
         try await db.queue.read { conn in
             let count = try Material.fetchCount(conn)
             #expect(count == 0)
+        }
+    }
+
+    // No PNG-through-the-real-pipeline test here -- see `ImageExtractorTests`'
+    // doc comment for why a real Vision OCR call is left out of this suite
+    // (it reproducibly hung the whole test run, a Vision concurrency
+    // fragility under this specific host process, not a bug in
+    // `ImageExtractor`/`VaultScanner`). The extension-to-`MaterialKind`
+    // dispatch itself (the actual wiring this file's tests otherwise cover)
+    // is exercised well enough by the pptx test below, which hits the exact
+    // same `importBinaryBody` code path with no Vision involved.
+
+    /// Builds a real, minimal `.pptx` (just the slide part `PptxExtractor`
+    /// reads, not a full OOXML package) with two term/definition pairs
+    /// spread across separate text runs on one slide -- the same
+    /// bare-term-line shape `importsSingleFile` above proves against a
+    /// `.md` note, here proving the identical parser runs against pptx
+    /// text too.
+    @Test("a pptx's slide text runs through the same import pipeline as a note")
+    func importsPptxViaSlideText() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let courseId = try await makeCourse(db)
+        let dir = try makeTempDir()
+
+        let runs = [
+            "Homeostasis",
+            "The maintenance of a stable internal environment despite external change, "
+                + "covering temperature, pH, and fluid balance across the whole organism.",
+            "Osmosis",
+            "The movement of water across a semi-permeable membrane from an area of "
+                + "low solute concentration to an area of high solute concentration.",
+        ].map { "<a:r><a:t>\($0)</a:t></a:r>" }.joined()
+        let slideXML = "<p:sld xmlns:a=\"a\" xmlns:p=\"p\"><p:cSld><p:spTree><p:sp><p:txBody>\(runs)</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+
+        let fileURL = dir.appendingPathComponent("Lecture Slides.pptx")
+        let archive = try Archive(url: fileURL, accessMode: .create, pathEncoding: nil)
+        let data = Data(slideXML.utf8)
+        try archive.addEntry(with: "ppt/slides/slide1.xml", type: .file, uncompressedSize: Int64(data.count)) {
+            position, size in data.subdata(in: Int(position)..<(Int(position) + size))
+        }
+
+        let scanner = VaultScanner(database: db)
+        let summary = try await scanner.importPaths([fileURL], intoCourse: courseId)
+
+        #expect(summary.filesImportedOrUpdated == 1)
+        #expect(summary.cardsCreated == 2)
+        try await db.queue.read { conn in
+            let material = try #require(try Material.filter(Column("courseId") == courseId).fetchOne(conn))
+            #expect(material.kind == .pptx)
+            #expect(material.extractionState == .ok)
         }
     }
 

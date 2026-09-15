@@ -15,6 +15,9 @@ struct HomeView: View {
     @Binding var selectedDeckId: String?
 
     @State private var decks: [AppStore.DeckSummary] = []
+    @State private var upcoming: [AppStore.UpcomingEvent] = []
+    @State private var streak = AppStore.StudyStreak(days: 0, studiedToday: false, reviewsToday: 0)
+    @AppStorage("dailyCardGoal") private var dailyGoal = 20
     @State private var studyingDeck: StudyTarget?
     @State private var editingCourse: Course?
     @State private var deletingCourse: Course?
@@ -104,6 +107,8 @@ struct HomeView: View {
                     header
                     statStrip
                         .padding(.top, 26)
+                    dailyGoalBar
+                        .padding(.top, 14)
                     if showsRail {
                         HStack(alignment: .top, spacing: 32) {
                             mainColumn
@@ -127,6 +132,10 @@ struct HomeView: View {
         .background(GRASPColor.canvas)
         .task { load() }
         .onChange(of: store.deckCounts.count) { load() }
+        // Calendar edits change no deck count, so the line above never
+        // fires for them -- without this, adding an exam leaves the alert
+        // strip stale until the next launch.
+        .onChange(of: store.revision) { load() }
         .sheet(item: $studyingDeck, onDismiss: load) { target in
             FlashcardStudyView(deckIds: [target.id], deckName: target.name)
         }
@@ -138,6 +147,8 @@ struct HomeView: View {
 
     private func load() {
         decks = (try? store.dashboardDecks()) ?? []
+        upcoming = (try? store.upcomingExams(within: 30, limit: 3)) ?? []
+        streak = store.studyStreak()
     }
 
     // MARK: - Header
@@ -202,7 +213,47 @@ struct HomeView: View {
             StatFigure(value: totalCards, label: "Cards", tint: nil)
             statDivider
             StatFigure(value: courseCount, label: "Courses", tint: nil)
+            statDivider
+            // Tinted only while it's alive: a grey 0 next to three amber
+            // figures reads as a scold, and a streak nobody has started
+            // yet isn't news.
+            StatFigure(
+                value: streak.days, label: streak.days == 1 ? "Day streak" : "Day streak",
+                tint: streak.days > 0 ? GRASPColor.success : nil
+            )
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Today's progress toward the daily goal, sitting directly under the
+    /// figures it qualifies. Hidden once the goal is met and nothing is
+    /// left due -- a finished day should feel finished, not carry a full
+    /// progress bar around all evening.
+    @ViewBuilder
+    private var dailyGoalBar: some View {
+        if dailyGoal > 0 && !(streak.reviewsToday >= dailyGoal && totalDue == 0) {
+            let progress = min(1, Double(streak.reviewsToday) / Double(dailyGoal))
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(streak.reviewsToday >= dailyGoal
+                         ? "Daily goal met -- \(streak.reviewsToday) cards reviewed"
+                         : "\(streak.reviewsToday) of \(dailyGoal) cards today")
+                        .graspType(.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(streak.reviewsToday >= dailyGoal
+                                         ? GRASPColor.success : GRASPColor.textSecondary)
+                    Spacer(minLength: 8)
+                    if !streak.studiedToday && streak.days > 0 {
+                        Text("Study today to keep your \(streak.days)-day streak")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.accent)
+                    }
+                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(streak.reviewsToday >= dailyGoal ? GRASPColor.success : GRASPColor.accent)
+                    .frame(maxWidth: 420)
+            }
         }
     }
 
@@ -219,12 +270,48 @@ struct HomeView: View {
 
     private var mainColumn: some View {
         VStack(alignment: .leading, spacing: 34) {
+            // Above "pick up where you left off" deliberately: a test in
+            // three days outranks whatever deck happened to be open last,
+            // and the strip disappears entirely when nothing is coming, so
+            // it costs the ordinary dashboard nothing.
+            if !upcoming.isEmpty {
+                upcomingExams
+            }
             if let jumpBackIn {
                 continueCard(jumpBackIn)
             }
             coursesShelf
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Upcoming exams
+
+    private var upcomingExams: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SectionLabel("Upcoming")
+                Spacer(minLength: 8)
+                Button("Open calendar") { selectedCourseId = ContentView.calendarRoute }
+                    .buttonStyle(.plain)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.accent)
+            }
+            VStack(spacing: 8) {
+                ForEach(upcoming) { item in
+                    ExamAlertRow(item: item) { study(item) }
+                }
+            }
+        }
+    }
+
+    /// Straight into the deck the exam is actually about -- its linked
+    /// deck when one is set, otherwise the course's "All Cards", which is
+    /// the honest answer when nobody has said which deck the test covers.
+    private func study(_ item: AppStore.UpcomingEvent) {
+        guard let courseId = item.event.courseId else { return }
+        selectedCourseId = courseId
+        selectedDeckId = item.event.deckId ?? DeckListView.allCardsId
     }
 
     private var rail: some View {
@@ -396,6 +483,76 @@ private struct StatFigure: View {
                 .foregroundStyle(GRASPColor.textTertiary)
         }
         .fixedSize()
+    }
+}
+
+/// One upcoming exam on the dashboard: what it is, which course, how long
+/// you have, and a way to start studying for it in one click. The tint
+/// escalates as the date closes in -- neutral a month out, amber inside a
+/// week, terracotta in the last three days -- so the strip reads as
+/// urgency at a glance rather than as four identical rows.
+private struct ExamAlertRow: View {
+    let item: AppStore.UpcomingEvent
+    let onStudy: () -> Void
+
+    private var daysAway: Int { item.daysAway(from: Date()) }
+
+    private var urgencyTint: Color {
+        if daysAway <= 3 { return GRASPColor.rejected }
+        if daysAway <= 7 { return GRASPColor.accent }
+        return GRASPColor.textSecondary
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.event.kind.icon)
+                .font(.system(size: 13))
+                .foregroundStyle(urgencyTint)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.event.title.isEmpty ? item.event.kind.label : item.event.title)
+                    .graspType(.rowTitle)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    if let courseName = item.courseName {
+                        Text(courseName)
+                        Text("·").foregroundStyle(GRASPColor.textTertiary)
+                    }
+                    Text(item.event.startsAt.formatted(date: .abbreviated, time: .omitted))
+                    if let timeText = item.event.timeText {
+                        Text("·").foregroundStyle(GRASPColor.textTertiary)
+                        Text(timeText)
+                    }
+                }
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textSecondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 10)
+
+            Text(item.event.countdownText())
+                .graspType(.meta)
+                .fontWeight(.semibold)
+                .foregroundStyle(urgencyTint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(urgencyTint.opacity(0.12), in: Capsule())
+
+            if item.event.courseId != nil {
+                Button("Study", action: onStudy)
+                    .buttonStyle(GRASPQuietButton())
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(urgencyTint.opacity(daysAway <= 7 ? 0.35 : 0.12), lineWidth: 1)
+        }
     }
 }
 

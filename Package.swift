@@ -5,7 +5,11 @@ let package = Package(
     name: "GRASP",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.29.0")
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.29.0"),
+        // .pptx is a zip of XML parts (slide text, speaker notes) -- this
+        // is the one reader for that shape; PDF/docx both ride Apple's own
+        // PDFKit/AppKit readers with no library needed.
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.19"),
     ],
     targets: [
         // Pure logic: ingest, store, and the study engine (FSRS scheduling,
@@ -15,7 +19,8 @@ let package = Package(
         .target(
             name: "GRASPCore",
             dependencies: [
-                .product(name: "GRDB", package: "GRDB.swift")
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
             path: "Sources/GRASPCore"
         ),
@@ -30,7 +35,10 @@ let package = Package(
         ),
         .testTarget(
             name: "GRASPCoreTests",
-            dependencies: ["GRASPCore"],
+            dependencies: [
+                "GRASPCore",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ],
             path: "Tests/GRASPCoreTests",
             resources: [.copy("Fixtures")]
         )

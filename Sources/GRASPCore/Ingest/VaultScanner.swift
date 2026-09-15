@@ -37,10 +37,9 @@ public struct ImportSummary: Sendable, Equatable {
 
 /// Walks `<vaultRoot>/College/<Semester>/<Course>/[Lecture Notes/]*`, maps
 /// folders to Semester/Course rows, filters asset sidecars and empty
-/// stubs, cleans and reflows real notes (markdown directly, PDF/docx/ipynb
-/// via their extractors), extracts deterministic term/definition pairs,
-/// and writes everything into the store. No pptx handling -- there are
-/// none under College/ in the vault this was built against.
+/// stubs, cleans and reflows real notes (markdown directly,
+/// PDF/docx/ipynb/pptx/image via their extractors), extracts deterministic
+/// term/definition pairs, and writes everything into the store.
 ///
 /// Re-running is idempotent: unchanged files (by content hash) are
 /// skipped, and a file whose hash matches an existing material under a
@@ -182,6 +181,7 @@ public actor VaultScanner {
 
     private static let importableKinds: [String: MaterialKind] = [
         "md": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
+        "pptx": .pptx, "png": .image, "jpg": .image, "jpeg": .image,
     ]
 
     private func importNote(
@@ -228,10 +228,10 @@ public actor VaultScanner {
         )
     }
 
-    /// PDF/docx/ipynb: no frontmatter to read, so semester resolution
-    /// falls back to the folder name alone, and there is no asset-sidecar
-    /// or empty-stub concept -- an extraction failure or empty result is
-    /// its own distinct state instead.
+    /// PDF/docx/ipynb/pptx/image: no frontmatter to read, so semester
+    /// resolution falls back to the folder name alone, and there is no
+    /// asset-sidecar or empty-stub concept -- an extraction failure or
+    /// empty result is its own distinct state instead.
     private func importBinaryMaterial(
         _ fileURL: URL, kind: MaterialKind, courseName: String, courseFolderPath: String,
         fallbackSemesterFolderName: String, resolvedCourseId: inout String?,
@@ -457,7 +457,9 @@ public actor VaultScanner {
         case .pdf: extracted = PDFExtractor.extractText(from: fileURL)
         case .docx: extracted = DocxExtractor.extractText(from: fileURL)
         case .ipynb: extracted = IpynbExtractor.extractText(from: fileURL)
-        case .markdown, .image, .pptx: extracted = nil
+        case .image: extracted = ImageExtractor.extractText(from: fileURL)
+        case .pptx: extracted = PptxExtractor.extractText(from: fileURL)
+        case .markdown: extracted = nil // never reached: markdown routes through importNote instead
         }
 
         guard let extracted else {

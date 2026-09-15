@@ -5,19 +5,22 @@
 A native macOS study app that turns your own class notes into flashcards,
 adaptive practice, and tests — instead of retyping everything into Quizlet
 by hand. Point it at a folder of lecture notes (Markdown, PDF, docx,
-Jupyter notebooks) and it organizes them into courses and decks
-automatically, then drills them with the study modes that actually work.
+PowerPoint, Jupyter notebooks, scanned images) and it organizes them into
+courses and decks automatically, then drills them with the study modes
+that actually work.
 
 > **Status: in development.** Built against one real Obsidian vault so
-> far; the core is solid (142 automated tests, most run against real
+> far; the core is solid (162 automated tests, most run against real
 > imported content) but it hasn't been used by anyone but its author yet.
 
 ## What it does today
 
-- **Imports** Markdown, PDF, docx, and `.ipynb` notes, organizing them into
-  courses and decks automatically from folder structure and filenames —
-  or add a course by hand and drop in one-off files/folders (a homework
-  PDF, a scanned handout) that never lived in the vault at all
+- **Imports** Markdown, PDF, docx, PowerPoint (`.pptx`, slide text plus
+  speaker notes), `.ipynb`, and PNG/JPEG images (via on-device OCR),
+  organizing them into courses and decks automatically from folder
+  structure and filenames — or add a course by hand and drop in one-off
+  files/folders (a homework PDF, a scanned handout) that never lived in
+  the vault at all
 - **Deterministic flashcard generation** from lecture-style notes (term +
   definition pairs), with a review queue so nothing reaches study
   unapproved
@@ -67,7 +70,9 @@ automatically, then drills them with the study modes that actually work.
 
 Swift 6 / SwiftUI, SwiftPM (no Xcode project), [GRDB.swift](https://github.com/groue/GRDB.swift)
 over SQLite, PDFKit for PDF text extraction, `NSAttributedString`'s Office
-Open XML reader for docx.
+Open XML reader for docx, Vision for on-device image OCR, and
+[ZIPFoundation](https://github.com/weichsel/ZIPFoundation) to read pptx's
+slide XML.
 
 ## Building
 

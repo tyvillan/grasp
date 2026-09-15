@@ -118,6 +118,71 @@ struct CardGeneratorTests {
         #expect(!prompt.contains("Focus especially on"))
     }
 
+    @Test("NoGenerator proposes no test questions")
+    func noGeneratorGeneratesNoTestQuestions() async {
+        let candidates = [CandidatePair(front: "Permeability", back: "Ability to transmit fluids", sourceLine: 1)]
+        let result = await NoGenerator().generateTestQuestions(existing: candidates, noteContext: "context", maxCount: 3)
+        #expect(result.isEmpty)
+    }
+
+    @Test("Ollama's generateTestQuestions falls back to an empty array when the server is unreachable")
+    func ollamaGenerateTestQuestionsFallsBackWithoutServer() async {
+        let candidates = [CandidatePair(front: "Porosity", back: "Percentage of open space", sourceLine: 1)]
+        let result = await OllamaGenerator().generateTestQuestions(
+            existing: candidates, noteContext: "Some geology notes.", maxCount: 3
+        )
+        #expect(result.isEmpty)
+    }
+
+    @Test("Ollama's generateTestQuestions prompt stays grounded and caps the count")
+    func ollamaGenerateTestQuestionsPromptShape() {
+        let existing = [CandidatePair(front: "Porosity", back: "Open space fraction", sourceLine: 1)]
+        let prompt = OllamaGenerator.generateTestQuestionsPrompt(existing: existing, noteContext: "context", maxCount: 2)
+        #expect(prompt.contains("at most 2"))
+        #expect(prompt.contains("Do not add outside knowledge"))
+        #expect(prompt.contains("Porosity: Open space fraction"))
+        #expect(prompt.contains("prompt\": \"...\", \"answer\": \"...\""))
+        #expect(prompt.contains("Return [] if there is nothing worth asking"))
+    }
+
+    @Test("Ollama's generateTestQuestions prompt notes when no cards exist yet for this note")
+    func ollamaGenerateTestQuestionsPromptEmptyExisting() {
+        let prompt = OllamaGenerator.generateTestQuestionsPrompt(existing: [], noteContext: "context", maxCount: 3)
+        #expect(prompt.contains("(none yet)"))
+    }
+
+    @Test("NoGenerator always calls a definition valid")
+    func noGeneratorAlwaysValid() async {
+        let result = await NoGenerator().validateContext(
+            front: "Abstraction", back: "Submit your answer as a PDF by Friday.",
+            noteContext: "Abstraction hides implementation details.", courseName: "Intro to Software Design"
+        )
+        #expect(result.verdict == .valid)
+    }
+
+    @Test("Ollama's validateContext falls back to valid when the server is unreachable")
+    func ollamaValidateContextFallsBackWithoutServer() async {
+        let result = await OllamaGenerator().validateContext(
+            front: "Abstraction", back: "Submit your answer as a PDF by Friday.",
+            noteContext: "Abstraction hides implementation details.", courseName: "Intro to Software Design"
+        )
+        #expect(result.verdict == .valid)
+    }
+
+    @Test("Ollama's validateContext prompt names the course and asks for a brand-new definition, not a summary")
+    func ollamaValidateContextPromptShape() {
+        let prompt = OllamaGenerator.validateContextPrompt(
+            front: "Abstraction", back: "See rubric on page 3.",
+            noteContext: "Abstraction hides implementation details behind a simple interface.",
+            courseName: "Intro to Software Design"
+        )
+        #expect(prompt.contains("Intro to Software Design"))
+        #expect(prompt.contains("See rubric on page 3."))
+        #expect(prompt.contains("Do NOT summarize, paraphrase, or shorten"))
+        #expect(prompt.contains("\"verdict\": \"reject\""))
+        #expect(prompt.contains("Judge the TERM itself, not the quality of its extracted definition"))
+    }
+
     @Test("Foundation Models availability check completes without throwing, regardless of Apple Intelligence state")
     func foundationModelsAvailabilityIsSafeToCheck() async {
         if #available(macOS 26.0, *) {

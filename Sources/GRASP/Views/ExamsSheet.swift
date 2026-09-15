@@ -1,74 +1,111 @@
 import SwiftUI
 import GRASPCore
 
-/// Exam dates for one course. Setting one here is what turns on FSRS's
-/// exam biasing (`AppStore.gradeCard`/`dueCards`) for every deck in this
-/// course -- capping intervals to land before the date, and reordering
-/// the due queue by weakest retention first in the final week.
+/// Dates for one course, reachable from that course's own toolbar -- the
+/// quick "when is the midterm again?" view, as opposed to the full
+/// `CalendarView` that shows every course at once. Setting an exam or quiz
+/// here is what turns on FSRS's exam biasing (`AppStore.gradeCard`/
+/// `dueCards`) for every deck in this course: capping intervals to land
+/// before the date, and reordering the due queue by weakest retention
+/// first in the final week. Deadlines and study blocks sit alongside them
+/// without touching scheduling.
 struct ExamsSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let courseId: String
 
-    @State private var exams: [Exam] = []
-    @State private var newName = "Exam"
-    @State private var newDate = Date().addingTimeInterval(14 * 86400)
+    @State private var events: [CalendarEvent] = []
+    @State private var editing: CalendarEvent?
+    @State private var creating: CalendarEvent?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Exams").font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 24))
+                    .foregroundStyle(GRASPColor.accent)
+                Text("Dates for This Course")
+                    .font(.system(size: 18, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(GRASPColor.textPrimary)
+            }
 
-            if exams.isEmpty {
-                Text("No exam dates set for this course yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            if events.isEmpty {
+                Text("No exams, deadlines, or study blocks set for this course yet.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                List {
-                    ForEach(exams) { exam in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(exam.name)
-                                Text(exam.examDate.formatted(date: .abbreviated, time: .omitted))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(role: .destructive) {
-                                try? store.deleteExam(exam.id)
-                                load()
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.plain)
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(events) { event in
+                            row(event)
                         }
                     }
                 }
-                .frame(height: min(CGFloat(exams.count) * 44, 180))
+                .frame(maxHeight: 260)
             }
 
-            Divider()
-
             HStack {
-                TextField("Name", text: $newName)
-                DatePicker("", selection: $newDate, displayedComponents: .date)
-                    .labelsHidden()
-                Button("Add") {
-                    try? store.addExam(courseId: courseId, name: newName, date: newDate)
-                    load()
+                Button {
+                    creating = CalendarEvent(
+                        courseId: courseId, title: "",
+                        startsAt: Calendar.current.startOfDay(for: Date().addingTimeInterval(14 * 86400))
+                    )
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus").font(.system(size: 11))
+                        Text("Add Date")
+                    }
                 }
-            }
-
-            HStack {
+                .buttonStyle(GRASPQuietButton())
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { dismiss() }
+                    .buttonStyle(GRASPProminentButton())
+                    .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .padding(24)
+        .frame(width: 440)
+        .background(GRASPColor.canvas)
         .task { load() }
+        .onChange(of: store.revision) { load() }
+        .sheet(item: $editing) { event in
+            CalendarEventEditSheet(event: event, isNew: false)
+        }
+        .sheet(item: $creating) { event in
+            CalendarEventEditSheet(event: event, isNew: true)
+        }
+    }
+
+    private func row(_ event: CalendarEvent) -> some View {
+        Button { editing = event } label: {
+            HStack(spacing: 10) {
+                Image(systemName: event.kind.icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(event.kind.tint)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(event.title.isEmpty ? event.kind.label : event.title)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    Text(event.startsAt.formatted(date: .abbreviated, time: .omitted))
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                }
+                Spacer(minLength: 8)
+                Text(event.countdownText())
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func load() {
-        exams = (try? store.exams(forCourse: courseId)) ?? []
+        events = (try? store.calendarEvents(forCourse: courseId)) ?? []
     }
 }

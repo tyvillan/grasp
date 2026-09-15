@@ -7,6 +7,11 @@ import SwiftUI
 /// of this weight actually uses.
 struct GRASPProminentButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    /// Defaults to the app's own accent, same as always -- pass `.success`
+    /// (or any other tint) for a same-shape button that needs to read as a
+    /// different verdict, e.g. a green "correct" action sitting beside a
+    /// normal accent-colored one.
+    var tint: Color = GRASPColor.accent
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -17,7 +22,7 @@ struct GRASPProminentButton: ButtonStyle {
             .frame(height: 28)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isEnabled ? GRASPColor.accent : GRASPColor.surface)
+                    .fill(isEnabled ? tint : GRASPColor.surface)
             )
             .overlay(
                 // A one-pixel light edge along the top only: the way a

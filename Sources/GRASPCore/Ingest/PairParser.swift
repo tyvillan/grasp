@@ -118,9 +118,50 @@ public enum PairParser {
             guard !isLinksOnly(pair.back) else { return nil }
             let front = stripMarkdown(pair.front)
             let back = stripMarkdown(pair.back)
-            guard isUsableTerm(front), isSelfContained(back) else { return nil }
+            guard isUsableTerm(front), isSelfContained(back), !isAssignmentMetaText(back) else { return nil }
             return CandidatePair(front: front, back: back, sourceLine: pair.sourceLine)
         }
+    }
+
+    /// Course logistics, not a definition -- "Submit your answer as a PDF
+    /// by Friday", "See rubric on page 3", "Late submissions lose 10% per
+    /// day". These match the structural shapes above (a bold term line, a
+    /// "Term: text" line) often enough in an assignment sheet or syllabus
+    /// excerpt to slip past every other filter here, since nothing about
+    /// their *shape* looks wrong -- only their content does.
+    ///
+    /// Deliberately biased toward multi-word phrases and sentence
+    /// structure (an imperative opener, a page/point reference) over bare
+    /// single-word keywords: a rejection here happens silently at parse
+    /// time with no second look (unlike the AI-assisted context check,
+    /// which runs later against the note's own text and can still recover
+    /// a card that reaches it), so a single generic word is too blunt --
+    /// "grade", "extension", and "PDF" are all also perfectly ordinary
+    /// vocabulary a real course could define ("PDF: a portable document
+    /// format...", "Extension: a browser add-on...", "Grade: a
+    /// measurement of a slope's steepness..."). Kept narrow on purpose.
+    private static let assignmentMetaPhrases: [String] = [
+        "see the rubric", "see rubric", "grading rubric", "the rubric",
+        "see the syllabus", "see syllabus", "the syllabus",
+        "academic integrity", "plagiarism policy", "late penalty", "late penalties",
+        "extra credit", "office hours", "due date", "due by",
+        "gradescope", "moodle",
+    ]
+    private static let pageOrPointsRegex = try! NSRegularExpression(
+        pattern: #"\b(?:page|pg\.?|pp\.?)\s*\d+\b|\b\d+\s*(?:points?|pts\.?)\b"#,
+        options: [.caseInsensitive]
+    )
+    private static let assignmentMetaLeadRegex = try! NSRegularExpression(
+        pattern: #"^(?:submit|resubmit|turn in|upload|hand in|see the|refer to the)\b"#,
+        options: [.caseInsensitive]
+    )
+
+    private static func isAssignmentMetaText(_ back: String) -> Bool {
+        let range = NSRange(back.startIndex..., in: back)
+        if assignmentMetaLeadRegex.firstMatch(in: back, range: range) != nil { return true }
+        if pageOrPointsRegex.firstMatch(in: back, range: range) != nil { return true }
+        let normalized = AnswerGrading.normalize(back)
+        return assignmentMetaPhrases.contains { normalized.contains($0) }
     }
 
     /// A bold term and its definition on one line. The definition must

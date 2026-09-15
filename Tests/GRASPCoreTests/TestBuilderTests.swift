@@ -47,4 +47,25 @@ struct TestBuilderTests {
             #expect(choices.contains(question.correctAnswer))
         }
     }
+
+    @Test("a card-less AI question merges with card-built questions and survives a shuffle")
+    func aiQuestionSurvivesMergeAndShuffle() {
+        var rng = SystemRandomNumberGenerator()
+        let config = TestBuilder.Config(questionCount: 5)
+        let cardQuestions = TestBuilder.build(from: Self.cards(count: 10), config: config, using: &rng)
+        let aiQuestion = LearnEngine.RoundQuestion(
+            cardId: nil, prompt: "AI-authored question", correctAnswer: "AI-authored answer", type: .written
+        )
+        var merged = cardQuestions + [aiQuestion]
+        merged.shuffle(using: &rng)
+
+        #expect(merged.count == cardQuestions.count + 1)
+        let survived = try! #require(merged.first { $0.cardId == nil })
+        #expect(survived.prompt == "AI-authored question")
+        #expect(survived.correctAnswer == "AI-authored answer")
+        #expect(survived.type == .written)
+        // Every card-backed question still has a unique, stable id distinct
+        // from the AI question's freshly-synthesized one.
+        #expect(Set(merged.map(\.id)).count == merged.count)
+    }
 }

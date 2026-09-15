@@ -212,6 +212,73 @@ enum Schema {
             }
         }
 
+        // Distinguishes an ephemeral, AI-generated test-only question
+        // (cardId always nil by design) from a real card-backed testItem
+        // whose card was later deleted (cardId set to nil by the existing
+        // `onDelete: .setNull` FK) -- both look identical by cardId alone.
+        migrator.registerMigration("v3_test_item_ai_generated") { db in
+            try db.alter(table: "testItem") { t in
+                t.add(column: "isAIGenerated", .boolean).notNull().defaults(to: false)
+            }
+        }
+
+        // Backs the context-validation pipeline: `originalBack` preserves
+        // the pre-refinement text so the review UI can show a diff and
+        // offer a revert, `isContextRefined` flags which cards have one.
+        migrator.registerMigration("v4_card_context_refinement") { db in
+            try db.alter(table: "card") { t in
+                t.add(column: "originalBack", .text)
+                t.add(column: "isContextRefined", .boolean).notNull().defaults(to: false)
+            }
+        }
+
+        // Widens the old exams-only table into the calendar's one table of
+        // dated things (exams, quizzes, deadlines, study blocks). Built as
+        // create-copy-drop rather than a rename plus `ALTER`s because two
+        // of the changes SQLite can't do in place: `courseId` has to lose
+        // its NOT NULL (a personal study block belongs to no course), and
+        // the new `deckId` needs a real foreign key. Every existing exam
+        // row carries over as `kind = 'exam'`, keeping whatever exam dates
+        // are already set -- and the FSRS biasing they drive -- intact.
+        migrator.registerMigration("v5_calendar_event") { db in
+            try db.create(table: "calendarEvent") { t in
+                t.column("id", .text).primaryKey()
+                t.column("courseId", .text).references("course", onDelete: .cascade)
+                t.column("deckId", .text).references("deck", onDelete: .setNull)
+                t.column("kind", .text).notNull().defaults(to: "exam")
+                t.column("title", .text).notNull()
+                t.column("startsAt", .datetime).notNull()
+                t.column("endsAt", .datetime)
+                t.column("isAllDay", .boolean).notNull().defaults(to: true)
+                t.column("sourceEventId", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.execute(sql: """
+                INSERT INTO calendarEvent
+                    (id, courseId, deckId, kind, title, startsAt, endsAt, isAllDay,
+                     sourceEventId, createdAt, updatedAt)
+                SELECT id, courseId, NULL, 'exam', name, examDate, NULL, 1,
+                       NULL, examDate, examDate
+                FROM exam
+                """)
+            try db.drop(table: "exam")
+            // Every calendar read is a date-range scan (a month grid, the
+            // agenda's next N, Home's upcoming alerts), never a lookup by id.
+            try db.create(index: "calendarEvent_on_startsAt", on: "calendarEvent", columns: ["startsAt"])
+        }
+
+        // Links a generated study block back to the exam it was planned
+        // for. Without it, regenerating a plan (or deleting the exam)
+        // would leave the old blocks stranded on the calendar with no way
+        // to tell them apart from ones added by hand -- which must never
+        // be swept up by a regenerate.
+        migrator.registerMigration("v6_calendar_event_parent") { db in
+            try db.alter(table: "calendarEvent") { t in
+                t.add(column: "parentEventId", .text)
+            }
+        }
+
         return migrator
     }
 }

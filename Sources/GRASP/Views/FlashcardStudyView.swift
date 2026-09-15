@@ -25,9 +25,20 @@ struct FlashcardStudyView: View {
     @State private var editingCard: Card?
     @FocusState private var isFocused: Bool
 
+    @AppStorage("focusWorkMinutes") private var workMinutes = 25
+    @AppStorage("focusBreakMinutes") private var breakMinutes = 5
+    @AppStorage("focusCardTarget") private var cardTarget = 20
+    @State private var focusTimer = FocusTimerModel(workMinutes: 25, breakMinutes: 5, cardTarget: 20)
+
     var body: some View {
         VStack(spacing: 0) {
             header
+            // Below the header rather than above it: the deck and the
+            // queue's progress are what the session is, the timer is a
+            // tool running alongside it.
+            if !queue.isEmpty && index < queue.count {
+                FocusTimerBar(model: focusTimer)
+            }
             if queue.isEmpty {
                 ContentUnavailableView(
                     "Nothing due", systemImage: "checkmark.circle",
@@ -47,11 +58,22 @@ struct FlashcardStudyView: View {
         .task {
             queue = (try? store.dueCards(inDecks: deckIds)) ?? []
             isFocused = true
+            focusTimer.workMinutes = workMinutes
+            focusTimer.breakMinutes = breakMinutes
+            focusTimer.cardTarget = cardTarget
         }
         .focusable()
         .focusEffectDisabled()
         .focused($isFocused)
         .onKeyPress { handleKeyPress($0) }
+        // The timer bar disappears once the queue is finished (it's
+        // gated on `index < queue.count` above), but the model itself
+        // keeps running unless told to stop -- without this, a work or
+        // break interval can still elapse behind the completion screen,
+        // beeping with no bar left to acknowledge it from.
+        .onChange(of: index) {
+            if index >= queue.count { focusTimer.pause() }
+        }
         .sheet(item: $editingCard) { card in
             CardQuickEditSheet(card: card) { updated in
                 try? store.updateCard(updated)
@@ -277,6 +299,7 @@ struct FlashcardStudyView: View {
         guard index < queue.count else { return }
         try? store.markCard(queue[index].id, understood: understood, source: "flashcards")
         if understood { understoodCount += 1 } else { reviewCount += 1 }
+        focusTimer.countCard()
         index += 1
         isFlipped = false
     }

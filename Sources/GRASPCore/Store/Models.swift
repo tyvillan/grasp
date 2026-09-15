@@ -175,6 +175,18 @@ public struct Card: Codable, FetchableRecord, PersistableRecord, Identifiable, S
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
+    /// The back text as originally extracted, kept only when the AI
+    /// context-validation pipeline has since rewritten `back` -- lets the
+    /// review UI show "what changed" and offer a one-click revert. `nil`
+    /// for every card whose definition has never been machine-refined,
+    /// which is most of them.
+    public var originalBack: String?
+    /// True once `originalBack` holds a real pre-refinement value.
+    /// Distinct from `origin` on purpose (same reasoning as `CardOrigin`
+    /// vs. approval `status`): a card's origin says how it was first
+    /// created, this says whether its *definition* was later corrected --
+    /// a manually-typed or vault-parsed card can still get refined.
+    public var isContextRefined: Bool
 
     public init(id: String = UUID().uuidString, materialId: String?, front: String, back: String,
                 hasMath: Bool = false, imagePath: String? = nil, sourceLine: Int? = nil,
@@ -182,14 +194,14 @@ public struct Card: Codable, FetchableRecord, PersistableRecord, Identifiable, S
                 stability: Double = 0, difficulty: Double = 0, elapsedDays: Double = 0,
                 scheduledDays: Double = 0, reps: Int = 0, lapses: Int = 0, schedulerState: Int = 0,
                 lastReview: Date? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
-                deletedAt: Date? = nil) {
+                deletedAt: Date? = nil, originalBack: String? = nil, isContextRefined: Bool = false) {
         self.id = id; self.materialId = materialId; self.front = front; self.back = back
         self.hasMath = hasMath; self.imagePath = imagePath; self.sourceLine = sourceLine
         self.origin = origin; self.status = status; self.due = due; self.stability = stability
         self.difficulty = difficulty; self.elapsedDays = elapsedDays; self.scheduledDays = scheduledDays
         self.reps = reps; self.lapses = lapses; self.schedulerState = schedulerState
         self.lastReview = lastReview; self.createdAt = createdAt; self.updatedAt = updatedAt
-        self.deletedAt = deletedAt
+        self.deletedAt = deletedAt; self.originalBack = originalBack; self.isContextRefined = isContextRefined
     }
 }
 
@@ -280,29 +292,114 @@ public struct TestItem: Codable, FetchableRecord, PersistableRecord, Identifiabl
     public var correctAnswer: String?
     public var givenAnswer: String?
     public var isCorrect: Bool?
+    /// True for an ephemeral, AI-generated, test-only question (`cardId`
+    /// is always nil for these by design). Kept distinct from a real
+    /// card-backed item whose `cardId` went nil because its `Card` was
+    /// later deleted -- `cardId == nil` alone can't tell those apart.
+    public var isAIGenerated: Bool
 
     public init(id: String = UUID().uuidString, attemptId: String, cardId: String?, ordinal: Int,
                 questionType: String, promptText: String, choicesJSON: String? = nil,
-                correctAnswer: String? = nil, givenAnswer: String? = nil, isCorrect: Bool? = nil) {
+                correctAnswer: String? = nil, givenAnswer: String? = nil, isCorrect: Bool? = nil,
+                isAIGenerated: Bool = false) {
         self.id = id; self.attemptId = attemptId; self.cardId = cardId; self.ordinal = ordinal
         self.questionType = questionType; self.promptText = promptText; self.choicesJSON = choicesJSON
         self.correctAnswer = correctAnswer; self.givenAnswer = givenAnswer; self.isCorrect = isCorrect
+        self.isAIGenerated = isAIGenerated
     }
 }
 
-/// Drives FSRS interval capping and due-queue reordering as the date
-/// approaches -- the one scheduling feature a plain SRS implementation
-/// lacks: "study for retention" and "study for a specific exam on a
-/// specific date" are different problems.
-public struct Exam: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
-    public static let databaseTableName = "exam"
-    public var id: String
-    public var courseId: String
-    public var name: String
-    public var examDate: Date
+/// What kind of thing a `CalendarEvent` is. Only `.exam` and `.quiz` drive
+/// FSRS's exam biasing (see `ExamBias` and `AppStore.nearestUpcomingExam`):
+/// a deadline is someone else's date, and a study block is a plan you made
+/// -- neither is a reason to cram every card in the course before it.
+public enum CalendarEventKind: String, Codable, CaseIterable, Sendable {
+    case exam, quiz, deadline, study
 
-    public init(id: String = UUID().uuidString, courseId: String, name: String, examDate: Date) {
-        self.id = id; self.courseId = courseId; self.name = name; self.examDate = examDate
+    /// The kinds a course's card scheduling should actually bend around.
+    public static let examLike: [CalendarEventKind] = [.exam, .quiz]
+
+    public var label: String {
+        switch self {
+        case .exam: return "Exam"
+        case .quiz: return "Quiz"
+        case .deadline: return "Deadline"
+        case .study: return "Study Block"
+        }
+    }
+}
+
+/// Anything scheduled on the study calendar. Exams among them drive FSRS
+/// interval capping and due-queue reordering as the date approaches -- the
+/// one scheduling feature a plain SRS implementation lacks: "study for
+/// retention" and "study for a specific exam on a specific date" are
+/// different problems.
+///
+/// This replaced a narrower `Exam` record (see the `v5_calendar_event`
+/// migration): the calendar needs one table it can render, edit and sync
+/// in a single pass, not an exams table plus a parallel one per new kind
+/// of dated thing.
+public struct CalendarEvent: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
+    public static let databaseTableName = "calendarEvent"
+    public var id: String
+    /// nil for a personal event tied to no course in particular.
+    public var courseId: String?
+    /// The deck to actually study for this, when one is known -- what the
+    /// "Study" button on a Home exam alert launches.
+    public var deckId: String?
+    public var kind: CalendarEventKind
+    public var title: String
+    public var startsAt: Date
+    /// Set only for an event that occupies a span (a study block); nil for
+    /// an all-day or point-in-time event.
+    public var endsAt: Date?
+    public var isAllDay: Bool
+    /// The EventKit identifier this was imported from, so re-syncing the
+    /// system calendar updates this row instead of adding a second copy of
+    /// the same event. nil for anything created by hand inside GRASP.
+    public var sourceEventId: String?
+    /// The exam a generated study block was planned for. Set only by
+    /// `StudyPlanner`-generated blocks, which is exactly what makes
+    /// regenerating a plan able to clear its own old blocks without
+    /// touching anything added by hand.
+    public var parentEventId: String?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(id: String = UUID().uuidString, courseId: String? = nil, deckId: String? = nil,
+                kind: CalendarEventKind = .exam, title: String, startsAt: Date,
+                endsAt: Date? = nil, isAllDay: Bool = true, sourceEventId: String? = nil,
+                parentEventId: String? = nil,
+                createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id; self.courseId = courseId; self.deckId = deckId
+        self.kind = kind; self.title = title
+        self.startsAt = startsAt; self.endsAt = endsAt; self.isAllDay = isAllDay
+        self.sourceEventId = sourceEventId; self.parentEventId = parentEventId
+        self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+
+    /// Whole calendar days from `now` until this event: 0 today, 1
+    /// tomorrow, negative once it's past. Counted by calendar day rather
+    /// than 24-hour spans on purpose -- an exam at 9am tomorrow is "in 1
+    /// day", not "in 0 days" because it happens to be 20 hours out.
+    public func daysAway(from now: Date, calendar: Calendar = .current) -> Int {
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.startOfDay(for: startsAt)
+        return calendar.dateComponents([.day], from: today, to: day).day ?? 0
+    }
+
+    /// "Today" / "Tomorrow" / "in 4 days" / "3 days ago" -- the one
+    /// phrasing every countdown in the app uses, so a Home alert and the
+    /// same event in the agenda never word it two different ways.
+    public func countdownText(from now: Date = Date(), calendar: Calendar = .current) -> String {
+        let days = daysAway(from: now, calendar: calendar)
+        switch days {
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case -1: return "Yesterday"
+        case let future where future > 1: return "in \(future) days"
+        default: return "\(-days) days ago"
+        }
     }
 }
 

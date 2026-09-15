@@ -12,6 +12,10 @@ struct ContentView: View {
     /// single-selection binding with real course ids instead of a second
     /// piece of state that could disagree with it.
     static let homeRoute = "home"
+    /// The calendar destination, a second sentinel alongside `homeRoute` --
+    /// same trick, same single selection binding, so adding a whole new
+    /// top-level screen costs no extra navigation state.
+    static let calendarRoute = "calendar"
 
     @Environment(AppStore.self) private var store
     @State private var selectedCourseId: String? = ContentView.homeRoute
@@ -29,15 +33,28 @@ struct ContentView: View {
     // state that should reset the moment the app relaunches.
     @AppStorage("deckListCollapsed") private var isDeckListCollapsed = false
 
-    // Course-level actions (New Deck, Add Files, Exams) live here rather
-    // than inside DeckListView: a zero-deck course renders no DeckListView
-    // at all (see `CourseEmptyStateView` below), so anything that must
-    // still work on an empty course -- adding its first deck or its first
-    // file -- can't be owned by a view that isn't mounted. This also fixes
-    // a second bug the same root cause created: collapsing the deck-list
-    // pane used to make these three toolbar buttons vanish along with it.
+    // Exams stays a toolbar-level action rather than living inside
+    // DeckListView: a zero-deck course renders no DeckListView at all (see
+    // `CourseEmptyStateView` below), so anything that must still work on
+    // an empty course can't be owned by a view that isn't mounted. New
+    // Deck and Add Files used to live here for the same reason, but
+    // `CourseEmptyStateView` already carries its own copies of both for
+    // the zero-deck case, so the real ones could move next to what they
+    // actually act on -- New Deck into `DeckListView`'s header, Add Files
+    // into `DeckDetailView`'s -- instead of sitting side by side up here
+    // looking like near-twins with different jobs.
     @State private var showingExams = false
     @State private var showingNewDeck = false
+
+    /// The selection when it's a real course, not one of the sentinel
+    /// routes -- every course-scoped branch and toolbar button keys off
+    /// this rather than re-listing which sentinels to exclude, which is
+    /// how the Exams button ended up trying to open for "Home" the first
+    /// time a second sentinel was added.
+    private var activeCourseId: String? {
+        guard let id = selectedCourseId, id != Self.homeRoute, id != Self.calendarRoute else { return nil }
+        return id
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -47,7 +64,9 @@ struct ContentView: View {
             Group {
                 if selectedCourseId == Self.homeRoute || selectedCourseId == nil {
                     HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
-                } else if let courseId = selectedCourseId, store.hasDecks(inCourse: courseId) {
+                } else if selectedCourseId == Self.calendarRoute {
+                    CalendarView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
+                } else if let courseId = activeCourseId, store.hasDecks(inCourse: courseId) {
                     // Three tiers of ground, narrowest to widest: the
                     // vibrant sidebar, then the deck list on a lifted
                     // surface, then the card canvas on the app's darkest
@@ -56,10 +75,13 @@ struct ContentView: View {
                     // treating all three as equal columns.
                     HStack(spacing: 0) {
                         if !isDeckListCollapsed {
-                            DeckListView(courseId: courseId, selectedDeckId: $selectedDeckId)
-                                .frame(width: 260)
-                                .background(GRASPColor.surface)
-                                .transition(.move(edge: .leading))
+                            DeckListView(
+                                courseId: courseId, selectedDeckId: $selectedDeckId,
+                                onNewDeck: { showingNewDeck = true }
+                            )
+                            .frame(width: 260)
+                            .background(GRASPColor.surface)
+                            .transition(.move(edge: .leading))
                             Rectangle()
                                 .fill(GRASPColor.hairlineStrong)
                                 .frame(width: 1)
@@ -67,13 +89,14 @@ struct ContentView: View {
                         if let deckId = selectedDeckId {
                             DeckDetailView(
                                 scope: deckId == DeckListView.allCardsId
-                                    ? .course(courseId) : .deck(deckId)
+                                    ? .course(courseId) : .deck(deckId),
+                                onAddFiles: { chooseAndImport(for: courseId) }
                             )
                         } else {
                             ContentUnavailableView("Select a deck", systemImage: "rectangle.stack")
                         }
                     }
-                } else if let courseId = selectedCourseId {
+                } else if let courseId = activeCourseId {
                     // A course with no decks at all: one clean empty state
                     // spanning the full width, not a narrow "No decks yet"
                     // column sitting next to a second, redundant "Select a
@@ -95,7 +118,7 @@ struct ContentView: View {
             // this is the more faithful match to "the same behavior as the
             // main sidebar toggle", not a deviation from it.
             ToolbarItem(placement: .navigation) {
-                if selectedCourseId != nil, selectedCourseId != Self.homeRoute {
+                if activeCourseId != nil {
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) { isDeckListCollapsed.toggle() }
                     } label: {
@@ -104,28 +127,7 @@ struct ContentView: View {
                     .help(isDeckListCollapsed ? "Show deck list" : "Hide deck list")
                 }
             }
-            if let courseId = selectedCourseId, courseId != Self.homeRoute {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingNewDeck = true
-                    } label: {
-                        Label("New Deck", systemImage: "plus.rectangle.on.folder")
-                    }
-                    .help("Create a custom module/unit in this course")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        chooseAndImport(for: courseId)
-                    } label: {
-                        if store.isImporting {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Add Files", systemImage: "doc.badge.plus")
-                        }
-                    }
-                    .disabled(store.isImporting)
-                    .help("Add specific files or a whole folder to this course, from anywhere on disk")
-                }
+            if activeCourseId != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showingExams = true
@@ -172,25 +174,32 @@ struct ContentView: View {
             UploadToCourseSheet(selection: $uploadTargetCourseId)
         }
         .sheet(isPresented: $showingExams) {
-            if let courseId = selectedCourseId {
+            if let courseId = activeCourseId {
                 ExamsSheet(courseId: courseId)
             }
         }
         .sheet(isPresented: $showingNewDeck) {
-            if let courseId = selectedCourseId {
+            if let courseId = activeCourseId {
                 DeckCreateSheet(courseId: courseId) { newDeckId in
                     selectedDeckId = newDeckId
                 }
             }
         }
-        .alert(
-            importResult?.title ?? "Import complete",
-            isPresented: Binding(get: { importResult != nil }, set: { if !$0 { importResult = nil } }),
-            presenting: importResult
-        ) { _ in
-            Button("OK") {}
-        } message: { result in
-            Text(result.body)
+        // Continuous duplicate detection: every import/rescan re-scans the
+        // whole vault (`AppStore.scanForDuplicatesAfterImport`), and this
+        // surfaces the result the moment it finds something, root-level so
+        // it works no matter which course was open when the import ran.
+        .sheet(isPresented: Binding(
+            get: { !store.pendingDuplicateGroups.isEmpty },
+            set: { if !$0 { store.clearPendingDuplicates() } }
+        )) {
+            DuplicateReviewSheet(groups: store.pendingDuplicateGroups) { merges in
+                try? store.mergeDuplicates(merges)
+                store.clearPendingDuplicates()
+            }
+        }
+        .sheet(item: $importResult) { result in
+            ResultSheet(icon: "tray.and.arrow.down", title: result.title, leadText: result.body)
         }
         // Home's two "jump to a specific deck" tap handlers set both ids
         // together (see HomeView's continue-card and recents-row taps) --
@@ -199,8 +208,8 @@ struct ContentView: View {
         // own course-tile tap, which sets only the course id) needs the
         // stale deck cleared: without this, the detail pane can keep
         // showing a deck that belongs to the course you just left.
-        .onChange(of: selectedCourseId) { _, newValue in
-            guard let courseId = newValue, courseId != Self.homeRoute else { return }
+        .onChange(of: selectedCourseId) { _, _ in
+            guard let courseId = activeCourseId else { return }
             if let deckId = selectedDeckId,
                let deck = (try? store.deck(deckId)) ?? nil,
                deck.courseId == courseId, deck.deletedAt == nil {

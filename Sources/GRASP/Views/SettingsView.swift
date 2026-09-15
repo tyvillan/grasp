@@ -25,8 +25,16 @@ private struct GeneralSettingsTab: View {
     @Environment(\.switchProfile) private var switchProfile
     @State private var showingArchivedCourses = false
     @State private var showingOllamaSetup = false
+    // Shared with HomeView's goal bar and the study session's focus timer
+    // through `@AppStorage`'s own store, rather than threaded through
+    // AppStore -- these are view preferences, not app data.
+    @AppStorage("dailyCardGoal") private var dailyGoal = 20
+    @AppStorage("focusWorkMinutes") private var focusWorkMinutes = 25
+    @AppStorage("focusBreakMinutes") private var focusBreakMinutes = 5
+    @AppStorage("focusCardTarget") private var focusCardTarget = 20
 
     var body: some View {
+        @Bindable var store = store
         Form {
             Section("Profile") {
                 HStack {
@@ -46,6 +54,39 @@ private struct GeneralSettingsTab: View {
                         .font(.caption)
                 }
                 Text("With no local model, cards come from the deterministic parser only -- fully usable, just more editing in the review queue. Install Ollama and pull a model (e.g. qwen2.5:7b-instruct) to enable AI refinement.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Study Goals") {
+                Stepper(value: $dailyGoal, in: 0...500, step: 5) {
+                    Text(dailyGoal == 0 ? "No daily goal" : "\(dailyGoal) cards a day")
+                        .monospacedDigit()
+                }
+                Text("Sets the progress bar on Home and what counts as a full day. Your study streak counts any day with at least one review, whatever the goal -- so a light day still keeps it alive.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Focus Timer") {
+                Stepper(value: $focusWorkMinutes, in: 5...90, step: 5) {
+                    Text("\(focusWorkMinutes) min work interval").monospacedDigit()
+                }
+                Stepper(value: $focusBreakMinutes, in: 1...30) {
+                    Text("\(focusBreakMinutes) min break").monospacedDigit()
+                }
+                Stepper(value: $focusCardTarget, in: 0...200, step: 5) {
+                    Text(focusCardTarget == 0 ? "No card target" : "\(focusCardTarget) cards per interval")
+                        .monospacedDigit()
+                }
+                Text("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("AI-Generated Test Questions") {
+                Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
+                Text("When enabled, Custom Tests mix in a few fresh, written questions grounded in your notes alongside your real cards. These are generated fresh each time and never saved as cards, added to the review queue, or scheduled by FSRS. Uses the same AI connection as Card Generation above.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -134,6 +175,14 @@ private struct GeneralSettingsTab: View {
 private struct AdvancedSettingsTab: View {
     @Environment(AppStore.self) private var store
     @State private var showingExcludedFolders = false
+    @State private var showingDuplicateReview = false
+    @State private var duplicateGroups: [AppStore.DuplicateGroup] = []
+    /// Only meaningful right after a scan that found nothing -- a scan
+    /// that found groups opens the review sheet instead, so this never
+    /// needs to report a positive count itself.
+    @State private var duplicateScanFoundNone = false
+    @State private var isSweepingContext = false
+    @State private var contextSweepResult: AppStore.ContextCheckSummary?
 
     var body: some View {
         @Bindable var store = store
@@ -161,10 +210,89 @@ private struct AdvancedSettingsTab: View {
                     title: "Excluded Folders", count: store.excludedFolders.count
                 ) { showingExcludedFolders = true }
             }
+
+            Section("Duplicate Cards") {
+                HStack {
+                    Button("Scan All Courses for Duplicates…") { scanForDuplicatesAcrossAllCourses() }
+                    if duplicateScanFoundNone {
+                        Text("No duplicates found").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Looks for near-identical cards across every course, not just within one -- catches the same material imported under two different course folders. Nothing is removed automatically: you review each group and pick which card survives, same as \"Review Duplicates\" inside a single course.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Off-Topic Card Check") {
+                HStack(spacing: 8) {
+                    Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
+                        .disabled(isSweepingContext)
+                    if isSweepingContext {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                Text("One-time sweep of every card you already have, going card by card against its own source note with the local AI model: a definition that reads like assignment instructions or a vague fragment gets rewritten from the note's own text, or removed if the note doesn't support a real one either. Applies immediately -- there's no per-card review step -- but every change is listed in the result and can be undone individually from the \"AI Refined\" badge on the card itself. Needs a local AI model (Ollama or Apple's on-device model) to do anything.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 320)
+        .frame(width: 480, height: 420)
         .sheet(isPresented: $showingExcludedFolders) { ExcludedFoldersSheet() }
+        .sheet(isPresented: $showingDuplicateReview) {
+            DuplicateReviewSheet(groups: duplicateGroups) { merges in
+                try? store.mergeDuplicates(merges)
+            }
+        }
+        .sheet(isPresented: Binding(get: { contextSweepResult != nil }, set: { if !$0 { contextSweepResult = nil } })) {
+            if let contextSweepResult {
+                ResultSheet(
+                    icon: "checkmark.shield",
+                    title: "Off-Topic Card Check Complete",
+                    leadText: contextSweepResult.isEmpty
+                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment. (If you have no local AI model set up, nothing was checked at all -- see Card Generation above.)"
+                        : nil,
+                    sections: contextSweepSections(contextSweepResult)
+                )
+            }
+        }
+    }
+
+    private func contextSweepSections(_ result: AppStore.ContextCheckSummary) -> [ResultSheet.Section] {
+        var sections: [ResultSheet.Section] = []
+        if !result.refined.isEmpty {
+            sections.append(.init(
+                icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success, title: "Rewrote",
+                items: result.refined.map { "\($0.front) (\($0.courseName))" }
+            ))
+        }
+        if !result.removed.isEmpty {
+            sections.append(.init(
+                icon: "trash", tint: GRASPColor.rejected, title: "Removed",
+                items: result.removed.map { "\($0.front) (\($0.courseName))" }
+            ))
+        }
+        return sections
+    }
+
+    private func sweepAllCardsForContext() {
+        isSweepingContext = true
+        Task {
+            let result = await store.sweepAllCardsForContext()
+            isSweepingContext = false
+            contextSweepResult = result
+        }
+    }
+
+    private func scanForDuplicatesAcrossAllCourses() {
+        duplicateScanFoundNone = false
+        let groups = (try? store.duplicateGroupsAcrossAllCourses()) ?? []
+        if groups.isEmpty {
+            duplicateScanFoundNone = true
+        } else {
+            duplicateGroups = groups
+            showingDuplicateReview = true
+        }
     }
 
     private func chooseVault() {

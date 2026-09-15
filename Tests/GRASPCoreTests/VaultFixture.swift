@@ -48,9 +48,38 @@ private actor VaultFixtureCache {
         // the file gets copied out from under it.
         do {
             let database = try GRASPDatabase(path: url)
-            _ = try await VaultScanner(database: database).scan(vaultRoot: VaultFixture.root)
+            _ = try await RealVaultScanGate.shared.run {
+                try await VaultScanner(database: database).scan(vaultRoot: VaultFixture.root)
+            }
         }
         masterURL = url
         return url
+    }
+}
+
+/// A hard cap of one real, filesystem-walking vault scan at a time across
+/// the whole test process. This cache's own one-time scan isn't the only
+/// place that does one: `RealVaultVerification` (by design -- it exists to
+/// verify a live scan, not a cached copy) and a couple of
+/// `FolderExclusionTests` cases (which mutate their own fixture copy, then
+/// need a real re-scan to see whether it comes back) each run their own,
+/// independent real scan too. Also sets `GRASP_SKIP_OCR` before every real
+/// scan -- see `ImageExtractor`'s own doc comment on that variable. Both
+/// exist for the same underlying reason: a real `VNRecognizeTextRequest`
+/// call, `sample`d mid-hang on a stuck test run, sat the *entire* sampling
+/// window on one `dispatch_semaphore_wait_slow` deep inside Apple's own
+/// `TextRecognition` internals -- reproduced with a real vault image and a
+/// synthetic one, at both `.accurate` and `.fast` recognition levels, and
+/// regardless of how many real scans were running at once (this gate keeps
+/// that at exactly one, and it still happened). That rules out "too many
+/// concurrent scans" as the actual trigger: it's Vision itself that doesn't
+/// reliably tolerate running under `swift test`'s heavily concurrent host
+/// process, full stop -- the same call from a plain standalone binary, no
+/// test harness involved, succeeded on all 50 real images in under 1s each.
+actor RealVaultScanGate {
+    static let shared = RealVaultScanGate()
+    func run<T>(_ body: () async throws -> T) async rethrows -> T {
+        setenv("GRASP_SKIP_OCR", "1", 1)
+        return try await body()
     }
 }

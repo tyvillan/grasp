@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import EventKit
 import GRASPCore
 import GRDB
 
@@ -44,9 +45,34 @@ final class AppStore {
         didSet { UserDefaults.standard.set(vaultPath, forKey: Self.vaultPathKey(for: profile)) }
     }
 
+    /// Global, per-profile: when on, `startTest` mixes a few ephemeral,
+    /// AI-generated written questions in alongside a test's real cards.
+    /// Defaults off -- a new AI-mixing behavior shouldn't silently turn on
+    /// for existing users.
+    var isAITestQuestionsEnabled: Bool {
+        didSet { UserDefaults.standard.set(isAITestQuestionsEnabled, forKey: Self.aiTestQuestionsKey(for: profile)) }
+    }
+
     private(set) var lastImportSummary: ImportSummary?
     private(set) var isImporting = false
     private(set) var importError: String?
+
+    /// Populated automatically after every import/rescan (`runImport`,
+    /// `importFiles`) by a vault-wide duplicate scan -- continuous, not
+    /// something you have to remember to trigger by hand in Settings. The
+    /// UI (`ContentView`) presents the same `DuplicateReviewSheet` as the
+    /// manual scan whenever this is non-empty, then clears it via
+    /// `clearPendingDuplicates()` so it doesn't reappear until the next
+    /// import actually changes something.
+    private(set) var pendingDuplicateGroups: [DuplicateGroup] = []
+
+    func clearPendingDuplicates() {
+        pendingDuplicateGroups = []
+    }
+
+    private func scanForDuplicatesAfterImport() {
+        pendingDuplicateGroups = (try? duplicateGroupsAcrossAllCourses()) ?? []
+    }
 
     /// Human-readable name of whichever generator `CardGenerators.select()`
     /// last resolved to, refreshed on demand (Settings, and before a
@@ -92,6 +118,9 @@ final class AppStore {
     /// one person's vault path into another's settings.
     private static func vaultPathKey(for profile: Profile) -> String { "\(vaultPathKey).\(profile.id)" }
 
+    private static let aiTestQuestionsKey = "aiTestQuestionsEnabled"
+    private static func aiTestQuestionsKey(for profile: Profile) -> String { "\(aiTestQuestionsKey).\(profile.id)" }
+
     /// - Parameter profile: whose database this store opens. `.preview`
     ///   (an ephemeral in-memory profile) is used by SwiftUI previews and
     ///   the design-time default; real launches always pass a profile the
@@ -109,6 +138,7 @@ final class AppStore {
         self.database = db
         self.scanner = VaultScanner(database: db)
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? Self.defaultVaultPath
+        self.isAITestQuestionsEnabled = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
         reload()
         Task { await refreshGeneratorStatus() }
     }
@@ -184,6 +214,173 @@ final class AppStore {
         }
         reload()
         return refinedCount
+    }
+
+    /// One card's outcome from a context-verification pass, kept only for
+    /// the summary the caller shows/logs afterward -- see `verifyContext`.
+    struct ContextCheckEntry: Sendable, Identifiable {
+        var id: String { cardId }
+        let cardId: String
+        let front: String
+        let courseName: String
+    }
+
+    struct ContextCheckSummary: Sendable {
+        var refined: [ContextCheckEntry] = []
+        var removed: [ContextCheckEntry] = []
+        var isEmpty: Bool { refined.isEmpty && removed.isEmpty }
+    }
+
+    /// Checks a card's own recorded pieces of context validation against
+    /// its source note and course -- flagging assignment instructions,
+    /// submission logistics, or a vague fragment that the deterministic
+    /// parser's own filters (see `PairParser.isAssignmentMetaText`) didn't
+    /// catch. Shared by two callers with different scopes: the draft-time
+    /// check on a fresh import (`verifyCardContext`, still-unapproved
+    /// cards only) and the one-time sweep over cards already approved
+    /// long ago (`sweepAllCardsForContext`). Cards with no `materialId`
+    /// (hand-typed, no source note to check against) are skipped
+    /// entirely -- there's nothing here for them to be checked against.
+    ///
+    /// A `.refine` verdict rewrites the card's `back` in place (keeping
+    /// the original in `originalBack` for the review UI's revert
+    /// option); a `.reject` verdict soft-deletes it, same as any other
+    /// card removal in this app. Fails soft at every step -- no generator
+    /// available, no source text for a note, a DB error mid-pass -- by
+    /// simply leaving the remaining cards untouched rather than throwing,
+    /// consistent with every other `CardGenerator`-backed flow.
+    private func verifyContext(of cards: [Card]) async -> ContextCheckSummary {
+        var summary = ContextCheckSummary()
+        let candidates = cards.filter { $0.materialId != nil }
+        guard !candidates.isEmpty else { return summary }
+
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable else { return summary }
+
+        let materialIds = Set(candidates.map { $0.materialId! })
+        let courseNameByMaterial: [String: String]
+        do {
+            courseNameByMaterial = try await database.queue.read { db -> [String: String] in
+                let materials = try Material.filter(materialIds.contains(Column("id"))).fetchAll(db)
+                let courseIds = Set(materials.map(\.courseId))
+                let courses = try Course.filter(courseIds.contains(Column("id"))).fetchAll(db)
+                let courseById = Dictionary(uniqueKeysWithValues: courses.map { ($0.id, $0) })
+                return Dictionary(uniqueKeysWithValues: materials.map { ($0.id, courseById[$0.courseId]?.name ?? "") })
+            }
+        } catch {
+            return summary
+        }
+
+        let byMaterial = Dictionary(grouping: candidates, by: { $0.materialId! })
+        for (materialId, materialCards) in byMaterial {
+            guard let context = (try? noteText(forMaterial: materialId))?.reflowed, !context.isEmpty else { continue }
+            let courseName = courseNameByMaterial[materialId] ?? ""
+
+            for card in materialCards {
+                let result = await generator.validateContext(
+                    front: card.front, back: card.back, noteContext: context, courseName: courseName
+                )
+                do {
+                    switch result.verdict {
+                    case .valid:
+                        continue
+                    case .refine(let newBack):
+                        try await database.queue.write { db in
+                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                            if updated.originalBack == nil { updated.originalBack = updated.back }
+                            updated.back = newBack
+                            updated.isContextRefined = true
+                            updated.updatedAt = Date()
+                            try updated.save(db)
+                        }
+                        summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+                    case .reject:
+                        try await database.queue.write { db in
+                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                            updated.deletedAt = Date()
+                            updated.updatedAt = Date()
+                            try updated.save(db)
+                        }
+                        summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+        reload()
+        return summary
+    }
+
+    /// The draft-time context check: runs over every still-unapproved
+    /// card in scope, right where "Refine with AI" already runs, so a bad
+    /// extraction can be caught before it's ever approved into real study
+    /// material. `topic`-less, deck-scoped exactly like `refineDraftCards`.
+    func verifyCardContext(inDecks deckIds: [String]) async -> ContextCheckSummary {
+        let drafts: [Card]
+        do {
+            let cardIds = try await database.queue.read { db in
+                try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
+            }
+            guard !cardIds.isEmpty else { return ContextCheckSummary() }
+            drafts = try await database.queue.read { db in
+                try Card
+                    .filter(cardIds.contains(Column("id")))
+                    .filter(Column("status") == CardStatus.draft.rawValue)
+                    .filter(Column("deletedAt") == nil)
+                    .fetchAll(db)
+            }
+        } catch {
+            return ContextCheckSummary()
+        }
+        return await verifyContext(of: drafts)
+    }
+
+    /// The one-time sweep: every live card in the whole vault, approved or
+    /// not, checked against its own source note -- the only way to catch
+    /// an off-topic card that was approved long before this feature
+    /// existed. Deliberately vault-wide rather than deck/course-scoped
+    /// (unlike `verifyCardContext`): a first pass over already-curated
+    /// content is exactly the kind of thing worth doing everywhere at
+    /// once rather than course by course.
+    func sweepAllCardsForContext() async -> ContextCheckSummary {
+        let liveCards: [Card]
+        do {
+            liveCards = try await database.queue.read { db in
+                try Card.filter(Column("deletedAt") == nil).fetchAll(db)
+            }
+        } catch {
+            return ContextCheckSummary()
+        }
+        return await verifyContext(of: liveCards)
+    }
+
+    /// The combined result of "Refine Deck with AI" -- the single button
+    /// that replaced the separate "Refine with AI" and "Check for
+    /// Off-Topic Cards" actions.
+    struct RefineDeckSummary: Sendable {
+        var wordingRefinedCount = 0
+        var context = ContextCheckSummary()
+        var isEmpty: Bool { wordingRefinedCount == 0 && context.isEmpty }
+    }
+
+    /// "Refine Deck with AI": one action, two passes, always in this
+    /// order. Pass 1 (`verifyCardContext`) prunes or rewrites drafts that
+    /// aren't real definitions at all -- assignment text, off-topic
+    /// fragments. Pass 2 (`refineDraftCards`) then cleans up wording
+    /// (parsing artifacts, awkward phrasing) on whatever drafts survive.
+    /// Doing it in this order, not the reverse or a single mixed pass, is
+    /// what fixes the bug where a genuinely off-topic card used to just
+    /// come out of "Refine with AI" more smoothly worded but still
+    /// wrong -- that wording-cleanup prompt's whole job is to preserve
+    /// meaning, so handing it a bad card early meant it dutifully
+    /// polished the wrong meaning instead of replacing it. By the time
+    /// pass 2 runs now, anything genuinely off-topic is already gone or
+    /// already rewritten from scratch in pass 1.
+    func refineDeckWithAI(inDecks deckIds: [String]) async -> RefineDeckSummary {
+        let context = await verifyCardContext(inDecks: deckIds)
+        let wordingRefinedCount = await refineDraftCards(inDecks: deckIds)
+        return RefineDeckSummary(wordingRefinedCount: wordingRefinedCount, context: context)
     }
 
     /// The default cap on how many additional cards a single note can
@@ -327,6 +524,17 @@ final class AppStore {
         revision += 1
     }
 
+    /// A course's display name straight from the already-loaded in-memory
+    /// lists -- no query, since the callers are rendering one row each and
+    /// a fetch per row is exactly the pattern `dashboardDecks` exists to
+    /// avoid. Archived courses are included: an exam on the calendar
+    /// shouldn't lose its course label just because the course was filed
+    /// away.
+    func courseName(_ courseId: String) -> String? {
+        coursesBySemester.values.joined().first { $0.id == courseId }?.name
+            ?? archivedCourses.first { $0.id == courseId }?.name
+    }
+
     func hasDecks(inCourse courseId: String) -> Bool {
         coursesWithDecks.contains(courseId)
     }
@@ -365,8 +573,24 @@ final class AppStore {
     /// once, so a duplicate that crept in via two different decks (not
     /// just two notes in the same one) shows up too.
     func duplicateGroups(inDecks deckIds: [String]) throws -> [DuplicateGroup] {
-        let deckCards = try cards(inDecks: deckIds)
-        return DuplicateDetector.groups(deckCards).map { group in
+        Self.buildDuplicateGroups(try cards(inDecks: deckIds))
+    }
+
+    /// A deliberate, manually-triggered sweep across *every* course at
+    /// once -- the counterpart to `duplicateGroups(inDecks:)`'s per-course
+    /// scope, for a duplicate that scope structurally can't see (e.g. the
+    /// same lecture PDF imported under two different course folders,
+    /// which import-time suppression and the per-course review sheet both
+    /// only ever compare within, never across).
+    func duplicateGroupsAcrossAllCourses() throws -> [DuplicateGroup] {
+        let allCards = try database.queue.read { db in
+            try Card.filter(Column("deletedAt") == nil).fetchAll(db)
+        }
+        return Self.buildDuplicateGroups(allCards)
+    }
+
+    private static func buildDuplicateGroups(_ cards: [Card]) -> [DuplicateGroup] {
+        DuplicateDetector.groups(cards).map { group in
             let withHistory = group.filter { $0.reps > 0 }
             let keeper = group.max { lhs, rhs in
                 Self.duplicateKeepRank(lhs).lexicographicallyPrecedes(Self.duplicateKeepRank(rhs))
@@ -497,7 +721,17 @@ final class AppStore {
                 .filter(cardIds.contains(Column("id")))
                 .filter(Column("deletedAt") == nil)
                 .fetchAll(db)
-            let order = Dictionary(uniqueKeysWithValues: cardIds.enumerated().map { ($1, $0) })
+            // `cardIds` is built from `DeckCard` rows, one per membership --
+            // normally a card belongs to exactly one deck within a course,
+            // but that's a convention this table doesn't itself enforce,
+            // so a card that ends up in two of the requested decks would
+            // appear twice here. `uniquingKeysWith` (keep the first,
+            // i.e. earliest by deck/sortIndex order) keeps this from
+            // crashing on a duplicate key if that ever happens, rather
+            // than assuming it never will.
+            let order = Dictionary(
+                cardIds.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first }
+            )
             cards.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
             return cards
         }
@@ -566,6 +800,22 @@ final class AppStore {
         reload()
     }
 
+    /// Undoes one AI context-refinement: restores `back` from
+    /// `originalBack` and clears both refinement fields. A no-op if the
+    /// card was never refined (`originalBack == nil`), so this is always
+    /// safe to call from a "Revert" button without checking first.
+    func revertContextRefinement(_ cardId: String) throws {
+        try database.queue.write { db in
+            guard var card = try Card.fetchOne(db, key: cardId), let original = card.originalBack else { return }
+            card.back = original
+            card.originalBack = nil
+            card.isContextRefined = false
+            card.updatedAt = Date()
+            try card.save(db)
+        }
+        reload()
+    }
+
     func setCardStatus(_ cardId: String, status: CardStatus) throws {
         try database.queue.write { db in
             guard var card = try Card.fetchOne(db, key: cardId) else { return }
@@ -609,6 +859,30 @@ final class AppStore {
                     .filter(Column("deletedAt") == nil)
                     .updateAll(db, Column("deletedAt").set(to: now), Column("updatedAt").set(to: now))
             }
+        }
+        reload()
+    }
+
+    /// One "keep this card, fold these into it" instruction from the
+    /// Review Duplicates sheet -- the UI-facing mirror of
+    /// `DuplicateDetector.Merge`, which does the actual work.
+    struct DuplicateMerge {
+        let survivorId: String
+        let losingIds: [String]
+    }
+
+    /// Folds duplicate cards into their group's survivor instead of just
+    /// deleting the losers outright, preserving review history and Learn
+    /// progress where possible. See `DuplicateDetector.applyMerges` for
+    /// the full behavioral contract -- this just translates the UI's
+    /// instruction type, wraps every group's merge in one write
+    /// transaction, and refreshes derived store state afterward.
+    func mergeDuplicates(_ merges: [DuplicateMerge]) throws {
+        guard !merges.isEmpty else { return }
+        try database.queue.write { db in
+            try DuplicateDetector.applyMerges(
+                merges.map { DuplicateDetector.Merge(survivorId: $0.survivorId, losingIds: $0.losingIds) }, db: db
+            )
         }
         reload()
     }
@@ -684,7 +958,7 @@ final class AppStore {
             if let firstDeckId = deckIds.first,
                let deck = try Deck.fetchOne(db, key: firstDeckId),
                let exam = try Self.nearestUpcomingExam(forCourseId: deck.courseId, now: now, db: db),
-               ExamBias.isInFinalWeek(now: now, examDate: exam.examDate) {
+               ExamBias.isInFinalWeek(now: now, examDate: exam.startsAt) {
                 cards.sort { a, b in
                     let elapsedA = a.lastReview.map { max(0, now.timeIntervalSince($0) / 86400) } ?? 0
                     let elapsedB = b.lastReview.map { max(0, now.timeIntervalSince($0) / 86400) } ?? 0
@@ -728,7 +1002,7 @@ final class AppStore {
                     """, arguments: [cardId])
             }
             if let courseId, let exam = try Self.nearestUpcomingExam(forCourseId: courseId, now: now, db: db) {
-                result.due = ExamBias.capDue(result.due, examDate: exam.examDate)
+                result.due = ExamBias.capDue(result.due, examDate: exam.startsAt)
             }
             let dueBefore = card.due
 
@@ -778,13 +1052,17 @@ final class AppStore {
         }
     }
 
-    private static func learnCandidates(
+    nonisolated private static func learnCandidates(
         forDeck deckId: String, db: Database
     ) throws -> [(candidate: LearnEngine.Candidate, lastSeenAt: Date?)] {
         try learnCandidates(forDecks: [deckId], db: db)
     }
 
-    private static func learnCandidates(
+    /// `nonisolated` (unlike most of this class) so it can run inside a
+    /// GRDB `@Sendable` read closure called from an `async` context (see
+    /// `startTest`) without hopping back to the main actor -- it only ever
+    /// touches the `Database` connection it's handed, no store state.
+    nonisolated private static func learnCandidates(
         forDecks deckIds: [String], db: Database
     ) throws -> [(candidate: LearnEngine.Candidate, lastSeenAt: Date?)] {
         let cardIds = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
@@ -876,9 +1154,81 @@ final class AppStore {
     /// Starts a test: builds questions from every active card in the deck,
     /// writes the `testAttempt` and one `testItem` row per question up
     /// front (answers filled in as the user submits them), and returns the
-    /// attempt id alongside the in-memory questions the UI drives from.
-    func startTest(deckId: String, config: TestBuilder.Config) throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion]) {
-        try startTest(deckIds: [deckId], config: config)
+    /// attempt id and in-memory questions the UI drives from, plus a
+    /// user-facing warning when AI test questions were requested but
+    /// couldn't actually be produced (see `generateAITestQuestions`).
+    func startTest(deckId: String, config: TestBuilder.Config) async throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
+        try await startTest(deckIds: [deckId], config: config)
+    }
+
+    /// A test still reads as "mostly the deck's own cards" even with AI
+    /// generation on -- roughly a third of the requested count, capped
+    /// absolutely, regardless of how many notes are in scope.
+    private static func aiQuestionBudget(for questionCount: Int) -> Int { max(0, min(questionCount / 3, 10)) }
+
+    /// The default cap on how many AI test questions a single note can
+    /// contribute, mirroring `defaultMaxGeneratedPerNote`'s "keep one
+    /// chatty response from dominating" reasoning.
+    private static let aiTestQuestionsPerNote = 2
+
+    /// Proposes a handful of ephemeral, AI-generated written questions
+    /// grounded in the notes behind `deckIds` -- never saved as a `Card`,
+    /// never entering the review queue. Unlike `generateAdditionalCards`
+    /// (where an empty result is *always* a normal outcome, silently),
+    /// this feature is behind an explicit user-facing toggle -- so when it's
+    /// on and nothing came back, that's worth telling the user about rather
+    /// than letting the test quietly look like the toggle does nothing.
+    /// The `warning` is nil whenever there's nothing worth surfacing:
+    /// either this deck has no note-backed cards to ground a question in
+    /// (a structural non-applicability, not a failure), or generation
+    /// actually produced something.
+    private func generateAITestQuestions(
+        inDecks deckIds: [String], maxCount: Int
+    ) async -> (questions: [LearnEngine.RoundQuestion], warning: String?) {
+        guard maxCount > 0 else { return ([], nil) }
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable else {
+            return ([], "AI test questions are on in Settings, but no local AI model is reachable right now (Ollama isn't running, and no on-device model is available). This test uses your cards only.")
+        }
+
+        let existingByMaterial: [String: [Card]]
+        do {
+            let cards = try await database.queue.read { db -> [Card] in
+                let cardIds = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
+                guard !cardIds.isEmpty else { return [] }
+                return try Card
+                    .filter(cardIds.contains(Column("id")))
+                    .filter(Column("deletedAt") == nil)
+                    .filter(Column("materialId") != nil)
+                    .fetchAll(db)
+            }
+            guard !cards.isEmpty else { return ([], nil) } // no note-backed cards here -- nothing to ground on, not a failure
+            existingByMaterial = Dictionary(grouping: cards, by: { $0.materialId! })
+        } catch {
+            return ([], "AI test questions couldn't be generated (a database error occurred while reading your notes). This test uses your cards only.")
+        }
+
+        var results: [LearnEngine.RoundQuestion] = []
+        var attemptedAnyNote = false
+        for (materialId, existing) in existingByMaterial.shuffled() {
+            guard results.count < maxCount,
+                  let context = (try? noteText(forMaterial: materialId))?.reflowed, !context.isEmpty
+            else { continue }
+            attemptedAnyNote = true
+            let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
+            let proposed = await generator.generateTestQuestions(
+                existing: candidates, noteContext: context,
+                maxCount: min(Self.aiTestQuestionsPerNote, maxCount - results.count)
+            )
+            results += proposed.map {
+                LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer, type: .written)
+            }
+        }
+
+        let warning: String? = (attemptedAnyNote && results.isEmpty)
+            ? "AI test questions are on in Settings, but the AI didn't return any usable questions for this test's notes. This test uses your cards only."
+            : nil
+        return (Array(results.prefix(maxCount)), warning)
     }
 
     /// The plural of the above, for a test run across every deck in a
@@ -887,39 +1237,56 @@ final class AppStore {
     /// stores `nil` rather than picking one arbitrarily.
     func startTest(
         deckIds: [String], config: TestBuilder.Config
-    ) throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion]) {
-        try database.queue.write { db in
-            var cards = try Self.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
-            if config.excludeMastered {
-                cards = cards.filter { $0.level != .mastered }
-            }
-            var rng = SystemRandomNumberGenerator()
-            let pool = cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
-            let questions = TestBuilder.build(from: pool, config: config, using: &rng)
+    ) async throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
+        var cards = try await database.queue.read { db in try Self.learnCandidates(forDecks: deckIds, db: db).map(\.candidate) }
+        if config.excludeMastered {
+            cards = cards.filter { $0.level != .mastered }
+        }
 
+        // AI questions are always .written -- if Written is off, none
+        // sneak in regardless of the toggle, and there's nothing to warn
+        // about since the user didn't ask for any this time.
+        let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?) = (config.allowWritten && isAITestQuestionsEnabled)
+            ? await generateAITestQuestions(inDecks: deckIds, maxCount: Self.aiQuestionBudget(for: config.questionCount))
+            : ([], nil)
+        let aiQuestions = aiResult.questions
+
+        var rng = SystemRandomNumberGenerator()
+        let pool = cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
+        var cardConfig = config
+        cardConfig.questionCount = max(0, config.questionCount - aiQuestions.count)
+        var mutableQuestions = TestBuilder.build(from: pool, config: cardConfig, using: &rng) + aiQuestions
+        if config.shuffle { mutableQuestions.shuffle(using: &rng) }
+        let questions = mutableQuestions
+
+        let attemptId = try await database.queue.write { db -> String in
             let attempt = TestAttempt(
                 deckId: deckIds.count == 1 ? deckIds.first : nil, configJSON: "{}", startedAt: Date()
             )
             try attempt.insert(db)
             for (index, question) in questions.enumerated() {
                 try TestItem(
-                    id: question.cardId + "-" + attempt.id, attemptId: attempt.id, cardId: question.cardId,
+                    id: question.id + "-" + attempt.id, attemptId: attempt.id, cardId: question.cardId,
                     ordinal: index, questionType: question.type.rawValue, promptText: question.prompt,
                     choicesJSON: question.choices.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
-                    correctAnswer: question.correctAnswer
+                    correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil
                 ).insert(db)
             }
-            return (attempt.id, questions)
+            return attempt.id
         }
+        return (attemptId, questions, aiResult.warning)
     }
 
     /// Records one answer to a test item, and grades it immediately so the
-    /// results screen never has to re-derive correctness.
-    func submitTestAnswer(attemptId: String, cardId: String, given: String, isCorrect: Bool) throws {
+    /// results screen never has to re-derive correctness. Keyed by
+    /// `ordinal` (unique per attempt by construction) rather than `cardId`
+    /// -- an AI-generated question has no `cardId` at all, and more than
+    /// one such question can exist in the same attempt.
+    func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) throws {
         try database.queue.write { db in
             guard var item = try TestItem
                 .filter(Column("attemptId") == attemptId)
-                .filter(Column("cardId") == cardId)
+                .filter(Column("ordinal") == ordinal)
                 .fetchOne(db)
             else { return }
             item.givenAnswer = given
@@ -962,32 +1329,351 @@ final class AppStore {
         }
     }
 
+    /// The user says a written question judged "incorrect" by fuzzy text
+    /// matching was actually right -- exact/fuzzy comparison is a poor
+    /// judge of a long or loaded free-response answer, and this is the
+    /// override valve for that. Idempotent: a question already marked
+    /// correct is left untouched, so a duplicate call (or a UI race)
+    /// can't double-count the score or double-apply the FSRS correction
+    /// below.
+    ///
+    /// If the attempt hadn't finished yet (the override happened mid-quiz,
+    /// in `TestRunView`), flipping the stored `TestItem` is all that's
+    /// needed -- `finishTest` hasn't scored anything or touched FSRS yet,
+    /// so it will simply score this item correctly when it does. If the
+    /// attempt had already finished (the override happened from
+    /// `TestResultsView`, which only ever shows after `finishTest` already
+    /// ran), this also corrects the attempt's stored score and, for a
+    /// card-backed question, re-grades the card "Good" to counteract the
+    /// "Again" grade `finishTest` already applied for that miss. That's a
+    /// best-effort correction, not a perfect undo -- FSRS state isn't
+    /// reversible -- but it's truer than leaving a card penalized for an
+    /// answer that was actually right.
+    func overrideTestItemCorrect(attemptId: String, ordinal: Int, cardId: String?) throws {
+        let correctedAFinishedAttempt = try database.queue.write { db -> Bool in
+            guard var item = try TestItem
+                .filter(Column("attemptId") == attemptId)
+                .filter(Column("ordinal") == ordinal)
+                .fetchOne(db),
+                item.isCorrect != true
+            else { return false }
+            item.isCorrect = true
+            try item.save(db)
+
+            guard var attempt = try TestAttempt.fetchOne(db, key: attemptId), attempt.finishedAt != nil else {
+                return false
+            }
+            attempt.scoreNumerator = min((attempt.scoreNumerator ?? 0) + 1, attempt.scoreDenominator ?? .max)
+            try attempt.save(db)
+            return true
+        }
+        if correctedAFinishedAttempt, let cardId {
+            // `gradeCard` opens its own write transaction, same as every
+            // other grading call site -- kept outside this one rather than
+            // nested inside it.
+            try? gradeCard(cardId, grade: .good, source: "test-override")
+        }
+    }
+
     /// The soonest exam still in the future for a course, or nil if none
     /// is set -- both `gradeCard`'s interval capping and `dueCards`'s
-    /// final-week reordering are no-ops without one.
-    private static func nearestUpcomingExam(forCourseId courseId: String, now: Date, db: Database) throws -> Exam? {
-        try Exam
+    /// final-week reordering are no-ops without one. Deadlines and study
+    /// blocks are deliberately excluded (see `CalendarEventKind.examLike`):
+    /// they share the calendar, not the scheduler's notion of a deadline
+    /// every card must be ready for.
+    private static func nearestUpcomingExam(
+        forCourseId courseId: String, now: Date, db: Database
+    ) throws -> CalendarEvent? {
+        try CalendarEvent
             .filter(Column("courseId") == courseId)
-            .filter(Column("examDate") >= now)
-            .order(Column("examDate"))
+            .filter(CalendarEventKind.examLike.map(\.rawValue).contains(Column("kind")))
+            .filter(Column("startsAt") >= now)
+            .order(Column("startsAt"))
             .fetchOne(db)
     }
 
-    func exams(forCourse courseId: String) throws -> [Exam] {
+    func calendarEvents(forCourse courseId: String) throws -> [CalendarEvent] {
         try database.queue.read { db in
-            try Exam.filter(Column("courseId") == courseId).order(Column("examDate")).fetchAll(db)
+            try CalendarEvent
+                .filter(Column("courseId") == courseId)
+                .order(Column("startsAt"))
+                .fetchAll(db)
         }
     }
 
-    func addExam(courseId: String, name: String, date: Date) throws {
-        try database.queue.write { db in
-            try Exam(courseId: courseId, name: name, examDate: date).insert(db)
+    /// Every event overlapping a date range -- what the month grid, the
+    /// week columns and the agenda all read, each just asking for a
+    /// different span.
+    func calendarEvents(from start: Date, to end: Date) throws -> [CalendarEvent] {
+        try database.queue.read { db in
+            try CalendarEvent
+                .filter(Column("startsAt") >= start && Column("startsAt") < end)
+                .order(Column("startsAt"))
+                .fetchAll(db)
         }
     }
 
-    func deleteExam(_ examId: String) throws {
+    /// One upcoming event with the course name already resolved, so a
+    /// caller rendering a list of them doesn't fetch a course per row.
+    struct UpcomingEvent: Identifiable, Sendable {
+        let event: CalendarEvent
+        let courseName: String?
+        var id: String { event.id }
+
+        func daysAway(from now: Date, calendar: Calendar = .current) -> Int {
+            event.daysAway(from: now, calendar: calendar)
+        }
+    }
+
+    /// Exams and quizzes coming up across every course, soonest first --
+    /// the Home dashboard's alert strip. Events earlier today still count
+    /// as upcoming (an exam at 2pm shouldn't vanish from the alert at
+    /// 2:01pm on the day it matters most), so the window starts at the
+    /// beginning of today rather than at `now`.
+    func upcomingExams(within days: Int = 30, limit: Int = 5, now: Date = Date()) throws -> [UpcomingEvent] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: days, to: start) ?? start
+        return try database.queue.read { db in
+            let events = try CalendarEvent
+                .filter(CalendarEventKind.examLike.map(\.rawValue).contains(Column("kind")))
+                .filter(Column("startsAt") >= start && Column("startsAt") < end)
+                .order(Column("startsAt"))
+                .limit(limit)
+                .fetchAll(db)
+            let courseNames = try Self.courseNames(for: events, db: db)
+            return events.map {
+                UpcomingEvent(event: $0, courseName: $0.courseId.flatMap { courseNames[$0] })
+            }
+        }
+    }
+
+    private static func courseNames(for events: [CalendarEvent], db: Database) throws -> [String: String] {
+        let ids = Set(events.compactMap(\.courseId))
+        guard !ids.isEmpty else { return [:] }
+        return try Course.filter(ids.contains(Column("id")))
+            .fetchAll(db)
+            .reduce(into: [:]) { $0[$1.id] = $1.name }
+    }
+
+    func addCalendarEvent(_ event: CalendarEvent) throws {
+        try database.queue.write { db in try event.insert(db) }
+        reload()
+    }
+
+    func updateCalendarEvent(_ event: CalendarEvent) throws {
+        var updated = event
+        updated.updatedAt = Date()
+        try database.queue.write { db in try updated.update(db) }
+        reload()
+    }
+
+    func deleteCalendarEvent(_ eventId: String) throws {
         try database.queue.write { db in
-            _ = try Exam.deleteOne(db, key: examId)
+            // Take any study plan generated for this exam with it -- blocks
+            // for an exam that no longer exists are just clutter nobody
+            // would think to go and clean up.
+            try CalendarEvent.filter(Column("parentEventId") == eventId).deleteAll(db)
+            _ = try CalendarEvent.deleteOne(db, key: eventId)
+        }
+        reload()
+    }
+
+    // MARK: - Calendar sync
+
+    /// Mirrors exam dates from the Mac's Calendar into GRASP. One-way by
+    /// design (see `CalendarSync`): nothing here writes to the system
+    /// calendar, and an event you typed into GRASP yourself is never
+    /// touched, since only rows carrying a `sourceEventId` are considered
+    /// for update.
+    func syncSystemCalendar(withinDays days: Int = 180) async -> Result<CalendarSync.Summary, Error> {
+        let eventStore = EKEventStore()
+        do {
+            guard try await CalendarSync.requestAccess(store: eventStore) else {
+                return .failure(CalendarSync.SyncError.accessDenied)
+            }
+        } catch {
+            return .failure(error)
+        }
+
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: days, to: start) ?? start
+        let courseTuples = coursesBySemester.values.joined().map { (id: $0.id, name: $0.name, code: $0.code) }
+        let found = CalendarSync.scan(store: eventStore, courses: Array(courseTuples), from: start, to: end)
+
+        var summary = CalendarSync.Summary()
+        summary.calendarsScanned = CalendarSync.calendarCount(store: eventStore)
+        do {
+            let written = try await database.queue.write { db -> (imported: [String], updated: [String], unmatched: [String]) in
+                var imported: [String] = []
+                var updated: [String] = []
+                var unmatched: [String] = []
+                for scanned in found {
+                    if var existing = try CalendarEvent
+                        .filter(Column("sourceEventId") == scanned.sourceEventId)
+                        .fetchOne(db) {
+                        // Only the fields the system calendar is the
+                        // authority on. A deck linked by hand in GRASP, and
+                        // a course corrected by hand after a bad match,
+                        // both survive a re-sync -- overwriting them would
+                        // undo the user's own work every time this runs.
+                        guard existing.startsAt != scanned.startsAt
+                            || existing.endsAt != scanned.endsAt
+                            || existing.title != scanned.title
+                            || existing.isAllDay != scanned.isAllDay
+                        else { continue }
+                        existing.title = scanned.title
+                        existing.startsAt = scanned.startsAt
+                        existing.endsAt = scanned.endsAt
+                        existing.isAllDay = scanned.isAllDay
+                        existing.updatedAt = Date()
+                        try existing.update(db)
+                        updated.append(scanned.title)
+                    } else {
+                        try CalendarEvent(
+                            courseId: scanned.courseId, kind: scanned.kind, title: scanned.title,
+                            startsAt: scanned.startsAt, endsAt: scanned.endsAt,
+                            isAllDay: scanned.isAllDay, sourceEventId: scanned.sourceEventId
+                        ).insert(db)
+                        imported.append(scanned.title)
+                        if scanned.courseId == nil { unmatched.append(scanned.title) }
+                    }
+                }
+                return (imported, updated, unmatched)
+            }
+            summary.imported = written.imported
+            summary.updated = written.updated
+            summary.unmatched = written.unmatched
+        } catch {
+            return .failure(error)
+        }
+        reload()
+        return .success(summary)
+    }
+
+    // MARK: - Study plans
+
+    struct StudyPlanSummary: Sendable {
+        let blocksCreated: Int
+        let cardsCovered: Int
+        let replacedExisting: Bool
+        let firstDay: Date?
+    }
+
+    /// How many cards a plan for this event would have to cover -- the
+    /// linked deck's active cards, or the whole course's when no specific
+    /// deck is set.
+    func plannableCardCount(for event: CalendarEvent) -> Int {
+        let deckIds: [String]
+        if let deckId = event.deckId {
+            deckIds = [deckId]
+        } else if let courseId = event.courseId {
+            deckIds = (try? decks(inCourse: courseId))?.map(\.id) ?? []
+        } else {
+            deckIds = []
+        }
+        guard !deckIds.isEmpty else { return 0 }
+        return ((try? cards(inDecks: deckIds)) ?? []).filter { $0.status == .active }.count
+    }
+
+    /// Lays a `StudyPlanner` plan onto the calendar as study blocks, each
+    /// linked back to the exam so regenerating replaces exactly the blocks
+    /// this made before and nothing else.
+    @discardableResult
+    func generateStudyPlan(for event: CalendarEvent, now: Date = Date()) throws -> StudyPlanSummary {
+        let cardCount = plannableCardCount(for: event)
+        let blocks = StudyPlanner.plan(cardCount: cardCount, from: now, examDate: event.startsAt)
+        let courseName = event.courseId.flatMap { courseName($0) }
+
+        var replaced = false
+        try database.queue.write { db in
+            let existing = try CalendarEvent.filter(Column("parentEventId") == event.id).deleteAll(db)
+            replaced = existing > 0
+            for block in blocks {
+                try CalendarEvent(
+                    courseId: event.courseId, deckId: event.deckId, kind: .study,
+                    title: StudyPlanner.blockTitle(courseName: courseName, block: block),
+                    startsAt: block.day, isAllDay: true, parentEventId: event.id
+                ).insert(db)
+            }
+        }
+        reload()
+        return StudyPlanSummary(
+            blocksCreated: blocks.count, cardsCovered: cardCount,
+            replacedExisting: replaced, firstDay: blocks.first?.day
+        )
+    }
+
+    func hasStudyPlan(for eventId: String) -> Bool {
+        ((try? database.queue.read { db in
+            try CalendarEvent.filter(Column("parentEventId") == eventId).fetchCount(db)
+        }) ?? 0) > 0
+    }
+
+    // MARK: - Streak and daily load
+
+    /// Distinct days with at least one review, most recent first -- the
+    /// raw material for both the streak and the "did I study today" dot.
+    private func reviewDays(since: Date) throws -> Set<Date> {
+        let calendar = Calendar.current
+        return try database.queue.read { db in
+            let dates = try Date.fetchAll(
+                db, sql: "SELECT DISTINCT reviewedAt FROM review WHERE reviewedAt >= ?", arguments: [since]
+            )
+            return Set(dates.map { calendar.startOfDay(for: $0) })
+        }
+    }
+
+    struct StudyStreak: Sendable {
+        let days: Int
+        let studiedToday: Bool
+        let reviewsToday: Int
+    }
+
+    /// Consecutive days studied, counting back from today. Studying
+    /// yesterday but not yet today keeps the streak alive -- it only
+    /// breaks once a whole day passes with nothing, which is what makes
+    /// the number safe to show in the morning.
+    func studyStreak(now: Date = Date()) -> StudyStreak {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let horizon = calendar.date(byAdding: .day, value: -365, to: today) ?? today
+        let days = (try? reviewDays(since: horizon)) ?? []
+        let studiedToday = days.contains(today)
+
+        var streak = 0
+        var cursor = studiedToday ? today : (calendar.date(byAdding: .day, value: -1, to: today) ?? today)
+        while days.contains(cursor) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+
+        let reviewsToday = (try? database.queue.read { db in
+            try Int.fetchOne(
+                db, sql: "SELECT COUNT(*) FROM review WHERE reviewedAt >= ?", arguments: [today]
+            ) ?? 0
+        }) ?? 0
+        return StudyStreak(days: streak, studiedToday: studiedToday, reviewsToday: reviewsToday)
+    }
+
+    /// Cards falling due on each day in a range, for the calendar's
+    /// workload colouring. Everything already overdue lands on the first
+    /// day of the range, which is where it will actually be waiting.
+    func dailyCardLoad(from start: Date, to end: Date) -> [Date: Int] {
+        let calendar = Calendar.current
+        let firstDay = calendar.startOfDay(for: start)
+        let rows = (try? database.queue.read { db in
+            try Date.fetchAll(
+                db,
+                sql: "SELECT due FROM card WHERE deletedAt IS NULL AND status = 'active' AND due < ?",
+                arguments: [end]
+            )
+        }) ?? []
+        return rows.reduce(into: [:]) { counts, due in
+            let day = max(calendar.startOfDay(for: due), firstDay)
+            counts[day, default: 0] += 1
         }
     }
 
@@ -1314,6 +2000,7 @@ final class AppStore {
             if !summary.errors.isEmpty {
                 importError = summary.errors.first
             }
+            scanForDuplicatesAfterImport()
         } catch {
             importError = "Import failed: \(error)"
         }
@@ -1339,6 +2026,7 @@ final class AppStore {
             if !summary.errors.isEmpty {
                 importError = summary.errors.first
             }
+            scanForDuplicatesAfterImport()
         } catch {
             summary = ImportSummary()
             importError = "Import failed: \(error)"

@@ -56,18 +56,16 @@ private struct CourseDeleteConfirmationModifier: ViewModifier {
             .task(id: course?.id) {
                 impact = course.flatMap { try? store.courseDeletionImpact($0.id) }
             }
-            .alert(
-                "Delete \(course?.name ?? "course")?",
-                isPresented: Binding(get: { course != nil }, set: { if !$0 { course = nil } }),
-                presenting: course
-            ) { target in
-                Button("Delete", role: .destructive) {
-                    try? store.removeCourseAndExclude(target.id)
-                    onDeleted(target.id)
+            .sheet(isPresented: Binding(get: { course != nil }, set: { if !$0 { course = nil } })) {
+                if let target = course {
+                    ConfirmationSheet(
+                        icon: "trash", title: "Delete \(target.name)?",
+                        message: message(for: target), confirmTitle: "Delete"
+                    ) {
+                        try? store.removeCourseAndExclude(target.id)
+                        onDeleted(target.id)
+                    }
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: { target in
-                Text(message(for: target))
             }
     }
 

@@ -26,7 +26,13 @@ struct RealVaultVerificationTests {
         }
         let db = try GRASPDatabase.inMemory()
         let scanner = VaultScanner(database: db)
-        let summary = try await scanner.scan(vaultRoot: Self.vaultRoot)
+        // Routed through the same gate `VaultFixture` uses -- see
+        // `RealVaultScanGate`'s doc comment: this suite deliberately runs
+        // its own live scan rather than the cached fixture, but must still
+        // never run concurrently with another one.
+        let summary = try await RealVaultScanGate.shared.run {
+            try await scanner.scan(vaultRoot: Self.vaultRoot)
+        }
 
         print("""
 
@@ -80,6 +86,8 @@ struct RealVaultVerificationTests {
         // 21, not 20: a "Claude outputs" folder appeared directly under
         // College/ (not inside any semester folder), matching the same
         // non-semester pseudo-course branch "Side Lectures" already uses.
-        #expect(summary.courseCount == 21)
+        // 22, not 21: a "cpp-hello" folder appeared the same way, holding
+        // one importable file with nothing card-worthy in it.
+        #expect(summary.courseCount == 22)
     }
 }

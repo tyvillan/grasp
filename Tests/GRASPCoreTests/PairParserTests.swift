@@ -55,6 +55,34 @@ struct PairParserTests {
         #expect(pairs.contains { $0.front == "Observer pattern" })
     }
 
+    @Test("rejects a definition that is really submission/logistics instructions")
+    func rejectsAssignmentMetaText() {
+        let pairs = PairParser.parse(
+            "- **Final Project** - Submit your answer as a PDF by Friday at midnight through Gradescope."
+        )
+        #expect(pairs.isEmpty)
+    }
+
+    @Test("rejects a definition referencing a rubric or a page/points count")
+    func rejectsRubricAndPageReference() {
+        let a = PairParser.parse("- **Essay Grading** - See rubric on page 3 for the full grading breakdown.")
+        let b = PairParser.parse("- **Late Work** - Late submissions lose 10 points per day, up to 3 days.")
+        #expect(a.isEmpty)
+        #expect(b.isEmpty)
+    }
+
+    @Test("keeps a real definition that happens to mention a course tool in passing")
+    func keepsRealDefinitionNotJustLogistics() {
+        // A genuine conceptual definition shouldn't be caught just because
+        // the word "grade" or "submit" appears in an unrelated sense --
+        // this one has neither, it's here to confirm the keyword gate
+        // isn't so broad it rejects ordinary CS vocabulary.
+        let pairs = PairParser.parse(
+            "- **Encapsulation** - Bundling data with the methods that operate on it, hiding internal state from outside callers."
+        )
+        #expect(pairs.contains { $0.front == "Encapsulation" })
+    }
+
     @Test("a bare-term line whose term is a section locator produces no card")
     func rejectsBareTermLocator() {
         let pairs = PairParser.parse("Week 3\nRead the assigned chapter before class starts on Thursday morning")

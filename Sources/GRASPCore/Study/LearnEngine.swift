@@ -15,8 +15,10 @@ public enum LearnEngine {
     }
 
     public struct RoundQuestion: Sendable, Identifiable {
-        public var id: String { cardId }
-        public var cardId: String
+        public let id: String
+        /// nil for an ephemeral, AI-generated, test-only question with no
+        /// backing `Card` -- never true for anything Learn mode produces.
+        public var cardId: String?
         public var prompt: String
         public var correctAnswer: String
         public var type: QuestionType
@@ -24,8 +26,9 @@ public enum LearnEngine {
         public var statement: String?       // trueFalse only: the (possibly false) statement shown
         public var statementIsTrue: Bool?   // trueFalse only
 
-        public init(cardId: String, prompt: String, correctAnswer: String, type: QuestionType,
+        public init(id: String? = nil, cardId: String?, prompt: String, correctAnswer: String, type: QuestionType,
                     choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil) {
+            self.id = id ?? cardId ?? UUID().uuidString
             self.cardId = cardId; self.prompt = prompt; self.correctAnswer = correctAnswer; self.type = type
             self.choices = choices; self.statement = statement; self.statementIsTrue = statementIsTrue
         }

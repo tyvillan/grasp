@@ -10,6 +10,40 @@ public struct GeneratedCard: Sendable, Equatable {
     }
 }
 
+public struct GeneratedTestQuestion: Sendable, Equatable {
+    public let prompt: String
+    public let correctAnswer: String
+
+    public init(prompt: String, correctAnswer: String) {
+        self.prompt = prompt
+        self.correctAnswer = correctAnswer
+    }
+}
+
+/// The outcome of checking one card's definition against its term and
+/// source note -- see `CardGenerator.validateContext`.
+public struct ContextValidation: Sendable, Equatable {
+    public enum Verdict: Sendable, Equatable {
+        /// The term is a real course concept and the definition already
+        /// states it accurately. No change.
+        case valid
+        /// The term is a real course concept, but its extracted
+        /// definition doesn't state it -- a brand-new, general definition
+        /// written from the model's own subject knowledge, not a
+        /// summary/paraphrase of the flawed extracted text.
+        case refine(newBack: String)
+        /// The *term itself* isn't a real, general course concept at
+        /// all -- a label specific to one document (an essay draft's own
+        /// section heading, an assignment instruction, a personal
+        /// reference, a stray fragment) that the deterministic parser's
+        /// own filters didn't catch. Judged independently of how good or
+        /// bad its extracted definition happens to be.
+        case reject
+    }
+    public let verdict: Verdict
+    public init(_ verdict: Verdict) { self.verdict = verdict }
+}
+
 /// A pluggable upgrade path over the deterministic parser: takes its raw
 /// candidate pairs and produces cleaner cards, or generates distractors for
 /// multiple-choice questions. Every implementation must fail soft --
@@ -42,6 +76,40 @@ public protocol CardGenerator: Sendable {
     func generateAdditional(
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> [GeneratedCard]
+
+    /// Proposes up to `maxCount` fresh, written/free-response practice
+    /// questions grounded in `noteContext`, for a test-only question that
+    /// is never saved as a `Card` and never enters the draft review queue
+    /// -- unlike `generateAdditional`, nothing this returns is persisted;
+    /// a test asks for a fresh batch every time it starts. `existing` (the
+    /// cards already made from this note) steers the model away from
+    /// asking something that just restates a card the deck already tests
+    /// directly. Same grounding contract as `generateAdditional`: every
+    /// fact must come from `noteContext`, an empty result is a normal,
+    /// expected outcome, and every implementation must fail soft.
+    func generateTestQuestions(
+        existing: [CandidatePair], noteContext: String, maxCount: Int
+    ) async -> [GeneratedTestQuestion]
+
+    /// Judges a card two ways, kept deliberately separate (see
+    /// `ContextValidation.Verdict`): first whether `front` names a real,
+    /// general concept for `courseName` at all (independent of how good
+    /// `back` is), then -- only for a term that passes that bar -- whether
+    /// `back` already states it accurately. Unlike `generateAdditional`,
+    /// a `.refine` result is NOT restricted to what `noteContext` happens
+    /// to say: it's a brand-new definition from the model's own subject
+    /// knowledge, because the whole point is correcting a term whose
+    /// extracted text is wrong or off-topic -- restating that same flawed
+    /// text more smoothly (what an earlier version of this prompt did)
+    /// isn't a fix. `noteContext` is still passed as grounding/reference,
+    /// just not as a hard boundary the way it is for `generateAdditional`.
+    /// `.valid` is the fail-soft default: no generator available, an
+    /// empty `noteContext`, or any error all look the same to a caller --
+    /// keep the card exactly as parsed rather than risk rejecting
+    /// something real on a shaky signal.
+    func validateContext(
+        front: String, back: String, noteContext: String, courseName: String
+    ) async -> ContextValidation
 }
 
 /// The v1 default: no model, no network, no framework check. Candidates
@@ -69,6 +137,22 @@ public struct NoGenerator: CardGenerator {
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> [GeneratedCard] {
         []
+    }
+
+    /// No model means no proposal -- same "nothing fabricated" spirit as
+    /// `generateAdditional`.
+    public func generateTestQuestions(
+        existing: [CandidatePair], noteContext: String, maxCount: Int
+    ) async -> [GeneratedTestQuestion] {
+        []
+    }
+
+    /// No model means no opinion -- always `.valid`, i.e. leave the card
+    /// exactly as the deterministic parser produced it.
+    public func validateContext(
+        front: String, back: String, noteContext: String, courseName: String
+    ) async -> ContextValidation {
+        ContextValidation(.valid)
     }
 }
 

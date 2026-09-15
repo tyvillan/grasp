@@ -22,6 +22,14 @@
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- Both keys: macOS 14 split calendar access into full/write-only,
+         and the older key is still what pre-14 systems read. GRASP only
+         ever reads (it never writes to Calendar.app), but reading exam
+         dates is exactly what the "full access" prompt gates. -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>GRASP reads your calendar to find exam and quiz dates and match them to your courses. It never adds, changes, or deletes anything in your calendar.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>GRASP reads your calendar to find exam and quiz dates and match them to your courses. It never adds, changes, or deletes anything in your calendar.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Tyler Villanueva</string>
     <key>UTExportedTypeDeclarations</key>

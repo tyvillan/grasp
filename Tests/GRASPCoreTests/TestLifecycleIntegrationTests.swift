@@ -45,7 +45,7 @@ struct TestLifecycleIntegrationTests {
             try attempt.insert(conn)
             for (index, q) in questions.enumerated() {
                 try TestItem(
-                    id: "\(q.cardId)-\(attempt.id)", attemptId: attempt.id, cardId: q.cardId,
+                    id: "\(q.id)-\(attempt.id)", attemptId: attempt.id, cardId: q.cardId,
                     ordinal: index, questionType: q.type.rawValue, promptText: q.prompt,
                     correctAnswer: q.correctAnswer
                 ).insert(conn)
@@ -59,7 +59,7 @@ struct TestLifecycleIntegrationTests {
             try await db.queue.write { conn in
                 guard var item = try TestItem
                     .filter(Column("attemptId") == attemptId)
-                    .filter(Column("cardId") == question.cardId)
+                    .filter(Column("ordinal") == index)
                     .fetchOne(conn)
                 else { return }
                 item.givenAnswer = isCorrect ? question.correctAnswer : "wrong"
@@ -112,5 +112,63 @@ struct TestLifecycleIntegrationTests {
         }
         #expect(regradedCards.allSatisfy { $0.reps == 1 })
         #expect(regradedCards.allSatisfy { $0.schedulerState == FSRS.CardState.learning.rawValue })
+    }
+
+    @Test("a card-less AI-generated test item grades by ordinal and is skipped by FSRS feedback")
+    func aiGeneratedItemGradesWithoutACard() async throws {
+        let (db, deckId) = try await Self.seededGeologyDeck()
+
+        let realCard = try await db.queue.read { conn in
+            let cardIds = try DeckCard.filter(Column("deckId") == deckId).fetchAll(conn).map(\.cardId)
+            return try #require(try Card.filter(cardIds.contains(Column("id"))).fetchOne(conn))
+        }
+
+        let attemptId = try await db.queue.write { conn -> String in
+            let attempt = TestAttempt(deckId: deckId, configJSON: "{}", startedAt: Date())
+            try attempt.insert(conn)
+            try TestItem(
+                id: "real-\(attempt.id)", attemptId: attempt.id, cardId: realCard.id,
+                ordinal: 0, questionType: "written", promptText: realCard.front,
+                correctAnswer: realCard.back
+            ).insert(conn)
+            try TestItem(
+                id: "ai-\(attempt.id)", attemptId: attempt.id, cardId: nil,
+                ordinal: 1, questionType: "written", promptText: "An AI-authored question",
+                correctAnswer: "An AI-authored answer", isAIGenerated: true
+            ).insert(conn)
+            return attempt.id
+        }
+
+        // Miss both, ordinal-keyed exactly like `AppStore.submitTestAnswer`.
+        for ordinal in [0, 1] {
+            try await db.queue.write { conn in
+                guard var item = try TestItem
+                    .filter(Column("attemptId") == attemptId)
+                    .filter(Column("ordinal") == ordinal)
+                    .fetchOne(conn)
+                else { return }
+                item.givenAnswer = "wrong"
+                item.isCorrect = false
+                try item.save(conn)
+            }
+        }
+
+        let (correct, total) = try await db.queue.read { conn -> (Int, Int) in
+            let items = try TestItem.filter(Column("attemptId") == attemptId).fetchAll(conn)
+            return (items.filter { $0.isCorrect == true }.count, items.count)
+        }
+        #expect(correct == 0)
+        #expect(total == 2) // the AI item counts toward the score even with no backing card
+
+        // Exactly `AppStore.gradeMissedTestItems`'s own logic: `.compactMap`
+        // over `cardId` naturally drops the AI item, no special-casing.
+        let missedCardIds = try await db.queue.read { conn in
+            try TestItem
+                .filter(Column("attemptId") == attemptId)
+                .filter(Column("isCorrect") == false)
+                .fetchAll(conn)
+                .compactMap(\.cardId)
+        }
+        #expect(missedCardIds == [realCard.id])
     }
 }

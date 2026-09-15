@@ -67,6 +67,26 @@ struct DuplicateDetectorTests {
         #expect(ids == Set([a.id, b.id, c.id]))
     }
 
+    @Test("groups (but not plain matchId) catches an exact-term pair whose independently-written definitions diverge past the back threshold")
+    func groupsCatchesSameTermDivergentDefinitions() {
+        // Modeled directly on real data: "Intro to Software Design" covers
+        // Abstraction in both its own lecture notes and a separate
+        // exam-prep slide deck, worded completely differently -- exactly
+        // the shape `sameTermFrontThreshold` exists for.
+        let a = card("Abstraction", "Exposing what a thing does while hiding how it does it, so a caller uses the interface without knowing the internals.")
+        let b = card("Abstraction", "Hides the internal implementation details while exposing only the necessary functionality, to focus on what to do rather than how.")
+
+        // Plain `matchId` (import-time/generation-time suppression) stays
+        // strict and correctly does NOT consider these the same card.
+        let strictIndex = DuplicateDetector.Index([a])
+        #expect(strictIndex.matchId(front: b.front, back: b.back) == nil)
+
+        // `groups` (the human-reviewed flow) does catch it.
+        let groups = DuplicateDetector.groups([a, b])
+        #expect(groups.count == 1)
+        #expect(Set(groups.first?.map(\.id) ?? []) == Set([a.id, b.id]))
+    }
+
     @Test("no duplicates among genuinely distinct cards")
     func noFalsePositives() {
         let cards = [
@@ -128,6 +148,159 @@ struct DuplicateDetectorTests {
         try await db.queue.read { conn in
             let count = try Card.filter(Column("front") == "Sunk cost").fetchCount(conn)
             #expect(count == 1)
+        }
+    }
+
+    // MARK: - applyMerges
+
+    /// A course + one deck, ready for cards to be dropped into -- every
+    /// `applyMerges` test needs at least one real deck for `DeckCard` FKs
+    /// to point at.
+    private func makeCourseAndDeck(_ db: Database) throws -> String {
+        let course = Course(semesterId: nil, name: "Merge Test Course")
+        try course.insert(db)
+        let deck = Deck(courseId: course.id, name: "Merge Test Deck")
+        try deck.insert(db)
+        return deck.id
+    }
+
+    @Test("applyMerges re-points a loser's Review rows onto the survivor")
+    func applyMergesRepointsReviews() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let survivor = card("Encapsulation", "Hiding implementation details.")
+            let loser = card("Encapsulation", "Hiding implementation details, reworded.")
+            try survivor.insert(conn)
+            try loser.insert(conn)
+            try DeckCard(deckId: deckId, cardId: survivor.id).insert(conn)
+            try DeckCard(deckId: deckId, cardId: loser.id).insert(conn)
+            try Review(
+                cardId: loser.id, reviewedAt: Date(), grade: 3, source: "flashcards",
+                dueAfter: Date(), schedulerVersion: "fsrs-5"
+            ).insert(conn)
+
+            try DuplicateDetector.applyMerges(
+                [.init(survivorId: survivor.id, losingIds: [loser.id])], db: conn
+            )
+
+            let survivorReviews = try Review.filter(Column("cardId") == survivor.id).fetchCount(conn)
+            let loserReviews = try Review.filter(Column("cardId") == loser.id).fetchCount(conn)
+            #expect(survivorReviews == 1)
+            #expect(loserReviews == 0)
+
+            let mergedLoser = try #require(try Card.fetchOne(conn, key: loser.id))
+            #expect(mergedLoser.deletedAt != nil)
+        }
+    }
+
+    @Test("applyMerges drops a loser's DeckCard row instead of colliding when the survivor is already in that deck")
+    func applyMergesDropsCollidingDeckCard() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let survivor = card("Term", "Definition A")
+            let loser = card("Term", "Definition A, reworded")
+            try survivor.insert(conn)
+            try loser.insert(conn)
+            // Both already in the same deck -- re-pointing the loser's row
+            // as-is would collide with the survivor's own (deckId, cardId)
+            // primary key.
+            try DeckCard(deckId: deckId, cardId: survivor.id).insert(conn)
+            try DeckCard(deckId: deckId, cardId: loser.id).insert(conn)
+
+            try DuplicateDetector.applyMerges(
+                [.init(survivorId: survivor.id, losingIds: [loser.id])], db: conn
+            )
+
+            let membershipCount = try DeckCard.filter(Column("deckId") == deckId).fetchCount(conn)
+            #expect(membershipCount == 1)
+            let survivorStillMember = try DeckCard
+                .filter(Column("deckId") == deckId).filter(Column("cardId") == survivor.id)
+                .fetchCount(conn)
+            #expect(survivorStillMember == 1)
+        }
+    }
+
+    @Test("applyMerges drops a loser's DeckCard membership in a different deck rather than giving the survivor a second deck")
+    func applyMergesDropsMembershipInADifferentDeck() async throws {
+        // Regression test: an earlier version of `applyMerges` moved this
+        // membership onto the survivor instead of dropping it, which put
+        // one card in two decks of the same course -- a state nothing
+        // else in the app expects. That crashed `AppStore.cards(inDecks:)`
+        // for real, the first time this shipped.
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let course = Course(semesterId: nil, name: "Merge Test Course")
+            try course.insert(conn)
+            let deckA = Deck(courseId: course.id, name: "Deck A")
+            let deckB = Deck(courseId: course.id, name: "Deck B")
+            try deckA.insert(conn)
+            try deckB.insert(conn)
+
+            let survivor = card("Term", "Definition A")
+            let loser = card("Term", "Definition A, reworded")
+            try survivor.insert(conn)
+            try loser.insert(conn)
+            try DeckCard(deckId: deckA.id, cardId: survivor.id).insert(conn)
+            try DeckCard(deckId: deckB.id, cardId: loser.id).insert(conn)
+
+            try DuplicateDetector.applyMerges(
+                [.init(survivorId: survivor.id, losingIds: [loser.id])], db: conn
+            )
+
+            let survivorDeckIds = Set(
+                try DeckCard.filter(Column("cardId") == survivor.id).fetchAll(conn).map(\.deckId)
+            )
+            #expect(survivorDeckIds == Set([deckA.id]))
+            #expect(try DeckCard.filter(Column("deckId") == deckB.id).fetchCount(conn) == 0)
+        }
+    }
+
+    @Test("applyMerges keeps the survivor's own LearnState and discards a loser's")
+    func applyMergesPrefersSurvivorLearnState() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let survivor = card("Term", "Definition")
+            let loser = card("Term", "Definition, reworded")
+            try survivor.insert(conn)
+            try loser.insert(conn)
+            try DeckCard(deckId: deckId, cardId: survivor.id).insert(conn)
+            try DeckCard(deckId: deckId, cardId: loser.id).insert(conn)
+            try LearnState(cardId: survivor.id, level: 3, consecutiveCorrect: 4).save(conn)
+            try LearnState(cardId: loser.id, level: 1, consecutiveCorrect: 0).save(conn)
+
+            try DuplicateDetector.applyMerges(
+                [.init(survivorId: survivor.id, losingIds: [loser.id])], db: conn
+            )
+
+            let survivorState = try #require(try LearnState.fetchOne(conn, key: survivor.id))
+            #expect(survivorState.level == 3) // untouched, not overwritten by the loser's
+            #expect(try LearnState.fetchOne(conn, key: loser.id) == nil)
+        }
+    }
+
+    @Test("applyMerges carries a loser's LearnState over when the survivor has none")
+    func applyMergesCarriesOverLearnStateWhenSurvivorHasNone() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let survivor = card("Term", "Definition")
+            let loser = card("Term", "Definition, reworded")
+            try survivor.insert(conn)
+            try loser.insert(conn)
+            try DeckCard(deckId: deckId, cardId: survivor.id).insert(conn)
+            try DeckCard(deckId: deckId, cardId: loser.id).insert(conn)
+            try LearnState(cardId: loser.id, level: 2, consecutiveCorrect: 1).save(conn)
+
+            try DuplicateDetector.applyMerges(
+                [.init(survivorId: survivor.id, losingIds: [loser.id])], db: conn
+            )
+
+            let survivorState = try #require(try LearnState.fetchOne(conn, key: survivor.id))
+            #expect(survivorState.level == 2)
+            #expect(try LearnState.fetchOne(conn, key: loser.id) == nil)
         }
     }
 }

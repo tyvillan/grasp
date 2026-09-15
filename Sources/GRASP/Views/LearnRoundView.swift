@@ -472,13 +472,16 @@ struct LearnRoundView: View {
     }
 
     private func advance(_ question: LearnEngine.RoundQuestion, wasCorrect: Bool) {
-        try? store.recordLearnAnswer(cardId: question.cardId, wasCorrect: wasCorrect)
+        // Learn mode never produces a card-less question -- every
+        // `RoundQuestion` here has a real backing card.
+        guard let cardId = question.cardId else { return }
+        try? store.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect)
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         refreshMastery()
 
         queue.removeFirst()
         if wasCorrect {
-            completedCardIds.insert(question.cardId)
+            completedCardIds.insert(cardId)
         } else {
             // Requeue a few slots back so it resurfaces before the round
             // ends, rather than dropping it entirely on a miss.
