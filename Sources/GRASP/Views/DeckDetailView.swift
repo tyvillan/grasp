@@ -122,7 +122,9 @@ struct DeckDetailView: View {
     private var aiActivity: AIActivity? { store.aiJob(cardJobKey)?.activity }
     private var isRefiningDeck: Bool { aiActivity?.purpose == "refine" }
     private var isGeneratingCards: Bool { aiActivity?.purpose == "add" }
-    private var dueCount: Int { (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0 }
+    /// Refreshed in `load()`. As a computed property it ran the whole due
+    /// query four times per render -- on every selection click.
+    @State private var dueCount = 0
 
     /// The New Card sheet's default target: the current deck when scoped
     /// to one, or no default at all in the "All Cards" master category --
@@ -227,7 +229,13 @@ struct DeckDetailView: View {
             }
             if selectedCardIds.count > 1 { selectionActionBar }
             HStack(spacing: 0) {
+                // The list keeps a usable width and the preview gives way,
+                // down to a floor. A fixed 360pt preview took the whole pane
+                // at the window's smallest size and squeezed the list to
+                // nothing.
                 cardList
+                    .frame(minWidth: 240)
+                    .layoutPriority(1)
                 if let card = previewCard {
                     Rectangle().fill(GRASPColor.hairlineStrong).frame(width: 1)
                     CardPreviewPane(
@@ -238,7 +246,7 @@ struct DeckDetailView: View {
                         onViewNote: { viewingMaterialId = card.materialId },
                         onClose: { previewCardId = nil }
                     )
-                    .frame(width: 360)
+                    .frame(minWidth: 240, idealWidth: 360, maxWidth: 360)
                 }
             }
         }
@@ -446,23 +454,18 @@ struct DeckDetailView: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                modeButton("Study", "rectangle.stack.fill", prominent: false) { isStudying = true }
-                    .disabled(dueCount == 0)
-                modeButton("Learn", "graduationcap.fill", prominent: dueCount == 0 && activeCount > 0) {
-                    isLearning = true
+            // One row when it fits; otherwise the card actions wrap under
+            // the study modes rather than clipping off the edge.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    studyModeButtons
+                    cardActionButtons
+                    Spacer(minLength: 0)
                 }
-                .disabled(activeCount == 0)
-                modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
-                    .disabled(activeCount == 0)
-                // Creating a card belongs to the card list; offering it
-                // while reading the overview puts an action in the wrong
-                // room.
-                if contentTab == .cards {
-                    newCardButton
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) { studyModeButtons; Spacer(minLength: 0) }
+                    HStack(spacing: 8) { cardActionButtons; Spacer(minLength: 0) }
                 }
-                addFilesButton
-                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 18)
@@ -472,6 +475,28 @@ struct DeckDetailView: View {
         .background(alignment: .bottom) {
             Rectangle().fill(GRASPColor.hairline).frame(height: 1)
         }
+    }
+
+    @ViewBuilder
+    private var studyModeButtons: some View {
+        modeButton("Study", "rectangle.stack.fill", prominent: false) { isStudying = true }
+            .disabled(dueCount == 0)
+        modeButton("Learn", "graduationcap.fill", prominent: dueCount == 0 && activeCount > 0) {
+            isLearning = true
+        }
+        .disabled(activeCount == 0)
+        modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
+            .disabled(activeCount == 0)
+    }
+
+    @ViewBuilder
+    private var cardActionButtons: some View {
+        // Creating a card belongs to the card list; offering it while
+        // reading the overview puts an action in the wrong room.
+        if contentTab == .cards {
+            newCardButton
+        }
+        addFilesButton
     }
 
     /// Reads as a sentence -- "231 cards · 12 due · 40 understood" -- with
@@ -804,13 +829,17 @@ struct DeckDetailView: View {
     /// regardless of whatever the framework does to the selection
     /// binding before the menu opens.
     private var cardList: some View {
-        List(selection: $selectedCardIds) {
-            ForEach(visibleCards) { card in
+        // Computed once per render, not once per row.
+        let cards = visibleCards
+        let selection = cards.filter { selectedCardIds.contains($0.id) }.map(\.id)
+        return List(selection: $selectedCardIds) {
+            ForEach(cards) { card in
                 CardRow(
                     card: card,
                     mastery: learnLevels[card.id] ?? .new,
                     siblingDecks: siblingDecks,
                     isRefining: refiningCardIds.contains(card.id),
+                    dragCardIds: selectedCardIds.contains(card.id) ? selection : [card.id],
                     onPreview: { previewCardId = card.id },
                     onApprove: { setStatus(card, .active) },
                     onSuspend: { setStatus(card, card.status == .suspended ? .active : .suspended) },
@@ -994,6 +1023,7 @@ struct DeckDetailView: View {
         }
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
+        dueCount = (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0
         if let courseId {
             let allDecksInCourse = (try? store.decks(inCourse: courseId)) ?? []
             switch scope {
@@ -1395,6 +1425,8 @@ private struct CardRow: View {
     let mastery: LearnEngine.Level
     let siblingDecks: [Deck]
     let isRefining: Bool
+    /// What dragging this row carries.
+    let dragCardIds: [String]
     let onPreview: () -> Void
     let onApprove: () -> Void
     let onSuspend: () -> Void
@@ -1472,7 +1504,11 @@ private struct CardRow: View {
         }
         .padding(.vertical, 7)
         .contentShape(Rectangle())
-        .draggable(CardTransfer(cardId: card.id))
+        .draggable(CardTransfer(cardIds: dragCardIds)) {
+            Label(dragCardIds.count == 1 ? card.front : "\(dragCardIds.count) cards",
+                  systemImage: "rectangle.on.rectangle")
+                .padding(8)
+        }
         .onHover { isHovering = $0 }
     }
 

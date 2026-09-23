@@ -73,12 +73,26 @@ private final class SlideTextExtractor: NSObject, XMLParserDelegate {
         current += string
     }
 
+    /// The runs of the paragraph being read. A paragraph is emitted whole
+    /// when it closes: one line per run split a sentence wherever its
+    /// formatting changed -- a bolded word became its own line, and the
+    /// parser read those fragments as a term and its definition.
+    private var paragraph = ""
+
     func parser(
         _ parser: XMLParser, didEndElement elementName: String,
         namespaceURI: String?, qualifiedName qName: String?
     ) {
-        guard elementName == "a:t" else { return }
-        if !current.isEmpty { textRuns.append(current) }
-        isInTextRun = false
+        switch elementName {
+        case "a:t":
+            paragraph += current
+            isInTextRun = false
+        case "a:p":
+            let line = paragraph.trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { textRuns.append(line) }
+            paragraph = ""
+        default:
+            break
+        }
     }
 }

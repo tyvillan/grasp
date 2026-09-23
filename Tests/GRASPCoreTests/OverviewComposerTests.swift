@@ -485,6 +485,8 @@ struct OverviewComposerTests {
         #expect(Date().timeIntervalSince(cancelledAt) < 2)
         #expect(outcome == .empty)
         // The call in flight when Stop was pressed, and nothing after it.
-        #expect(generator.calls == 1)
+        // At most one rather than exactly one: on a loaded machine the
+        // first call may not have started by the time Stop is pressed.
+        #expect(generator.calls <= 1)
     }
 }

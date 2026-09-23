@@ -12,7 +12,10 @@ import UniformTypeIdentifiers
 /// `Transferable`'s `transferRepresentation` requirement is `nonisolated`,
 /// so without this the type would fail to conform.
 nonisolated struct CardTransfer: Codable, Transferable {
-    let cardId: String
+    /// Every card being dragged: the whole selection when the row dragged
+    /// is part of one. With a single id, dragging five selected cards moved
+    /// only the one under the pointer.
+    let cardIds: [String]
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .graspCard)

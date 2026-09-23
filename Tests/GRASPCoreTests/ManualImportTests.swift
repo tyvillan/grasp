@@ -164,7 +164,7 @@ struct ManualImportTests {
             "Osmosis",
             "The movement of water across a semi-permeable membrane from an area of "
                 + "low solute concentration to an area of high solute concentration.",
-        ].map { "<a:r><a:t>\($0)</a:t></a:r>" }.joined()
+        ].map { "<a:p><a:r><a:t>\($0)</a:t></a:r></a:p>" }.joined()
         let slideXML = "<p:sld xmlns:a=\"a\" xmlns:p=\"p\"><p:cSld><p:spTree><p:sp><p:txBody>\(runs)</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
 
         let fileURL = dir.appendingPathComponent("Lecture Slides.pptx")

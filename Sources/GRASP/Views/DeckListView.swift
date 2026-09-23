@@ -102,7 +102,7 @@ struct DeckListView: View {
                         }
                         .dropDestination(for: CardTransfer.self) { items, _ in
                             guard !items.isEmpty else { return false }
-                            try? store.bulkMoveCards(items.map(\.cardId), toDeck: deck.id)
+                            try? store.bulkMoveCards(items.flatMap(\.cardIds), toDeck: deck.id)
                             return true
                         } isTargeted: { isTargeted in
                             dropTargetDeckId = isTargeted ? deck.id : nil

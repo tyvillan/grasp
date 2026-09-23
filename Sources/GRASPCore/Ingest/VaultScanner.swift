@@ -72,8 +72,15 @@ public actor VaultScanner {
             return summary
         }
 
-        try database.queue.write { db in
-            let excludedFolders = Set(try ExcludedFolder.fetchAll(db).map(\.folderPath))
+        // One transaction per file, not one for the whole scan. A single
+        // write held the database for the entire run -- PDF parsing and OCR
+        // included -- so grading a card or saving an edit waited until the
+        // import finished, and any error outside a file's own handling
+        // rolled back everything imported so far.
+        let excludedFolders = try database.queue.read { db in
+            Set(try ExcludedFolder.fetchAll(db).map(\.folderPath))
+        }
+        do {
             for entry in topLevel.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
                 let name = entry.lastPathComponent
@@ -82,7 +89,7 @@ public actor VaultScanner {
 
                 if isSemesterFolder {
                     try scanSemesterFolder(
-                        entry, folderName: name, excludedFolders: excludedFolders, db: db, summary: &summary
+                        entry, folderName: name, excludedFolders: excludedFolders, summary: &summary
                     )
                 } else {
                     // A non-semester top-level directory (e.g. "Side
@@ -91,10 +98,12 @@ public actor VaultScanner {
                     // don't fit the semester/course pattern.
                     try scanCourseFolder(
                         entry, semesterId: nil, courseNameOverride: name,
-                        excludedFolders: excludedFolders, db: db, summary: &summary
+                        excludedFolders: excludedFolders, summary: &summary
                     )
                 }
             }
+        }
+        try database.queue.write { db in
             try Self.sweepMissingFiles(under: collegeRoot.path, db: db)
             summary.semesterCount = try Semester.fetchCount(db)
             summary.courseCount = try Course.fetchCount(db)
@@ -153,7 +162,7 @@ public actor VaultScanner {
 
     private func scanSemesterFolder(
         _ semesterDir: URL, folderName: String, excludedFolders: Set<String>,
-        db: Database, summary: inout ImportSummary
+        summary: inout ImportSummary
     ) throws {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
@@ -170,7 +179,7 @@ public actor VaultScanner {
             // folder names are known to sort incorrectly.
             try scanCourseFolder(
                 entry, semesterId: nil, courseNameOverride: nil,
-                fallbackSemesterFolderName: folderName, excludedFolders: excludedFolders, db: db, summary: &summary
+                fallbackSemesterFolderName: folderName, excludedFolders: excludedFolders, summary: &summary
             )
         }
     }
@@ -178,7 +187,7 @@ public actor VaultScanner {
     private func scanCourseFolder(
         _ courseDir: URL, semesterId: String?, courseNameOverride: String?,
         fallbackSemesterFolderName: String = "", excludedFolders: Set<String>,
-        db: Database, summary: inout ImportSummary
+        summary: inout ImportSummary
     ) throws {
         // Checked before anything else in this folder is even looked at --
         // no file walking, no `Material`/`Card` rows, no `findOrCreateCourse`
@@ -210,19 +219,28 @@ public actor VaultScanner {
 
             summary.filesScanned += 1
             do {
-                if kind == .markdown {
-                    try importNote(
-                        fileURL, courseName: courseName, courseFolderPath: courseDir.path,
-                        fallbackSemesterFolderName: fallbackSemesterFolderName,
-                        resolvedCourseId: &resolvedCourseId, db: db, summary: &summary
-                    )
-                } else {
-                    try importBinaryMaterial(
-                        fileURL, kind: kind, courseName: courseName, courseFolderPath: courseDir.path,
-                        fallbackSemesterFolderName: fallbackSemesterFolderName,
-                        resolvedCourseId: &resolvedCourseId, db: db, summary: &summary
-                    )
+                // Worked on copies, committed only if the file's transaction
+                // commits: a file that fails rolls back, and its half-counted
+                // summary and course id mustn't leak out of it.
+                var fileSummary = summary
+                var fileCourseId = resolvedCourseId
+                try database.queue.write { db in
+                    if kind == .markdown {
+                        try importNote(
+                            fileURL, courseName: courseName, courseFolderPath: courseDir.path,
+                            fallbackSemesterFolderName: fallbackSemesterFolderName,
+                            resolvedCourseId: &fileCourseId, db: db, summary: &fileSummary
+                        )
+                    } else {
+                        try importBinaryMaterial(
+                            fileURL, kind: kind, courseName: courseName, courseFolderPath: courseDir.path,
+                            fallbackSemesterFolderName: fallbackSemesterFolderName,
+                            resolvedCourseId: &fileCourseId, db: db, summary: &fileSummary
+                        )
+                    }
                 }
+                summary = fileSummary
+                resolvedCourseId = fileCourseId
             } catch {
                 summary.errors.append("\(fileURL.lastPathComponent): \(error)")
             }
@@ -622,7 +640,13 @@ public actor VaultScanner {
         try Self.deleteReplaceableDrafts(materialId: material.id, db: db)
 
         if material.isStudyWorthy {
-            let deck = try findOrCreateDeck(courseId: courseId, chapter: material.chapter, db: db)
+            let noteHadCards = try Card.filter(Column("materialId") == material.id).fetchCount(db) > 0
+            guard let deck = try findOrCreateDeck(
+                courseId: courseId, chapter: material.chapter, noteHadCards: noteHadCards, db: db
+            ) else {
+                summary.filesImportedOrUpdated += 1
+                return
+            }
             let pairs = PairParser.parse(reflowed)
 
             // Seeded from every card already in the deck -- deliberately
@@ -639,6 +663,13 @@ public actor VaultScanner {
                         arguments: [deck.id, material.id])
                 .fetchAll(db)
             var duplicateIndex = DuplicateDetector.Index(existingCards)
+            // Appended in order after what's there. Every import used to
+            // insert at sortIndex 0, so a deck's order was a tie broken
+            // however SQLite felt like it.
+            var nextIndex = try Int.fetchOne(db, sql:
+                "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
+                arguments: [deck.id]
+            ) ?? 0
 
             for pair in pairs {
                 if duplicateIndex.matchId(front: pair.front, back: pair.back) != nil {
@@ -651,7 +682,8 @@ public actor VaultScanner {
                     sourceLine: pair.sourceLine, origin: .parser, status: .draft
                 )
                 try card.save(db)
-                try DeckCard(deckId: deck.id, cardId: card.id).save(db)
+                try DeckCard(deckId: deck.id, cardId: card.id, sortIndex: nextIndex).save(db)
+                nextIndex += 1
                 duplicateIndex.insert(id: card.id, front: pair.front, back: pair.back)
                 summary.cardsCreated += 1
             }
@@ -717,19 +749,25 @@ public actor VaultScanner {
         return course
     }
 
-    private func findOrCreateDeck(courseId: String, chapter: String?, db: Database) throws -> Deck {
+    /// The deck a note's cards go in, or nil when the student deleted it.
+    ///
+    /// Matched by name or by the chapter it was made for, so a deck renamed
+    /// by hand keeps getting its note's cards instead of a second deck
+    /// appearing under the old name. A deleted deck is never reused. And
+    /// for a note that already had cards -- ones that were in that deck --
+    /// it isn't recreated either: re-importing those same notes brought
+    /// "General" and "Lecture 0" back after they were deleted, refilled with
+    /// every card as a fresh draft. A note that's new gets a fresh deck.
+    private func findOrCreateDeck(
+        courseId: String, chapter: String?, noteHadCards: Bool, db: Database
+    ) throws -> Deck? {
         let deckName = chapter ?? "General"
-        // Excludes soft-deleted decks: without this, re-importing after a
-        // user deletes a deck by hand would find and silently reuse that
-        // same tombstoned row for new cards -- into a deck every query
-        // already filters out everywhere else.
-        if let existing = try Deck
+        let matching = try Deck
             .filter(Column("courseId") == courseId)
-            .filter(Column("name") == deckName)
-            .filter(Column("deletedAt") == nil)
-            .fetchOne(db) {
-            return existing
-        }
+            .filter(Column("name") == deckName || (chapter != nil && Column("chapter") == chapter))
+            .fetchAll(db)
+        if let live = matching.first(where: { $0.deletedAt == nil }) { return live }
+        if !matching.isEmpty, noteHadCards { return nil }
         let deck = Deck(courseId: courseId, name: deckName, chapter: chapter)
         try deck.insert(db)
         return deck

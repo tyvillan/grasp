@@ -567,6 +567,12 @@ public enum MermaidParser {
     private static func parseMindmapNode(_ line: String) -> (String, MermaidGraph.NodeShape)? {
         for entry in shapeTable where line.contains(entry.open) && line.hasSuffix(entry.close) {
             guard let openRange = line.range(of: entry.open) else { continue }
+            // Only `id(text)` -- a single word before the bracket -- is a
+            // shaped node. "Gaussian elimination (row reduction)" is text
+            // that happens to end in a parenthesis, and was cut down to
+            // "row reduction".
+            let before = line[..<openRange.lowerBound]
+            guard !before.contains(where: \.isWhitespace) else { continue }
             let end = line.index(line.endIndex, offsetBy: -entry.close.count)
             guard openRange.upperBound <= end else { continue }
             let label = cleanLabel(String(line[openRange.upperBound..<end]))

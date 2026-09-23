@@ -41,9 +41,6 @@ final class AppStore {
     /// introduces.
     private(set) var revision = 0
 
-    /// Per-deck overview coverage, so the `Cards | Overview` switch can
-    /// tell whether there's anything behind it without a query per render.
-    private(set) var overviewStatusByDeck: [String: DeckOverviewStatus] = [:]
 
     /// Parsed and laid-out diagrams, keyed on material id plus the
     /// overview's `generatedAt` -- see `laidOutDiagram(for:source:)`.
@@ -143,6 +140,35 @@ final class AppStore {
     /// running on a throwaway in-memory one instead.
     let databaseOpenError: String?
 
+    /// This profile's own preferences, which every `@AppStorage` under the
+    /// profile's window reads (see `GRASPApp`). They used to live in the
+    /// shared defaults, so one person's daily goal, focus timer and sort
+    /// order were everyone's.
+    let preferences: UserDefaults
+
+    private static let perProfilePreferenceKeys = [
+        "dailyCardGoal", "focusWorkMinutes", "focusBreakMinutes", "focusCardTarget",
+        "deckSortOption", "cardSortOption", "deckListCollapsed",
+    ]
+
+    private static func preferences(for profile: Profile) -> UserDefaults {
+        guard profile.id != Profile.previewID,
+              let suite = UserDefaults(suiteName: "com.tyvillan.grasp.profile.\(profile.id)")
+        else { return .standard }
+        // Once: a profile that was already in use keeps the settings it had
+        // when they were shared. A brand-new profile starts from defaults.
+        if !suite.bool(forKey: "migratedSharedPreferences") {
+            let shared = UserDefaults.standard
+            if shared.object(forKey: vaultPathKey(for: profile)) != nil {
+                for key in perProfilePreferenceKeys {
+                    if let value = shared.object(forKey: key) { suite.set(value, forKey: key) }
+                }
+            }
+            suite.set(true, forKey: "migratedSharedPreferences")
+        }
+        return suite
+    }
+
     private static let vaultPathKey = "vaultPath"
 
     /// Per-profile UserDefaults key so switching profiles doesn't leak
@@ -177,6 +203,7 @@ final class AppStore {
         }
         self.database = db
         self.databaseOpenError = openError
+        self.preferences = Self.preferences(for: profile)
         self.scanner = VaultScanner(database: db)
         // A new profile starts with no vault. Defaulting to this Mac owner's
         // vault meant a second person's first Import pulled the owner's
@@ -670,21 +697,25 @@ final class AppStore {
 
                 let decks = try Deck.filter(Column("deletedAt") == nil).fetchAll(db)
                 coursesWithDecks = Set(decks.map(\.courseId))
-                var counts: [String: (Int, Int)] = [:]
-                let now = Date()
-                for deck in decks {
-                    let cardIds = try DeckCard.filter(Column("deckId") == deck.id).fetchAll(db).map(\.cardId)
-                    guard !cardIds.isEmpty else { counts[deck.id] = (0, 0); continue }
-                    let cards = try Card
-                        .filter(cardIds.contains(Column("id")))
-                        .filter(Column("deletedAt") == nil)
-                        .filter(Column("status") != CardStatus.suspended.rawValue)
-                        .fetchAll(db)
-                    let due = cards.filter { $0.status == .active && $0.due <= now }.count
-                    counts[deck.id] = (cards.count, due)
+                // One grouped query. This runs after every card graded or
+                // edited, and it used to be two queries per deck -- over a
+                // hundred for this vault -- loading full card rows each time.
+                var counts = Dictionary(uniqueKeysWithValues: decks.map { ($0.id, (0, 0)) })
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT deckCard.deckId AS deckId,
+                           COUNT(*) AS cards,
+                           SUM(CASE WHEN card.status = ? AND card.due <= ? THEN 1 ELSE 0 END) AS due
+                    FROM deckCard
+                    JOIN card ON card.id = deckCard.cardId
+                    WHERE card.deletedAt IS NULL AND card.status != ?
+                    GROUP BY deckCard.deckId
+                    """, arguments: [CardStatus.active.rawValue, Date(), CardStatus.suspended.rawValue])
+                for row in rows {
+                    let deckId: String = row["deckId"]
+                    guard counts[deckId] != nil else { continue }
+                    counts[deckId] = (row["cards"], row["due"])
                 }
                 deckCounts = counts
-                overviewStatusByDeck = try OverviewQueries.statusByDeck(db: db)
             }
         } catch {
             importError = "Failed to read database: \(error)"
@@ -2276,6 +2307,10 @@ final class AppStore {
             }
 
             try db.execute(sql: "DELETE FROM deckCard WHERE deckId = ?", arguments: [deckId])
+            // Decks are soft-deleted, so the calendar's ON DELETE SET NULL
+            // never fires: an exam kept pointing at the deleted deck, with a
+            // Study button leading nowhere.
+            try db.execute(sql: "UPDATE calendarEvent SET deckId = NULL WHERE deckId = ?", arguments: [deckId])
             deck.deletedAt = now
             deck.updatedAt = now
             try deck.save(db)

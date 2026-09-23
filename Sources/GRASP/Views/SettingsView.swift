@@ -517,7 +517,10 @@ private struct ExcludedFoldersSheet: View {
 /// request against a name the server no longer has.
 private struct OllamaModelPicker: View {
     let installed: [String]
-    @AppStorage(OllamaModelChoice.defaultsKey) private var chosen = ""
+    // The shared defaults, deliberately: which model to use is about what's
+    // installed on this Mac, not whose profile is open -- and it's read
+    // from there by `CardGenerators.select()`.
+    @AppStorage(OllamaModelChoice.defaultsKey, store: .standard) private var chosen = ""
 
     private var automaticName: String? {
         OllamaModelChoice.resolve(preferred: nil, installed: installed)

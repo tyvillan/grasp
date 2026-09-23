@@ -11,7 +11,8 @@ import ZIPFoundation
 @Suite("PptxExtractor")
 struct PptxExtractorTests {
     private func slideXML(_ texts: [String]) -> String {
-        let runs = texts.map { "<a:r><a:t>\($0)</a:t></a:r>" }.joined()
+        // One paragraph per text, as PowerPoint writes it.
+        let runs = texts.map { "<a:p><a:r><a:t>\($0)</a:t></a:r></a:p>" }.joined()
         return "<p:sld xmlns:a=\"a\" xmlns:p=\"p\"><p:cSld><p:spTree><p:sp><p:txBody>\(runs)</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
     }
 
@@ -83,5 +84,16 @@ struct PptxExtractorTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         #expect(PptxExtractor.extractText(from: url) == nil)
+    }
+
+    @Test("keeps a sentence whole when its formatting changes mid-way")
+    func joinsRunsWithinAParagraph() throws {
+        // "The <b>mitochondria</b> makes energy" is three runs, one paragraph.
+        let slide = "<p:sld xmlns:a=\"a\" xmlns:p=\"p\"><p:cSld><p:spTree><p:sp><p:txBody>"
+            + "<a:p><a:r><a:t>The </a:t></a:r><a:r><a:t>mitochondria</a:t></a:r><a:r><a:t> makes energy</a:t></a:r></a:p>"
+            + "</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+        let url = try makeArchive(["ppt/slides/slide1.xml": slide])
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(PptxExtractor.extractText(from: url) == "The mitochondria makes energy")
     }
 }

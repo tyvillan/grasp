@@ -21,6 +21,7 @@ struct GRASPApp: App {
             if let store {
                 ContentView()
                     .environment(store)
+                    .defaultAppStorage(store.preferences)
                     .environment(\.switchProfile) { self.store = nil }
                     .frame(minWidth: 800, minHeight: 500)
             } else {
@@ -38,6 +39,7 @@ struct GRASPApp: App {
             if let store {
                 SettingsView()
                     .environment(store)
+                    .defaultAppStorage(store.preferences)
                     .environment(\.switchProfile) { self.store = nil }
             }
         }
