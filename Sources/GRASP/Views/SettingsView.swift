@@ -53,7 +53,7 @@ private struct GeneralSettingsTab: View {
                     Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
                         .font(.caption)
                 }
-                Text("With no local model, cards come from the deterministic parser only -- fully usable, just more editing in the review queue. Install Ollama and pull a model (e.g. qwen2.5:7b-instruct) to enable AI refinement.")
+                Text("With no local model, cards come from the deterministic parser only -- fully usable, just more editing in the review queue. Install Ollama and pull a model (e.g. qwen3.5:9b) to enable AI refinement.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -144,13 +144,11 @@ private struct GeneralSettingsTab: View {
         if store.ollamaStatus.isRunning {
             let models = store.ollamaStatus.models
             if models.isEmpty {
-                Text("Connected, but no models are pulled yet -- run \"ollama pull qwen2.5:7b-instruct\" in Terminal.")
+                Text("Connected, but no models are pulled yet -- run \"ollama pull qwen3.5:9b\" in Terminal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("\(models.count) model\(models.count == 1 ? "" : "s") installed: \(models.joined(separator: ", "))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                OllamaModelPicker(installed: models)
             }
         } else {
             Text("GRASP couldn't reach a local Ollama server on this Mac. Install it, or start it if it's already installed, to enable on-device AI refinement.")
@@ -181,7 +179,10 @@ private struct AdvancedSettingsTab: View {
     /// that found groups opens the review sheet instead, so this never
     /// needs to report a positive count itself.
     @State private var duplicateScanFoundNone = false
-    @State private var isSweepingContext = false
+    /// Owned by the store: closing Settings mid-sweep used to leave it
+    /// running with no Stop button, and reopening offered a second one.
+    private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
+    private var isSweepingContext: Bool { sweepActivity != nil }
     @State private var contextSweepResult: AppStore.ContextCheckSummary?
 
     var body: some View {
@@ -224,12 +225,17 @@ private struct AdvancedSettingsTab: View {
             }
 
             Section("Off-Topic Card Check") {
-                HStack(spacing: 8) {
+                if let sweepActivity {
+                    AIProgressStrip(
+                        activity: sweepActivity,
+                        onStop: { store.stopAIJob(AppStore.sweepJobKey) },
+                        stopHelp: "Stops now. Cards already checked keep their changes; "
+                            + "the rest are left as they are.",
+                        isInline: true
+                    )
+                } else {
                     Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
                         .disabled(isSweepingContext)
-                    if isSweepingContext {
-                        ProgressView().controlSize(.small)
-                    }
                 }
                 Text("One-time sweep of every card you already have, going card by card against its own source note with the local AI model: a definition that reads like assignment instructions or a vague fragment gets rewritten from the note's own text, or removed if the note doesn't support a real one either. Applies immediately -- there's no per-card review step -- but every change is listed in the result and can be undone individually from the \"AI Refined\" badge on the card itself. Needs a local AI model (Ollama or Apple's on-device model) to do anything.")
                     .font(.caption)
@@ -276,11 +282,12 @@ private struct AdvancedSettingsTab: View {
     }
 
     private func sweepAllCardsForContext() {
-        isSweepingContext = true
-        Task {
-            let result = await store.sweepAllCardsForContext()
-            isSweepingContext = false
-            contextSweepResult = result
+        let run = AIActivity(headline: "Checking every card against its note")
+        store.runAIJob(AppStore.sweepJobKey, activity: run) { [store] run in
+            let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                await store.sweepAllCardsForContext()
+            }
+            if !(run.stopRequested && result.isEmpty) { contextSweepResult = result }
         }
     }
 
@@ -500,5 +507,37 @@ private struct ExcludedFoldersSheet: View {
             }
         }
         .frame(width: 480, height: 380)
+    }
+}
+
+/// Which installed model writes lessons and refines cards. "Automatic"
+/// stores nothing, so it keeps tracking `OllamaModelChoice.recommended` as
+/// that improves; picking a model pins it. A pinned model that's later
+/// removed falls back to automatic on its own, rather than failing every
+/// request against a name the server no longer has.
+private struct OllamaModelPicker: View {
+    let installed: [String]
+    @AppStorage(OllamaModelChoice.defaultsKey) private var chosen = ""
+
+    private var automaticName: String? {
+        OllamaModelChoice.resolve(preferred: nil, installed: installed)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("Model", selection: $chosen) {
+                Text(automaticName.map { "Automatic (\($0))" } ?? "Automatic").tag("")
+                ForEach(installed, id: \.self) { Text($0).tag($0) }
+            }
+            if !chosen.isEmpty, !installed.contains(chosen) {
+                Text("\(chosen) isn't installed any more, so GRASP is using \(automaticName ?? "another model").")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Used for lessons, card refinement and AI test questions. Larger models write better lessons but take longer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

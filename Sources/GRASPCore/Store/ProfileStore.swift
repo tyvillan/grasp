@@ -92,7 +92,18 @@ public enum ProfileStore {
     public static func save(_ profiles: [Profile], supportDirectory: URL) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let url = profilesFileURL(supportDirectory: supportDirectory)
+        // A file that exists but won't decode is set aside before it's
+        // replaced. The picker shows no profiles when loading fails, and
+        // creating one then wrote a list of just that one over the file --
+        // every existing profile gone from the list, their data orphaned.
+        if let existing = try? Data(contentsOf: url),
+           (try? JSONDecoder().decode([Profile].self, from: existing)) == nil {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let backup = url.deletingPathExtension().appendingPathExtension("unreadable-\(stamp).json")
+            try? fm.copyItem(at: url, to: backup)
+        }
         let data = try JSONEncoder().encode(profiles)
-        try data.write(to: profilesFileURL(supportDirectory: supportDirectory), options: .atomic)
+        try data.write(to: url, options: .atomic)
     }
 }

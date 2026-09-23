@@ -112,10 +112,7 @@ public enum LearnEngine {
     private static func trueFalseQuestion<R: RandomNumberGenerator>(
         for candidate: Candidate, allCandidates: [Candidate], using rng: inout R
     ) -> RoundQuestion {
-        let showTrue = Bool.random(using: &rng)
-        let statement = showTrue
-            ? candidate.back
-            : (distractors(for: candidate, in: allCandidates, count: 1, using: &rng).first ?? candidate.back)
+        let (statement, showTrue) = trueFalseStatement(for: candidate, in: allCandidates, using: &rng)
         return RoundQuestion(cardId: candidate.cardId, prompt: candidate.front,
                               correctAnswer: showTrue ? "True" : "False", type: .trueFalse,
                               statement: statement, statementIsTrue: showTrue)
@@ -127,10 +124,30 @@ public enum LearnEngine {
     /// answer identical to the correct one. A `CardGenerator` can replace
     /// this with semantically-chosen distractors later without changing
     /// the round builder's shape.
+    /// The statement a true/false question shows, and whether it's true.
+    /// A false one needs some other card's answer to show; with none to
+    /// borrow the statement is always the true one. Showing the correct
+    /// answer and keying it "False" -- what the old fallback did -- marked a
+    /// student wrong for answering correctly.
+    public static func trueFalseStatement<R: RandomNumberGenerator>(
+        for candidate: Candidate, in pool: [Candidate], using rng: inout R
+    ) -> (statement: String, isTrue: Bool) {
+        if Bool.random(using: &rng),
+           let wrong = distractors(for: candidate, in: pool, count: 1, using: &rng).first {
+            return (wrong, false)
+        }
+        return (candidate.back, true)
+    }
+
     public static func distractors<R: RandomNumberGenerator>(
         for candidate: Candidate, in pool: [Candidate], count: Int, using rng: inout R
     ) -> [String] {
-        let others = pool.filter { $0.cardId != candidate.cardId && $0.back != candidate.back }
+        // One per distinct answer: two cards with the same back would
+        // otherwise show the same option twice.
+        var seen: Set<String> = [AnswerGrading.normalize(candidate.back)]
+        let others = pool.filter {
+            $0.cardId != candidate.cardId && seen.insert(AnswerGrading.normalize($0.back)).inserted
+        }
         guard !others.isEmpty else { return [] }
         let targetLength = candidate.back.count
         let ranked = others.sorted { abs($0.back.count - targetLength) < abs($1.back.count - targetLength) }

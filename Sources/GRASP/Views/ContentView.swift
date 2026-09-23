@@ -28,6 +28,9 @@ struct ContentView: View {
     // toolbar button -- the two flows never run at once, so one alert
     // does for both.
     @State private var importResult: ImportResultMessage?
+    /// Held back while the duplicate sheet is up: SwiftUI shows one sheet at
+    /// a time, and the import summary requested alongside it was lost.
+    @State private var deferredImportResult: ImportResultMessage?
     // Persisted rather than session-only: a preference about how much of
     // the window to dedicate to the deck list, not a piece of navigation
     // state that should reset the moment the app relaunches.
@@ -108,6 +111,22 @@ struct ContentView: View {
                 }
             }
             .background(GRASPColor.canvas)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let error = store.databaseOpenError {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(GRASPColor.rejected)
+                        Text(error)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(GRASPColor.rejectedSoft)
+                }
+            }
         }
         .toolbar {
             // The deck-list collapse toggle: the ask placed this control
@@ -192,7 +211,12 @@ struct ContentView: View {
         .sheet(isPresented: Binding(
             get: { !store.pendingDuplicateGroups.isEmpty },
             set: { if !$0 { store.clearPendingDuplicates() } }
-        )) {
+        ), onDismiss: {
+            if let deferred = deferredImportResult {
+                deferredImportResult = nil
+                importResult = deferred
+            }
+        }) {
             DuplicateReviewSheet(groups: store.pendingDuplicateGroups) { merges in
                 try? store.mergeDuplicates(merges)
                 store.clearPendingDuplicates()
@@ -211,11 +235,16 @@ struct ContentView: View {
         .onChange(of: selectedCourseId) { _, _ in
             guard let courseId = activeCourseId else { return }
             if let deckId = selectedDeckId,
-               let deck = (try? store.deck(deckId)) ?? nil,
-               deck.courseId == courseId, deck.deletedAt == nil {
+               deckId == DeckListView.allCardsId
+               || (try? store.deck(deckId)).flatMap({ $0?.courseId == courseId && $0?.deletedAt == nil }) == true {
                 return
             }
-            selectedDeckId = (try? store.decks(inCourse: courseId))?.first?.id
+            // "All Cards" -- the master category pinned above every real
+            // deck -- rather than whichever deck happens to sort first:
+            // landing on one arbitrary deck read as landing in the wrong
+            // place, and "All Cards" is the one selection that's never
+            // wrong for a course you just clicked into.
+            selectedDeckId = DeckListView.allCardsId
         }
     }
 
@@ -223,6 +252,14 @@ struct ContentView: View {
     /// dismisses -- the file panel itself must run after that sheet is
     /// gone, not from inside it, since a modal `NSOpenPanel` launched from
     /// a still-presented SwiftUI sheet behaves unreliably on macOS.
+    private func showImportResult(_ result: ImportResultMessage) {
+        if store.pendingDuplicateGroups.isEmpty {
+            importResult = result
+        } else {
+            deferredImportResult = result
+        }
+    }
+
     private func runUploadPanel() {
         guard let courseId = uploadTargetCourseId else { return }
         uploadTargetCourseId = nil
@@ -230,7 +267,7 @@ struct ContentView: View {
         guard !urls.isEmpty else { return }
         Task {
             let summary = await store.importFiles(urls, intoCourse: courseId)
-            importResult = ImportResultMessage(summary: summary)
+            showImportResult(ImportResultMessage(summary: summary))
         }
     }
 
@@ -244,7 +281,7 @@ struct ContentView: View {
         guard !urls.isEmpty else { return }
         Task {
             let summary = await store.importFiles(urls, intoCourse: courseId)
-            importResult = ImportResultMessage(summary: summary)
+            showImportResult(ImportResultMessage(summary: summary))
         }
     }
 }
@@ -366,6 +403,10 @@ private struct UploadToCourseSheet: View {
                     selection = nil
                     dismiss()
                 }
+                // Escape too: without the shortcut, Escape closed the sheet
+                // with the course still chosen and the file panel opened
+                // anyway.
+                .keyboardShortcut(.cancelAction)
                 Button("Choose Files…") { dismiss() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(selection == nil)

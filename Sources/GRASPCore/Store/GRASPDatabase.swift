@@ -22,6 +22,11 @@ public final class GRASPDatabase: Sendable {
             withIntermediateDirectories: true
         )
         var config = Configuration()
+        // Wait briefly for a lock instead of failing at once. Switching back
+        // to the same profile can leave the old store's in-flight work
+        // holding this file for a moment, and "database is locked" then
+        // failed whatever the new store tried first.
+        config.busyMode = .timeout(5)
         config.foreignKeysEnabled = true
         queue = try DatabaseQueue(path: dbURL.path, configuration: config)
         try Schema.migrator().migrate(queue)

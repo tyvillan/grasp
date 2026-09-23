@@ -58,10 +58,12 @@ struct DeckDetailView: View {
     @State private var isLearning = false
     @State private var testPhase: TestPhase?
     @State private var isGeneratorAvailable = false
-    @State private var isRefiningDeck = false
+    @State private var showingDeckFiles = false
+    /// The deck-wide AI job in progress (Refine Deck, Add More Cards), shown
+    /// as a strip under the header. One at a time: they both work through
+    /// the same drafts.
     @State private var refineDeckResult: AppStore.RefineDeckSummary?
     @State private var showingRefineDeckConfirmation = false
-    @State private var isGeneratingCards = false
     @State private var fillGapsResult: Int?
     @State private var showingGenerateSheet = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
@@ -75,6 +77,10 @@ struct DeckDetailView: View {
     @State private var pendingBulkDelete: [String]?
     @State private var duplicateGroups: [AppStore.DuplicateGroup] = []
     @State private var showingDuplicateReview = false
+    /// Every card with a single-card refine in flight. A set: with one id,
+    /// refining a second card cleared the first one's "Refining…" early.
+    @State private var refiningCardIds: Set<String> = []
+    @State private var cardRefineResult: CardRefineMessage?
     /// Bumped every time `scope` changes (see `loadScopeIdentity`). `scope`
     /// itself is a plain `let`, not `@State`, so a `Task` launched from a
     /// button action captures it frozen at whatever deck/course was open
@@ -91,8 +97,31 @@ struct DeckDetailView: View {
         var id: String { rawValue }
     }
 
+    /// Which half of the deck is on screen. The deck header, the draft
+    /// notice and the duplicate notice sit above this and are shared by
+    /// both -- they're facts about the deck, not about either view of it.
+    @State private var contentTab: ContentTab = .cards
+
+    private enum ContentTab: String, CaseIterable, Identifiable {
+        case cards = "Cards", overview = "Overview"
+        var id: String { rawValue }
+    }
+
+    /// Free -- `cards` is already loaded. A deck whose cards were all typed
+    /// by hand has no note to summarise, so the tab never appears at all:
+    /// there'd be no action to offer behind it, and this app hides an
+    /// affordance rather than showing a disabled one.
+    private var hasSourceNotes: Bool { cards.contains { $0.materialId != nil } }
+
     private var draftCount: Int { cards.filter { $0.status == .draft }.count }
     private var activeCount: Int { cards.filter { $0.status == .active }.count }
+
+    /// This course's running deck-wide AI job, which the store owns so it
+    /// survives this view being swapped out mid-run.
+    private var cardJobKey: String { store.cardJobKey(courseId: courseId) }
+    private var aiActivity: AIActivity? { store.aiJob(cardJobKey)?.activity }
+    private var isRefiningDeck: Bool { aiActivity?.purpose == "refine" }
+    private var isGeneratingCards: Bool { aiActivity?.purpose == "add" }
     private var dueCount: Int { (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0 }
 
     /// The New Card sheet's default target: the current deck when scoped
@@ -106,7 +135,10 @@ struct DeckDetailView: View {
 
     private var visibleCards: [Card] {
         let filtered: [Card]
-        if masteryFilter == .all {
+        // With no active cards the filter picker is hidden, so a filter
+        // carried in from another deck would blank the list with no way to
+        // clear it. Only active cards have a mastery level to filter on.
+        if masteryFilter == .all || activeCount == 0 {
             filtered = cards
         } else {
             filtered = cards.filter { card in
@@ -168,11 +200,11 @@ struct DeckDetailView: View {
         visibleCards.filter { selectedCardIds.contains($0.id) }.map(\.id)
     }
 
-    var body: some View {
+    /// The card list and everything that belongs to it. Lifted out of
+    /// `body` verbatim when the Overview tab arrived -- no behaviour
+    /// change, and `body` finally fits on a screen.
+    private var cardsTab: some View {
         VStack(spacing: 0) {
-            deckHeader
-            if draftCount > 0 { draftNotice }
-            if !duplicateGroups.isEmpty { duplicateNotice }
             if !cards.isEmpty {
                 HStack {
                     if activeCount > 0 {
@@ -210,10 +242,43 @@ struct DeckDetailView: View {
                 }
             }
         }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            deckHeader
+            if let aiActivity {
+                AIProgressStrip(
+                    activity: aiActivity,
+                    onStop: { store.stopAIJob(cardJobKey) },
+                    stopHelp: "Stops now. Cards already finished keep their changes; "
+                        + "the one in progress is left as it was."
+                )
+            }
+            if draftCount > 0 { draftNotice }
+            if !duplicateGroups.isEmpty { duplicateNotice }
+            switch contentTab {
+            case .cards:
+                cardsTab
+            case .overview:
+                DeckOverviewView(scope: scope) { cardId in
+                    contentTab = .cards
+                    selectedCardIds = [cardId]
+                    previewCardId = cardId
+                }
+            }
+        }
         .background(GRASPColor.canvas)
         .navigationTitle(deckName)
         .task(id: scope) { loadScopeIdentity() }
         .onChange(of: store.revision) { load() }
+        // Sticky across deck switches on purpose -- someone comparing two
+        // lectures' overviews shouldn't have to re-pick the tab each time.
+        // But a deck with no source notes hides the picker, and a hidden
+        // picker can't be used to get back out of a tab with nothing in it.
+        .onChange(of: hasSourceNotes) { _, hasNotes in
+            if !hasNotes { contentTab = .cards }
+        }
         // A card that scrolls out of view because the filter changed must
         // also drop out of the selection -- a batch action must never
         // silently act on a card that's no longer on screen.
@@ -321,6 +386,9 @@ struct DeckDetailView: View {
                 )
             }
         }
+        .sheet(item: $cardRefineResult) { message in
+            ResultSheet(icon: message.icon, title: message.title, leadText: message.lead)
+        }
     }
 
     private func refineDeckSections(_ result: AppStore.RefineDeckSummary) -> [ResultSheet.Section] {
@@ -349,13 +417,33 @@ struct DeckDetailView: View {
     /// "N due" below.
     private var deckHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(deckName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .tracking(-0.4)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                    .lineLimit(2)
-                compositionLine
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(deckName)
+                        .font(.system(size: 20, weight: .semibold))
+                        .tracking(-0.4)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(2)
+                    compositionLine
+                }
+                Spacer(minLength: 8)
+                // In the pane header rather than the filter row below it:
+                // this picker changes what the whole pane *is*, which is
+                // the job `CalendarView`'s Month/Week/Agenda picker already
+                // does from the same position. The filter row is also gated
+                // on having cards, and Overview has to stay reachable for a
+                // deck whose cards are all still drafts.
+                if hasSourceNotes {
+                    Picker("", selection: $contentTab) {
+                        ForEach(ContentTab.allCases) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                }
             }
 
             HStack(spacing: 8) {
@@ -367,11 +455,13 @@ struct DeckDetailView: View {
                 .disabled(activeCount == 0)
                 modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
                     .disabled(activeCount == 0)
-                modeButton("New Card", "plus", prominent: true) { isCreatingCard = true }
-                addFilesButton
-                if isGeneratorAvailable {
-                    addCardsWithAIButton
+                // Creating a card belongs to the card list; offering it
+                // while reading the overview puts an action in the wrong
+                // room.
+                if contentTab == .cards {
+                    newCardButton
                 }
+                addFilesButton
                 Spacer(minLength: 0)
             }
         }
@@ -430,12 +520,17 @@ struct DeckDetailView: View {
         // them), not literally inside a single deck, so the label should
         // say what actually happens rather than overclaim scope it doesn't
         // have when a single real deck is what's on screen.
-        let title: String = {
-            if case .deck = scope { return "Add Files to Deck" }
-            return "Add Files to Course"
+        let noun: String = {
+            if case .deck = scope { return "Deck" }
+            return "Course"
         }()
-        return Button {
-            onAddFiles()
+        // A menu for the same reason "New Card" is one: seeing which files
+        // are behind a deck is the other half of the same job, and a
+        // separate button would crowd a row that's already full.
+        return Menu {
+            Button("Add Files to \(noun)…") { onAddFiles() }
+                .disabled(store.isImporting)
+            Button("Show Files in This \(noun)…") { showingDeckFiles = true }
         } label: {
             HStack(spacing: 5) {
                 if store.isImporting {
@@ -443,33 +538,84 @@ struct DeckDetailView: View {
                 } else {
                     Image(systemName: "doc.badge.plus").font(.system(size: 11))
                 }
-                Text(title)
+                Text("Files")
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textTertiary)
             }
+            .font(.system(size: 13, weight: .medium))
+            .tracking(-0.1)
+            .foregroundStyle(GRASPColor.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(height: 28)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
+            )
         }
-        .buttonStyle(GRASPQuietButton())
-        .disabled(store.isImporting)
-        .help("Add specific files or a whole folder to this course, from anywhere on disk")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Add files to this \(noun.lowercased()), or see which files its cards came from")
+        .sheet(isPresented: $showingDeckFiles) {
+            DeckFilesSheet(
+                deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased()
+            )
+        }
     }
 
-    /// Not `modeButton` -- this one swaps its icon for a spinner while a
-    /// run is in flight, which a run over several notes' worth of
-    /// sequential model round trips is slow enough to actually need.
-    private var addCardsWithAIButton: some View {
-        Button {
-            showingGenerateSheet = true
-        } label: {
-            HStack(spacing: 5) {
-                if isGeneratingCards {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "sparkles").font(.system(size: 11))
+    /// Clicking "New Card" now opens a menu -- "New Card…" and "Add More
+    /// Cards with AI" together, since the two are really the same job
+    /// ("get more cards into this deck") by two different means, not two
+    /// separate actions competing for space in the row. Collapses back to
+    /// a plain one-click button with no menu at all when no generator is
+    /// available -- there'd be nothing else to put in it.
+    @ViewBuilder
+    private var newCardButton: some View {
+        if isGeneratorAvailable {
+            // A plain `Menu`, not a split button -- every earlier attempt
+            // at a "one click makes a card, a separate chevron opens the
+            // rest" control ran into the same wall: a `Menu`'s own
+            // rendering doesn't reliably respect custom styling or an
+            // outer shape once any part of it is involved (a swallowed
+            // chevron, a clipped merged background, an invisible icon
+            // color, each a different symptom of the same thing). Making
+            // the whole button the menu trigger sidesteps all of it: the
+            // label here is a fully self-drawn view with its own
+            // background and text color, so `Menu` has nothing left to
+            // draw or restyle -- it only has to provide the tap target and
+            // the popup. "New Card…" is simply the menu's first item now,
+            // rather than a separate default action.
+            Menu {
+                Button("New Card…") { isCreatingCard = true }
+                Button {
+                    showingGenerateSheet = true
+                } label: {
+                    Label(isGeneratingCards ? "Adding Cards…" : "Add More Cards with AI", systemImage: "sparkles")
                 }
-                Text("Add More Cards with AI")
+                .disabled(isGeneratingCards || aiActivity != nil)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "plus").font(.system(size: 11))
+                    Text("New Card")
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .tracking(-0.1)
+                .foregroundStyle(Color.black.opacity(0.88))
+                .padding(.horizontal, 14)
+                .frame(height: 28)
+                .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                        .blendMode(.plusLighter)
+                )
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        } else {
+            modeButton("New Card", "plus", prominent: true) { isCreatingCard = true }
         }
-        .buttonStyle(GRASPQuietButton())
-        .disabled(isGeneratingCards)
-        .help("Ask the AI to propose cards for concepts your notes mention but never turned into a card")
     }
 
     /// The single unified action that replaced the separate "Refine with
@@ -493,7 +639,7 @@ struct DeckDetailView: View {
             }
         }
         .buttonStyle(GRASPQuietButton())
-        .disabled(isRefiningDeck || draftCount == 0)
+        .disabled(isRefiningDeck || aiActivity != nil || draftCount == 0)
         .help(draftCount == 0
               ? "No draft cards to refine right now"
               : "Checks each draft against its own note -- rewrites or removes off-topic definitions, then cleans up wording on the rest")
@@ -503,17 +649,56 @@ struct DeckDetailView: View {
     }
 
     private func startRefineDeckWithAI() {
-        isRefiningDeck = true
         let generation = scopeGeneration
         let deckIds = scopeDeckIds
-        Task {
-            let result = await store.refineDeckWithAI(inDecks: deckIds)
-            isRefiningDeck = false
+        let run = AIActivity(headline: "Refining \(deckName) with AI", purpose: "refine")
+        store.runAIJob(cardJobKey, activity: run) { [store] run in
+            let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                await store.refineDeckWithAI(inDecks: deckIds)
+            }
             // Same guard as `runGenerate`: don't let a run started on a
             // deck the user has since switched away from overwrite the
             // deck now on screen.
             guard generation == scopeGeneration else { return }
-            refineDeckResult = result
+            // After a stop, the summary still says what was done before it
+            // -- unless that was nothing, which the student already knows.
+            if !(run.stopRequested && result.isEmpty) { refineDeckResult = result }
+            load()
+        }
+    }
+
+    /// The single-card "Refine with AI" action -- reachable from a card's
+    /// own `•••` menu or its right-click menu, whether it's a draft or
+    /// long since approved. No `scopeGeneration` guard here the way
+    /// `startRefineDeckWithAI`/`runGenerate` have: those run over every
+    /// card in scope and must not silently overwrite a *different* deck's
+    /// results if the user switches away mid-run, but this touches one
+    /// specific card by id -- switching decks while it's in flight can't
+    /// make it land on the wrong card.
+    private func refineCard(_ card: Card) {
+        refiningCardIds.insert(card.id)
+        Task {
+            let outcome = await store.refineCard(card.id)
+            refiningCardIds.remove(card.id)
+            switch outcome {
+            case .removed:
+                cardRefineResult = CardRefineMessage(
+                    icon: "trash", title: "Card Removed",
+                    lead: "\"\(card.front)\" looked off-topic against its own note, "
+                        + "so the AI removed it instead of leaving a bad definition in place."
+                )
+            case .refined:
+                cardRefineResult = CardRefineMessage(
+                    icon: "checkmark.seal", title: "Card Refined",
+                    lead: "\"\(card.front)\" was checked against its source note and cleaned up."
+                )
+            case .unavailable:
+                cardRefineResult = CardRefineMessage(
+                    icon: "exclamationmark.triangle", title: "Couldn't Refine This Card",
+                    lead: "This needs an AI connection (Ollama or Apple's on-device model) "
+                        + "and a source note to check against -- one of those isn't available right now."
+                )
+            }
             load()
         }
     }
@@ -523,24 +708,24 @@ struct DeckDetailView: View {
     /// pass an explicit number, so it always tracks whatever that default
     /// actually is rather than a copy of it duplicated here.
     private func runGenerate(maxPerNote: Int?, topic: String?) {
-        isGeneratingCards = true
         let generation = scopeGeneration
         let deckIds = scopeDeckIds
-        Task {
-            let count: Int
-            if let maxPerNote {
-                count = await store.generateAdditionalCards(inDecks: deckIds, maxPerNote: maxPerNote, topic: topic)
-            } else {
-                count = await store.generateAdditionalCards(inDecks: deckIds, topic: topic)
+        let run = AIActivity(headline: "Adding cards to \(deckName) with AI", purpose: "add")
+        store.runAIJob(cardJobKey, activity: run) { [store] run in
+            let count = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                if let maxPerNote {
+                    await store.generateAdditionalCards(inDecks: deckIds, maxPerNote: maxPerNote, topic: topic)
+                } else {
+                    await store.generateAdditionalCards(inDecks: deckIds, topic: topic)
+                }
             }
-            isGeneratingCards = false
             // Bail before touching anything scope-dependent (`cards`,
             // `scopeDeckIds`, ...) if the user has since switched to a
             // different deck or course -- otherwise this stale result
             // would silently overwrite what's now on screen with data for
             // a scope that's no longer even visible.
             guard generation == scopeGeneration else { return }
-            fillGapsResult = count
+            if !(run.stopRequested && count == 0) { fillGapsResult = count }
             load()
         }
     }
@@ -625,6 +810,7 @@ struct DeckDetailView: View {
                     card: card,
                     mastery: learnLevels[card.id] ?? .new,
                     siblingDecks: siblingDecks,
+                    isRefining: refiningCardIds.contains(card.id),
                     onPreview: { previewCardId = card.id },
                     onApprove: { setStatus(card, .active) },
                     onSuspend: { setStatus(card, card.status == .suspended ? .active : .suspended) },
@@ -638,7 +824,8 @@ struct DeckDetailView: View {
                     onRevertContextRefinement: {
                         try? store.revertContextRefinement(card.id)
                         load()
-                    }
+                    },
+                    onRefine: { refineCard(card) }
                 )
             }
         }
@@ -677,6 +864,10 @@ struct DeckDetailView: View {
         Button("Edit") { editingCard = card }
         if card.materialId != nil {
             Button("View Source Note") { viewingMaterialId = card.materialId }
+            Button(refiningCardIds.contains(card.id) ? "Refining…" : "Refine with AI") { refineCard(card) }
+                // Not while a deck-wide job is working through the same
+                // cards: both would rewrite this one at once.
+                .disabled(refiningCardIds.contains(card.id) || aiActivity != nil)
         }
         if !siblingDecks.isEmpty {
             Menu("Move to…") {
@@ -773,6 +964,8 @@ struct DeckDetailView: View {
     /// since neither depends on live card data.
     private func loadScopeIdentity() {
         scopeGeneration += 1
+        // A filter is about the deck it was chosen in.
+        masteryFilter = .all
         switch scope {
         case .deck(let id):
             let deck = (try? store.deck(id)) ?? nil
@@ -812,8 +1005,12 @@ struct DeckDetailView: View {
                 siblingDecks = allDecksInCourse
             }
         }
-        selectedCardIds.formIntersection(Set(cards.map(\.id)))
-        if let id = previewCardId, !cards.contains(where: { $0.id == id }) {
+        // Against what's on screen, not everything loaded: under "Needs
+        // Review", suspending three cards hid them but left them selected,
+        // and Delete then offered to delete "0 cards".
+        let visible = Set(visibleCards.map(\.id))
+        selectedCardIds.formIntersection(visible)
+        if let id = previewCardId, !visible.contains(id) {
             previewCardId = nil
         }
         duplicateGroups = (try? store.duplicateGroups(inDecks: scopeDeckIds)) ?? []
@@ -826,6 +1023,13 @@ struct DeckDetailView: View {
 }
 
 private struct MaterialIdentifier: Identifiable { let id: String }
+
+private struct CardRefineMessage: Identifiable {
+    let id = UUID()
+    let icon: String
+    let title: String
+    let lead: String
+}
 
 /// "Refine Deck with AI"'s confirmation -- a custom sheet rather than a
 /// system `.confirmationDialog`, since the three things this action can
@@ -1164,7 +1368,9 @@ private struct CardPreviewPane: View {
 /// A small tinted capsule for a card's status/mastery -- the same idea as
 /// `DeckRow`'s due-count capsule, reused here rather than inventing a
 /// second badge style for what is visually the same kind of fact.
-private struct PreviewChip: View {
+/// Not private: the overview reader uses the same chip for its card links
+/// and its "out of date" marker, and a second copy would drift.
+struct PreviewChip: View {
     let text: String
     let tint: Color
     let tintSoft: Color
@@ -1188,6 +1394,7 @@ private struct CardRow: View {
     let card: Card
     let mastery: LearnEngine.Level
     let siblingDecks: [Deck]
+    let isRefining: Bool
     let onPreview: () -> Void
     let onApprove: () -> Void
     let onSuspend: () -> Void
@@ -1196,6 +1403,7 @@ private struct CardRow: View {
     let onDelete: () -> Void
     let onMove: (String) -> Void
     let onRevertContextRefinement: () -> Void
+    let onRefine: () -> Void
 
     // Reserved space, not conditionally inserted -- toggling opacity
     // rather than adding/removing the button from the tree keeps the
@@ -1227,8 +1435,8 @@ private struct CardRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            if card.status == .active { masteryBadge }
             previewButton
+            if card.status == .active { masteryBadge }
             contextRefinedBadge
             originBadge
             Menu {
@@ -1239,6 +1447,13 @@ private struct CardRow: View {
                 Button("Edit", action: onEdit)
                 if card.materialId != nil {
                     Button("View Source Note", action: onViewNote)
+                    // Not gated on card.status: an approved card is just
+                    // as likely to be clumsily worded or quietly off-topic
+                    // as a fresh draft, and this was previously the only
+                    // way to ask for a second look at one specific card
+                    // rather than the whole deck.
+                    Button(isRefining ? "Refining…" : "Refine with AI", action: onRefine)
+                        .disabled(isRefining)
                 }
                 if !siblingDecks.isEmpty {
                     Menu("Move to…") {
@@ -1615,13 +1830,12 @@ private struct CardEditSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    var saved = card
-                    saved.origin = .manual
-                    saved.updatedAt = Date()
-                    onSave(saved)
+                    onSave(card)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)

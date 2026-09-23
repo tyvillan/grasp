@@ -66,10 +66,7 @@ public enum TestBuilder {
                 return LearnEngine.RoundQuestion(cardId: candidate.cardId, prompt: candidate.front,
                                                   correctAnswer: candidate.back, type: .multipleChoice, choices: choices)
             case .trueFalse:
-                let showTrue = Bool.random(using: &rng)
-                let statement = showTrue
-                    ? candidate.back
-                    : (LearnEngine.distractors(for: candidate, in: pool, count: 1, using: &rng).first ?? candidate.back)
+                let (statement, showTrue) = LearnEngine.trueFalseStatement(for: candidate, in: pool, using: &rng)
                 return LearnEngine.RoundQuestion(cardId: candidate.cardId, prompt: candidate.front,
                                                   correctAnswer: showTrue ? "True" : "False", type: .trueFalse,
                                                   statement: statement, statementIsTrue: showTrue)

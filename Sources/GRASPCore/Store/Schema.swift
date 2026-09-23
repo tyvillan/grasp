@@ -279,6 +279,56 @@ enum Schema {
             }
         }
 
+        // A generated study overview of one note -- takeaways, definitions,
+        // an outline, formulas and one concept diagram. Keyed on the
+        // material exactly the way `noteText` is, because the material is
+        // the unit the model actually reads. A deck's overview is its
+        // materials' overviews stitched at read time rather than a stored
+        // thing of its own: a deck gains and loses materials as cards move
+        // between decks, so a deck-owned overview would go stale on a
+        // schedule nothing here tracks.
+        //
+        // The body is one JSON blob rather than a table per section. It is
+        // always written whole, always read whole, and never queried by its
+        // contents -- `noteFTS` already covers searching what a note said.
+        // Five join tables and a tree reassembly to render one document
+        // would buy a query nobody asks; `testItem.choicesJSON` already
+        // sets this precedent.
+        //
+        // What stays out of the blob is everything read *without*
+        // rendering. `sourceContentHash` is the staleness key, compared
+        // against `material.contentHash`, so "which overviews need
+        // rewriting" is a join rather than a decode of every row.
+        // `bodySchemaVersion` makes a body written by an older shape of
+        // `OverviewDocument` detectable and regenerable instead of
+        // half-decoded. And `mermaidSource` is its own column because it is
+        // the model's verbatim output: keeping it outside the blob is what
+        // lets an improved `MermaidParser` re-read an existing diagram
+        // without another round trip to a local model.
+        migrator.registerMigration("v7_note_overview") { db in
+            try db.create(table: "noteOverview") { t in
+                t.column("materialId", .text).primaryKey()
+                    .references("material", onDelete: .cascade)
+                t.column("bodyJSON", .text).notNull()
+                t.column("bodySchemaVersion", .integer).notNull().defaults(to: 1)
+                t.column("mermaidSource", .text)
+                // Nullable because `material.contentHash` is.
+                t.column("sourceContentHash", .text)
+                t.column("sourceWordCount", .integer).notNull().defaults(to: 0)
+                // 1 for a note summarised in one pass, N for a long note
+                // summarised section-wise -- see `OverviewChunker`.
+                t.column("chunkCount", .integer).notNull().defaults(to: 1)
+                t.column("generator", .text).notNull()
+                t.column("model", .text)
+                t.column("generatedAt", .datetime).notNull()
+            }
+            // Deliberately no index. Every read is either a primary-key
+            // lookup by materialId or a join from material rows a deck has
+            // already resolved, and staleness is decided against that same
+            // joined row -- nothing ever scans this table on its own, so an
+            // index would only cost writes.
+        }
+
         return migrator
     }
 }

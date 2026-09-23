@@ -56,10 +56,13 @@ public enum ExamEventMatcher {
     // MARK: - Whose exam is it?
 
     /// A course code as written anywhere in a title: two to four letters,
-    /// an optional space or dash, then three or four digits. Matches
-    /// "ECON 201", "COP3014", "MAC-2311".
+    /// an optional space or dash, three or four digits, and an optional
+    /// letter. Matches "ECON 201", "COP3014", "MAC-2311", and lab-course
+    /// codes like "COP 3275C" -- which the old pattern couldn't, there
+    /// being no word boundary between the 5 and the C, so every exam for
+    /// such a course went unmatched.
     private static let codePattern = try? NSRegularExpression(
-        pattern: "\\b([A-Za-z]{2,4})[ \\-]?([0-9]{3,4})\\b"
+        pattern: "\\b([A-Za-z]{2,4})[ \\-]?([0-9]{3,4}[A-Za-z]?)\\b"
     )
 
     /// How alike a title and a course name have to be, when there's no
@@ -85,7 +88,7 @@ public enum ExamEventMatcher {
         if let code = courseCode(in: title) {
             for course in courses {
                 guard let courseCode = course.code, !courseCode.isEmpty else { continue }
-                if compactCode(courseCode) == code { return course.id }
+                if sameCode(compactCode(courseCode), code) { return course.id }
             }
             // A title carrying a code that matches no course is a stronger
             // signal than any name similarity: it names some *other*
@@ -121,6 +124,19 @@ public enum ExamEventMatcher {
               let digits = Range(match.range(at: 2), in: title)
         else { return nil }
         return (title[letters] + title[digits]).lowercased()
+    }
+
+    /// Equal, or equal once a trailing section letter is dropped -- an exam
+    /// titled "COP 3275 Midterm" is still the COP 3275C exam.
+    private static func sameCode(_ a: String, _ b: String) -> Bool {
+        a == b || withoutSuffix(a) == withoutSuffix(b)
+    }
+
+    private static func withoutSuffix(_ code: String) -> String {
+        guard let last = code.last, last.isLetter,
+              let beforeLast = code.dropLast().last, beforeLast.isNumber
+        else { return code }
+        return String(code.dropLast())
     }
 
     private static func compactCode(_ code: String) -> String {

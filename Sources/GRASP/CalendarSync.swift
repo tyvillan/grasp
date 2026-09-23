@@ -83,8 +83,16 @@ enum CalendarSync {
                   let startDate = event.startDate,
                   let kind = ExamEventMatcher.examKind(forTitle: title)
             else { return nil }
+            // Every occurrence of a repeating event shares one identifier, so
+            // keyed on that alone a weekly quiz collapsed into a single row
+            // that each occurrence overwrote in turn. Occurrences get the
+            // date appended; one-off events keep the bare identifier, so
+            // rows already synced still match.
+            let key = event.hasRecurrenceRules
+                ? "\(sourceEventId)@\(Int((event.occurrenceDate ?? startDate).timeIntervalSince1970))"
+                : sourceEventId
             return ScannedEvent(
-                sourceEventId: sourceEventId, title: title, startsAt: startDate,
+                sourceEventId: key, title: title, startsAt: startDate,
                 endsAt: event.isAllDay ? nil : event.endDate, isAllDay: event.isAllDay,
                 kind: kind, courseId: ExamEventMatcher.matchCourse(title: title, courses: courses)
             )

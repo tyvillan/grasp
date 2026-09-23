@@ -286,7 +286,7 @@ struct LearnRoundView: View {
     /// from a tint alone.
     private func multipleChoiceBody(_ question: LearnEngine.RoundQuestion) -> some View {
         VStack(spacing: 7) {
-            ForEach(Array((question.choices ?? []).enumerated()), id: \.element) { index, choice in
+            ForEach(Array((question.choices ?? []).enumerated()), id: \.offset) { index, choice in
                 Button {
                     toggleSelection(choice)
                 } label: {

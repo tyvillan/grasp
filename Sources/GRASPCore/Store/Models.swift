@@ -114,6 +114,99 @@ public struct NoteText: Codable, FetchableRecord, PersistableRecord, Sendable {
     }
 }
 
+/// Which generator wrote an overview. A closed enum rather than `Deck`'s
+/// bare `String` origin because this one is shown in the UI ("written by
+/// Ollama, 3 days ago") and will gain cases as generators are added -- it
+/// should fail to compile when one is missed rather than render a raw
+/// string. No `.none` case on purpose: `NoGenerator` produces an empty
+/// document, and an empty document is never persisted.
+public enum OverviewOrigin: String, Codable, Sendable {
+    case ollama
+    case appleOnDevice
+
+    public var label: String {
+        switch self {
+        case .ollama: return "Ollama (local model)"
+        case .appleOnDevice: return "Apple on-device model"
+        }
+    }
+}
+
+/// One generated study overview of one note -- the other half of the deck
+/// view's `Cards | Overview` switch, written from exactly the text its
+/// flashcards came from. 1:1 with `Material` mirroring `NoteText`, and
+/// cascade-deleted with it for the same reason: derived data with no
+/// meaning once its source note is gone.
+///
+/// `bodyJSON` holds an `OverviewDocument`; everything a caller needs
+/// *before* deciding to decode it is a column of its own.
+public struct NoteOverview: Codable, FetchableRecord, PersistableRecord, Sendable {
+    public static let databaseTableName = "noteOverview"
+    public var materialId: String
+    public var bodyJSON: String
+    public var bodySchemaVersion: Int
+    /// Raw Mermaid as the model wrote it, or nil when it declined to draw
+    /// one -- a note that is a flat list of unrelated definitions is the
+    /// ordinary case for that, not a failure.
+    public var mermaidSource: String?
+    /// The `Material.contentHash` this was written from: the whole
+    /// staleness mechanism. Nullable only because `contentHash` is.
+    public var sourceContentHash: String?
+    public var sourceWordCount: Int
+    public var chunkCount: Int
+    public var generator: OverviewOrigin
+    /// e.g. "qwen2.5:7b-instruct". nil for the on-device model, which has
+    /// no user-visible version to record.
+    public var model: String?
+    public var generatedAt: Date
+
+    public init(materialId: String, bodyJSON: String,
+                bodySchemaVersion: Int = NoteOverview.currentBodySchemaVersion,
+                mermaidSource: String? = nil, sourceContentHash: String? = nil,
+                sourceWordCount: Int = 0, chunkCount: Int = 1,
+                generator: OverviewOrigin, model: String? = nil,
+                generatedAt: Date = Date()) {
+        self.materialId = materialId; self.bodyJSON = bodyJSON
+        self.bodySchemaVersion = bodySchemaVersion; self.mermaidSource = mermaidSource
+        self.sourceContentHash = sourceContentHash; self.sourceWordCount = sourceWordCount
+        self.chunkCount = chunkCount; self.generator = generator; self.model = model
+        self.generatedAt = generatedAt
+    }
+
+    /// Bumped whenever `OverviewDocument`'s stored shape changes in a way
+    /// an older body can't be decoded into. A mismatch reads as stale, so
+    /// the existing "Rewrite" path absorbs a schema change with no data
+    /// migration at all -- the body is derived, cheap to remake, and never
+    /// worth an `ALTER`.
+    /// v1 was takeaways plus an outline, v2 explanations plus a glossary,
+    /// v3 is the lesson shape `OverviewDocument` now carries -- claim-headed
+    /// sections with inline terms, figures and checks. Bodies written at an
+    /// older version read as stale, so the existing "Rewrite" path picks
+    /// them up with no data migration -- which is the whole reason this
+    /// number exists.
+    public static let currentBodySchemaVersion = 3
+
+    /// True when the note this was written from has changed since, or when
+    /// the body predates the current document shape.
+    ///
+    /// A material with no `contentHash` at all (never successfully
+    /// extracted) reports fresh on purpose: there is no staleness signal to
+    /// read, and rewriting would store the same nil back, so reporting
+    /// stale would leave a badge that rewriting can never clear.
+    public func isStale(for material: Material) -> Bool {
+        if bodySchemaVersion != Self.currentBodySchemaVersion { return true }
+        guard let current = material.contentHash else { return false }
+        return sourceContentHash != current
+    }
+
+    /// nil when the body predates the current schema version or is corrupt
+    /// -- both of which a caller treats exactly like "not written yet".
+    public func document() -> OverviewDocument? {
+        guard bodySchemaVersion == Self.currentBodySchemaVersion else { return nil }
+        return OverviewCoding.decode(bodyJSON)
+    }
+}
+
 public struct Deck: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     public static let databaseTableName = "deck"
     public var id: String

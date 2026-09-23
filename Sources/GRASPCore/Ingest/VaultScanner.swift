@@ -95,10 +95,60 @@ public actor VaultScanner {
                     )
                 }
             }
+            try Self.sweepMissingFiles(under: collegeRoot.path, db: db)
             summary.semesterCount = try Semester.fetchCount(db)
             summary.courseCount = try Course.fetchCount(db)
         }
         return summary
+    }
+
+    /// Notes that were in the vault and aren't any more.
+    ///
+    /// Identity is the file's path, and nothing used to notice a path
+    /// disappearing: a renamed or deleted note kept its material and its
+    /// cards forever, and the leftovers then blocked the renamed file's own
+    /// cards as "duplicates". Now a note whose file is gone is retired --
+    /// and when a note with exactly the same contents exists at a new path
+    /// it was a rename, so its cards move over to it. For a real deletion
+    /// only the untouched drafts go; anything approved or studied stays.
+    ///
+    /// A file iCloud has evicted to a placeholder is still there as far as
+    /// this is concerned.
+    static func sweepMissingFiles(under root: String, db: Database) throws {
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        let fm = FileManager.default
+        func isPresent(_ path: String) -> Bool {
+            if fm.fileExists(atPath: path) { return true }
+            let url = URL(fileURLWithPath: path)
+            let stub = url.deletingLastPathComponent()
+                .appendingPathComponent(".\(url.lastPathComponent).icloud").path
+            return fm.fileExists(atPath: stub)
+        }
+        let live = try Material
+            .filter(Column("deletedAt") == nil)
+            .filter(Column("relativePath").like(prefix + "%"))
+            .fetchAll(db)
+        for var gone in live where !isPresent(gone.relativePath) {
+            let renamedTo = try gone.contentHash.flatMap { hash in
+                try Material
+                    .filter(Column("contentHash") == hash)
+                    .filter(Column("id") != gone.id)
+                    .filter(Column("deletedAt") == nil)
+                    .fetchAll(db)
+                    .first { isPresent($0.relativePath) }
+            }
+            if let renamedTo {
+                try db.execute(
+                    sql: "UPDATE card SET materialId = ? WHERE materialId = ?",
+                    arguments: [renamedTo.id, gone.id]
+                )
+            } else {
+                try deleteReplaceableDrafts(materialId: gone.id, db: db)
+            }
+            gone.deletedAt = Date()
+            gone.updatedAt = Date()
+            try gone.update(db)
+        }
     }
 
     private func scanSemesterFolder(
@@ -195,7 +245,7 @@ public actor VaultScanner {
 
         // Idempotency: unchanged content at the same path needs no work.
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-           existing.contentHash == contentHash {
+           existing.contentHash == contentHash, existing.deletedAt == nil {
             summary.filesUnchanged += 1
             return
         }
@@ -210,7 +260,10 @@ public actor VaultScanner {
                 tags: frontmatter.tags, folderName: fallbackSemesterFolderName
             )
             var semesterId: String?
-            if !fallbackSemesterFolderName.isEmpty || !frontmatter.tags.isEmpty {
+            // Only a semester that was actually recognised. A top-level
+            // folder whose first note merely had some tag created a
+            // blank-named "unknown" semester and filed the course under it.
+            if semSlug != "unknown", !semName.isEmpty {
                 let semester = try findOrCreateSemester(slug: semSlug, name: semName, sortKey: semSortKey, db: db)
                 semesterId = semester.id
             }
@@ -242,7 +295,7 @@ public actor VaultScanner {
         let relativePath = fileURL.path
 
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-           existing.contentHash == contentHash {
+           existing.contentHash == contentHash, existing.deletedAt == nil {
             summary.filesUnchanged += 1
             return
         }
@@ -353,7 +406,7 @@ public actor VaultScanner {
                 let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
                 let relativePath = fileURL.path
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-                   existing.contentHash == contentHash {
+                   existing.contentHash == contentHash, existing.deletedAt == nil {
                     summary.filesUnchanged += 1
                     return
                 }
@@ -367,7 +420,7 @@ public actor VaultScanner {
                 let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 let relativePath = fileURL.path
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-                   existing.contentHash == contentHash {
+                   existing.contentHash == contentHash, existing.deletedAt == nil {
                     summary.filesUnchanged += 1
                     return
                 }
@@ -396,6 +449,8 @@ public actor VaultScanner {
 
         var material = (try Material.filter(Column("relativePath") == relativePath).fetchOne(db))
             ?? Material(courseId: courseId, relativePath: relativePath, kind: .markdown, title: fileName)
+        // A file that went missing and has come back.
+        material.deletedAt = nil
         material.courseId = courseId
         material.contentHash = contentHash
         material.title = fileName
@@ -410,6 +465,7 @@ public actor VaultScanner {
         if frontmatter.isAssetSidecar {
             material.extractionState = .skippedAsset
             try material.save(db)
+            try Self.clearReplaceableContent(materialId: material.id, db: db)
             summary.filesSkippedAsset += 1
             summary.filesImportedOrUpdated += 1
             return
@@ -417,6 +473,9 @@ public actor VaultScanner {
         if TextCleaning.isEmptyStub(rawBody) {
             material.extractionState = .skippedEmpty
             try material.save(db)
+            // A note emptied since its last import keeps no cards or search
+            // text from what it used to say.
+            try Self.clearReplaceableContent(materialId: material.id, db: db)
             summary.filesSkippedEmpty += 1
             summary.filesImportedOrUpdated += 1
             return
@@ -443,6 +502,8 @@ public actor VaultScanner {
 
         var material = (try Material.filter(Column("relativePath") == relativePath).fetchOne(db))
             ?? Material(courseId: courseId, relativePath: relativePath, kind: kind, title: fileName)
+        // A file that went missing and has come back.
+        material.deletedAt = nil
         material.courseId = courseId
         material.kind = kind
         material.contentHash = contentHash
@@ -473,6 +534,7 @@ public actor VaultScanner {
             // with no text layer, most often -- not an error.
             material.extractionState = .noTextLayer
             try material.save(db)
+            try Self.clearReplaceableContent(materialId: material.id, db: db)
             summary.filesImportedOrUpdated += 1
             return
         }
@@ -550,14 +612,14 @@ public actor VaultScanner {
             wordCount: wordCount, hasMath: hasMath
         ).save(db)
 
-        // Clear previously-parsed parser-origin cards for this material
-        // before re-parsing, but never touch a card the user has edited or
-        // reviewed -- those survive re-import untouched.
-        try Card
-            .filter(Column("materialId") == material.id)
-            .filter(Column("origin") == CardOrigin.parser.rawValue)
-            .filter(Column("reps") == 0)
-            .deleteAll(db)
+        // Clear previously-parsed cards for this material before re-parsing
+        // -- but only untouched drafts. "Never reviewed" used to be the whole
+        // test, which also swept away cards the student had approved, ones
+        // the AI check had rewritten, ones partway up the Learn ladder, and
+        // the deleted ones kept on purpose as tombstones: fixing one typo in
+        // a note turned all of its approved cards back into fresh drafts and
+        // brought deleted ones back.
+        try Self.deleteReplaceableDrafts(materialId: material.id, db: db)
 
         if material.isStudyWorthy {
             let deck = try findOrCreateDeck(courseId: courseId, chapter: material.chapter, db: db)
@@ -569,8 +631,12 @@ public actor VaultScanner {
             // (the same fix already applied to deleted decks). Grown as
             // each new card is created, so two duplicate bullets inside
             // this same note also collapse, not just cross-note dupes.
+            // And every card this note already has, wherever it sits: a card
+            // moved to another deck, or deleted and so no longer in any deck
+            // (a duplicate merge's loser), would otherwise be made again.
             let existingCards = try Card
-                .filter(sql: "id IN (SELECT cardId FROM deckCard WHERE deckId = ?)", arguments: [deck.id])
+                .filter(sql: "id IN (SELECT cardId FROM deckCard WHERE deckId = ?) OR materialId = ?",
+                        arguments: [deck.id, material.id])
                 .fetchAll(db)
             var duplicateIndex = DuplicateDetector.Index(existingCards)
 
@@ -591,6 +657,25 @@ public actor VaultScanner {
             }
         }
         summary.filesImportedOrUpdated += 1
+    }
+
+    /// The parser's own untouched drafts for a note -- the only cards a
+    /// re-import is allowed to replace. See `finishImportingBody`.
+    static func deleteReplaceableDrafts(materialId: String, db: Database) throws {
+        try Card
+            .filter(Column("materialId") == materialId)
+            .filter(Column("origin") == CardOrigin.parser.rawValue)
+            .filter(Column("reps") == 0)
+            .filter(Column("status") == CardStatus.draft.rawValue)
+            .filter(Column("deletedAt") == nil)
+            .filter(Column("isContextRefined") == false)
+            .filter(sql: "id NOT IN (SELECT cardId FROM learnState)")
+            .deleteAll(db)
+    }
+
+    private static func clearReplaceableContent(materialId: String, db: Database) throws {
+        try deleteReplaceableDrafts(materialId: materialId, db: db)
+        _ = try NoteText.deleteOne(db, key: materialId)
     }
 
     /// A freeform, hand-typed timeline (`AppStore.findOrCreateSemester(name:)`)

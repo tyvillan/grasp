@@ -11,15 +11,29 @@ public enum Reflow {
     public static func reflow(_ text: String) -> String {
         let lines = text.components(separatedBy: "\n")
         var out: [String] = []
+        var inFence = false
 
         for rawLine in lines {
             let s = rawLine.trimmingCharacters(in: .whitespaces)
+            // Fenced code passes through exactly as written. Reflowing it
+            // stripped the indentation and joined lowercase lines, so
+            // `self.plate = plate` and `self.passengers = []` became one
+            // line -- in the note viewer and in the context the AI reads.
+            if s.hasPrefix("```") {
+                inFence.toggle()
+                out.append(rawLine)
+                continue
+            }
+            if inFence {
+                out.append(rawLine)
+                continue
+            }
             if s == "undefined" { continue }
             if s.isEmpty {
                 out.append("")
                 continue
             }
-            if let last = out.last, !last.isEmpty {
+            if let last = out.last, !last.isEmpty, !last.hasPrefix("```") {
                 let startsLikeContinuation = s.first.map {
                     $0.isLowercase || $0 == ")" || $0 == "," || $0 == ";"
                 } ?? false

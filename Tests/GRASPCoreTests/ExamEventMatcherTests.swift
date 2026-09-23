@@ -189,4 +189,16 @@ struct StudyPlannerTests {
             #expect(block.day == expected)
         }
     }
+
+    @Test("matches a lab-course code with a letter suffix, written either way")
+    func letterSuffixCodes() {
+        // Real titles: both went unmatched before.
+        let courses: [(id: String, name: String, code: String?)] = [
+            (id: "cpp", name: "Systems Programming with C++", code: "COP 3275C"),
+            (id: "swd", name: "Intro to Software Design", code: "CEN 3062C"),
+        ]
+        #expect(ExamEventMatcher.matchCourse(title: "COP 3275C Midterm Exam", courses: courses) == "cpp")
+        #expect(ExamEventMatcher.matchCourse(title: "CEN3062C Final", courses: courses) == "swd")
+        #expect(ExamEventMatcher.matchCourse(title: "COP 3275 Final Exam", courses: courses) == "cpp")
+    }
 }

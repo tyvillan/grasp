@@ -86,7 +86,11 @@ public enum FSRS {
     }
 
     private static func nextDifficulty(_ d: Double, _ g: Grade, _ w: [Double]) -> Double {
-        let next = d - w[6] * (Double(g.rawValue) - 3)
+        // FSRS-5's linear damping: the closer difficulty is to its ceiling
+        // of 10, the less a grade moves it. Without it difficulty ran up to
+        // 10 and pinned there after a few lapses.
+        let delta = -w[6] * (Double(g.rawValue) - 3)
+        let next = d + delta * (10 - d) / 9
         let easyD0 = constrainDifficulty(w[4] - exp((Double(Grade.easy.rawValue) - 1) * w[5]) + 1)
         return constrainDifficulty(meanReversion(easyD0, next, w))
     }
@@ -140,7 +144,8 @@ public enum FSRS {
         case .learning, .relearning:
             return scheduleLearning(
                 grade: grade, now: now, lastDifficulty: snapshot.difficulty, lastStability: snapshot.stability,
-                elapsedDays: elapsedDays, reps: reps, lapses: snapshot.lapses, weights
+                elapsedDays: elapsedDays, reps: reps, lapses: snapshot.lapses,
+                state: snapshot.state, weights
             )
         case .review:
             return scheduleReview(
@@ -177,17 +182,19 @@ public enum FSRS {
 
     private static func scheduleLearning(
         grade: Grade, now: Date, lastDifficulty: Double, lastStability: Double,
-        elapsedDays: Double, reps: Int, lapses: Int, _ w: [Double]
+        elapsedDays: Double, reps: Int, lapses: Int, state: CardState, _ w: [Double]
     ) -> Result {
         let difficulty = nextDifficulty(lastDifficulty, grade, w)
         let stability = nextShortTermStability(lastStability, grade, w)
+        // Again or Hard keeps a relearning card relearning -- it had been
+        // turned back into a first-time learner.
         switch grade {
         case .again:
             return Result(due: minutes(5, from: now), stability: stability, difficulty: difficulty,
-                          elapsedDays: elapsedDays, scheduledDays: 0, reps: reps, lapses: lapses, state: .learning)
+                          elapsedDays: elapsedDays, scheduledDays: 0, reps: reps, lapses: lapses, state: state)
         case .hard:
             return Result(due: minutes(10, from: now), stability: stability, difficulty: difficulty,
-                          elapsedDays: elapsedDays, scheduledDays: 0, reps: reps, lapses: lapses, state: .learning)
+                          elapsedDays: elapsedDays, scheduledDays: 0, reps: reps, lapses: lapses, state: state)
         case .good:
             let interval = nextIntervalDays(stability: stability)
             return Result(due: days(interval, from: now), stability: stability, difficulty: difficulty,

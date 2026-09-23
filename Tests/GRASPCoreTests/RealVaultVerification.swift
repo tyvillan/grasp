@@ -74,7 +74,9 @@ struct RealVaultVerificationTests {
         // 5 semesters, not 4: Club Baseball's PDF certificates (skipped
         // entirely before binary extraction existed) now create a course
         // under the current semester, which didn't exist as a row before.
-        #expect(summary.semesterCount == 5)
+        // 4 since unrecognised folders stopped creating a blank-named
+        // "unknown" semester (Resumes had been filed under one).
+        #expect(summary.semesterCount == 4)
         // 20, not 15: Fall 2026-2027 gained five real courses (Intro to
         // Software Design, Introduction to Anthropology, Matrix Theory,
         // Microeconomic Principles, Systems Programming with C++). Those

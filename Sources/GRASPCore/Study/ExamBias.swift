@@ -8,9 +8,19 @@ public enum ExamBias {
     /// If FSRS would schedule a card's next review after the exam, that
     /// review cannot help for this exam -- cap it to the day before
     /// instead, so it lands with at least one look before the test.
-    public static func capDue(_ due: Date, examDate: Date) -> Date {
+    ///
+    /// Inside the last day the day before is already in the past, and
+    /// capping to it made every card graded that day overdue the moment it
+    /// was graded -- "due today" never went down, and each session served
+    /// the same cards again. Then the review lands a few hours before the
+    /// exam instead, never sooner than an hour from now, and never after
+    /// the exam starts.
+    public static func capDue(_ due: Date, examDate: Date, now: Date = Date()) -> Date {
         guard due > examDate else { return due }
-        return examDate.addingTimeInterval(-1 * 86400)
+        let dayBefore = examDate.addingTimeInterval(-1 * 86400)
+        if dayBefore > now { return dayBefore }
+        let soon = max(now.addingTimeInterval(3600), examDate.addingTimeInterval(-6 * 3600))
+        return min(soon, examDate)
     }
 
     public static let finalWeekWindow: TimeInterval = 7 * 86400

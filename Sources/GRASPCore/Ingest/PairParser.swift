@@ -53,9 +53,14 @@ public enum PairParser {
         var out: [CandidatePair] = []
 
         var i = 0
+        var inFence = false
         while i < lines.count {
             let s = lines[i].trimmingCharacters(in: .whitespaces)
             defer { i += 1 }
+            // Code isn't a term and its definition: a line of VHDL inside a
+            // fence became the card "UUT / mux2to1 port map ... process begin".
+            if s.hasPrefix("```") { inFence.toggle(); continue }
+            if inFence { continue }
             if s.isEmpty || s.hasPrefix("*Date:") { continue }
 
             // Bold-term pairs are checked before the structural filter,
@@ -306,9 +311,14 @@ public enum PairParser {
         t = t.replacingOccurrences(
             of: #"\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression
         )
-        t = t.replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "`", with: "")
-            .replacingOccurrences(of: "*", with: "")
+        // Paired delimiters only. Deleting every `*` and backtick took the
+        // content with them: "`*` for many" in a UML note became "for many",
+        // and *args, pointers and multiplication lost their stars too.
+        t = t.replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
+        t = t.replacingOccurrences(
+            of: #"(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])"#, with: "$1", options: .regularExpression
+        )
         return t.trimmingCharacters(in: .whitespaces)
     }
 

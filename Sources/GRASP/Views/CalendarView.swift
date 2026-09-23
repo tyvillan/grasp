@@ -862,7 +862,7 @@ struct CalendarEventEditSheet: View {
     /// empty plan and a confused user.
     private var canPlan: Bool {
         !isNew && CalendarEventKind.examLike.contains(kind) && courseId != nil
-            && original.daysAway(from: Date()) >= 1
+            && edited.daysAway(from: Date()) >= 1
     }
 
     /// Generating writes to the calendar immediately, so the sheet closes
@@ -884,9 +884,9 @@ struct CalendarEventEditSheet: View {
                 }
                 Spacer(minLength: 8)
                 Button(hasPlan ? "Regenerate" : "Generate") {
+                    let event = edited
                     save()
-                    try? store.generateStudyPlan(for: original)
-                    dismiss()
+                    try? store.generateStudyPlan(for: event)
                 }
                 .buttonStyle(GRASPQuietButton())
                 .disabled(plannableCards == 0)
@@ -896,13 +896,13 @@ struct CalendarEventEditSheet: View {
 
     private var hasPlan: Bool { store.hasStudyPlan(for: original.id) }
 
-    private var plannableCards: Int { store.plannableCardCount(for: original) }
+    private var plannableCards: Int { store.plannableCardCount(for: edited) }
 
     private var planDescription: String {
         guard plannableCards > 0 else {
             return "No active cards in this deck yet -- add or approve some first."
         }
-        let days = original.daysAway(from: Date())
+        let days = edited.daysAway(from: Date())
         let plan = StudyPlanner.plan(cardCount: plannableCards, from: Date(), examDate: original.startsAt)
         let existing = hasPlan ? "Replaces the current plan. " : ""
         let ending = plan.last?.isFinalReview == true
@@ -926,6 +926,20 @@ struct CalendarEventEditSheet: View {
     }
 
     private func save() {
+        let event = edited
+        if isNew {
+            try? store.addCalendarEvent(event)
+        } else {
+            try? store.updateCalendarEvent(event)
+        }
+        dismiss()
+    }
+
+    /// The event as it stands with the sheet's edits applied. The study plan
+    /// reads this rather than `original`: planning from the pre-edit event
+    /// laid out blocks for the old date and deck right after the new ones
+    /// were saved.
+    private var edited: CalendarEvent {
         let calendar = Calendar.current
         var event = original
         event.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -944,12 +958,7 @@ struct CalendarEventEditSheet: View {
             // week view would render as an empty sliver.
             event.endsAt = end > event.startsAt ? end : nil
         }
-        if isNew {
-            try? store.addCalendarEvent(event)
-        } else {
-            try? store.updateCalendarEvent(event)
-        }
-        dismiss()
+        return event
     }
 
     private func combine(day: Date, time: Date, calendar: Calendar) -> Date {

@@ -92,20 +92,33 @@ struct SearchView: View {
             .map { $0.lowercased() }
     }
 
-    /// `snippet(noteFTS, ...)` wraps each match in literal `**...**`
-    /// markers (see `AppStore.searchNotes`) -- split on those instead of
-    /// re-deriving match ranges ourselves.
+    /// `snippet(noteFTS, ...)` wraps each match in the control characters
+    /// U+0002 and U+0003 (see `AppStore.searchNotes`). They used to be
+    /// `**`, which a third of the notes use for their own bold text -- a
+    /// note's markers threw the alternation off and lit up non-matches.
     private func highlightedSnippet(_ snippet: String) -> AttributedString {
         var result = AttributedString()
-        for (index, part) in snippet.components(separatedBy: "**").enumerated() {
-            var piece = AttributedString(part)
-            if index.isMultiple(of: 2) == false {
+        var isMatch = false
+        var current = ""
+        func flush() {
+            guard !current.isEmpty else { return }
+            var piece = AttributedString(current.replacingOccurrences(of: "**", with: ""))
+            if isMatch {
                 piece.foregroundColor = GRASPColor.textPrimary
                 piece.backgroundColor = GRASPColor.accentSoft
                 piece.font = .callout.weight(.semibold)
             }
             result += piece
+            current = ""
         }
+        for character in snippet {
+            switch character {
+            case "\u{2}": flush(); isMatch = true
+            case "\u{3}": flush(); isMatch = false
+            default: current.append(character)
+            }
+        }
+        flush()
         return result
     }
 

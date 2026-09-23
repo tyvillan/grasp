@@ -97,6 +97,30 @@ enum GRASPType {
     /// rather than a headline's.
     case studyPrompt
     case studyAnswer
+    /// Long-form reading prose -- the lesson body. `.body` is a UI label at
+    /// 13pt: correct in a row, punishing over a page of paragraphs. 16 with
+    /// generous leading is where reading on screen stops feeling like work,
+    /// and at the lesson's 680pt measure it lands near 75 characters a line.
+    case prose
+    /// The lesson's opening question, set a step up from the body and in a
+    /// quieter colour -- a standfirst that pulls the reader in, not a
+    /// second title competing with the first.
+    case lede
+    /// The lesson's title. The one large piece of type on the page, and
+    /// deliberately a claim rather than a topic, so it gets display sizing
+    /// and the negative tracking display sizes want.
+    case lessonTitle
+    /// A section heading inside the lesson. Headings here are full-sentence
+    /// claims, so they're set at a size that holds a sentence without
+    /// shouting -- well below the title, well above the body.
+    case proseH2
+    /// Code, and inline runs of it. One rung below `.prose` on purpose -- a
+    /// monospaced face has a wider advance at the same point size, so
+    /// matching 16 would make code read as larger than the prose around it.
+    case mono
+    /// A formula on its own line. Monospaced like `.mono`, but at reading
+    /// size: this is content, not an annotation of it.
+    case formula
 
     var font: Font {
         switch self {
@@ -110,6 +134,12 @@ enum GRASPType {
         case .numeralSmall: return .system(size: 15, weight: .semibold).monospacedDigit()
         case .studyPrompt: return .system(size: 26, weight: .regular)
         case .studyAnswer: return .system(size: 17, weight: .regular)
+        case .prose: return .system(size: 16, weight: .regular)
+        case .lede: return .system(size: 19, weight: .regular)
+        case .lessonTitle: return .system(size: 30, weight: .bold)
+        case .proseH2: return .system(size: 21, weight: .semibold)
+        case .mono: return .system(size: 14, weight: .regular, design: .monospaced)
+        case .formula: return .system(size: 16, weight: .regular, design: .monospaced)
         }
     }
 
@@ -125,6 +155,17 @@ enum GRASPType {
         case .numeralSmall: return -0.2
         case .studyPrompt: return -0.4
         case .studyAnswer: return -0.1
+        // 16pt sits inside SF Pro Text's optically-correct range, so there
+        // is nothing to correct -- same reasoning as `.body`.
+        case .prose: return 0
+        case .lede: return -0.2
+        // Display sizes track negative, per this scale's own rule; 30 sits
+        // just under `.display`'s 32 and borrows most of its tracking.
+        case .lessonTitle: return -0.6
+        case .proseH2: return -0.35
+        // A monospaced face's advances are already fixed; tracking one only
+        // breaks the grid that makes it readable.
+        case .mono, .formula: return 0
         }
     }
 
@@ -134,6 +175,16 @@ enum GRASPType {
         switch self {
         case .studyPrompt: return 6
         case .studyAnswer, .body: return 2
+        // A reading column wants more air than either -- the eye has to
+        // find the start of the next line unaided.
+        case .prose: return 7
+        case .lede: return 6
+        case .lessonTitle: return 2
+        case .proseH2: return 2
+        // Formulas wrap badly; the extra leading stops a wrapped one
+        // reading as two separate formulas.
+        case .formula: return 6
+        case .mono: return 4
         default: return 0
         }
     }
@@ -156,5 +207,12 @@ extension Font {
 
     static func graspNumber(_ size: CGFloat) -> Font {
         .system(size: size, weight: .semibold).monospacedDigit()
+    }
+
+    /// Companion to the two above, for the `AttributedString` run
+    /// attributes the inline markdown renderer sets by hand -- a per-run
+    /// attribute can't reach the `graspType` view modifier.
+    static func graspMono(_ size: CGFloat) -> Font {
+        .system(size: size, weight: .regular, design: .monospaced)
     }
 }

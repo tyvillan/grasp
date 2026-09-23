@@ -20,6 +20,35 @@ public struct GeneratedTestQuestion: Sendable, Equatable {
     }
 }
 
+/// One figure a generator proposed, and which section (0-based, in the
+/// order the headings were given) it belongs beside.
+public struct GeneratedFigure: Sendable, Equatable {
+    public let sectionIndex: Int
+    public let figure: OverviewFigure
+
+    public init(sectionIndex: Int, figure: OverviewFigure) {
+        self.sectionIndex = sectionIndex
+        self.figure = figure
+    }
+}
+
+/// A whole-note study overview, before it is merged, linked or persisted.
+/// Mirrors `GeneratedCard`/`GeneratedTestQuestion`: a plain value the
+/// generator produces and the caller decides what to do with.
+public struct GeneratedOverview: Sendable, Equatable {
+    public let document: OverviewDocument
+
+    public init(document: OverviewDocument) { self.document = document }
+
+    /// The fail-soft result for no model, no note, or a response that
+    /// couldn't be read. Deliberately not an optional or a thrown error:
+    /// `generateAdditional` already established that "nothing came back"
+    /// and "there was nothing to say" are the same answer to a caller.
+    public static let empty = GeneratedOverview(document: .empty)
+
+    public var isEmpty: Bool { document.isEmpty }
+}
+
 /// The outcome of checking one card's definition against its term and
 /// source note -- see `CardGenerator.validateContext`.
 public struct ContextValidation: Sendable, Equatable {
@@ -110,6 +139,85 @@ public protocol CardGenerator: Sendable {
     func validateContext(
         front: String, back: String, noteContext: String, courseName: String
     ) async -> ContextValidation
+
+    /// Teaches one note as a short lesson: a claim-style title, an opening
+    /// question, objectives, claim-headed sections with inline key terms and
+    /// self-checks, and takeaways. Unlike every card-facing method here this
+    /// is *not* grounded to the note's wording -- a lesson that stays inside
+    /// the note's own sentences reads as a copy of the student's notes. The
+    /// boundary is topical instead: explain the concepts the note raises as
+    /// well as possible, without wandering onto concepts it doesn't raise.
+    /// An empty result is still a normal, expected outcome.
+    ///
+    /// `noteContext` is NOT truncated by the implementation, unlike every
+    /// other method here. The caller has already cut the note into pieces
+    /// that fit `overviewContextWordBudget`, because a whole-note summary
+    /// silently cut off at 3,000 characters is a *wrong* answer rather than
+    /// a slightly thinner one -- it describes the first third of a lecture
+    /// while presenting itself as describing the lecture.
+    ///
+    /// `includeFormulas` comes from `NoteText.hasMath`: a note with no
+    /// math shouldn't be shown a formulas section at all, because a model
+    /// shown an empty section fills it. `partLabel`, when non-nil, tells
+    /// the model it is seeing one piece of a longer note so it summarises
+    /// only that piece.
+    ///
+    /// Deliberately does not produce the diagram -- see `generateDiagram`.
+    func generateOverview(
+        noteTitle: String, courseName: String, noteContext: String,
+        includeFormulas: Bool, partLabel: String?
+    ) async -> GeneratedOverview
+
+    /// Draws one concept diagram over an already-summarised note, as raw
+    /// Mermaid source in the restricted subset `MermaidParser` accepts.
+    ///
+    /// Split out of `generateOverview` for one concrete reason: a Mermaid
+    /// block is inherently multi-line, every other call in this file comes
+    /// back inside a JSON string, and an unescaped newline in a JSON string
+    /// is the most common way a local 7B response fails to decode. Asking
+    /// for the diagram in its own plain-text response removes that failure
+    /// mode rather than trying to survive it, and it lets the overview pass
+    /// demand single-line strings everywhere.
+    ///
+    /// Returns the source verbatim, never a parsed graph: parsing belongs
+    /// to `MermaidParser`, which is pure, tolerant, independently testable,
+    /// and able to improve without regenerating anything. `""` is the
+    /// fail-soft empty result, and also the honest answer for a note with
+    /// no relationships worth drawing.
+    func generateDiagram(
+        noteTitle: String, courseName: String, conceptOutline: String
+    ) async -> String
+
+    /// Chooses interactive figures for a lesson that has already been
+    /// written, from the fixed set `OverviewFigure.Kind` names, and supplies
+    /// only their *numbers* -- the equations the note contains, the row
+    /// operations it performs, a matrix it discusses. `sectionHeadings` are
+    /// the lesson's headings in order, so each figure can say which section
+    /// it belongs beside.
+    ///
+    /// A separate pass from `generateOverview` so the lesson prompt can stay
+    /// about writing well, and so a model that fumbles this narrower,
+    /// numbers-only question costs the lesson its pictures and nothing else.
+    /// Everything drawn is recomputed from these numbers by
+    /// `OverviewFigures`; nothing here is trusted to be arithmetic. `[]` is
+    /// the fail-soft empty result, and the honest one for any note with no
+    /// equations or matrices in it.
+    func generateFigures(
+        noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]
+    ) async -> [GeneratedFigure]
+
+    /// Roughly how many words of note text this generator can be handed in
+    /// one call and still answer well -- what `OverviewChunker` sizes its
+    /// chunks against. Words rather than tokens because nothing in this
+    /// codebase has a tokenizer, and `NoteText.wordCount` is already stored.
+    var overviewContextWordBudget: Int { get }
+}
+
+public extension CardGenerator {
+    /// ~1,200 words is roughly 1,600 tokens of English prose, leaving a
+    /// 7-8B model's 8k window comfortable room for the prompt and a full
+    /// answer. `FoundationModelsGenerator` overrides this downward.
+    var overviewContextWordBudget: Int { 1_200 }
 }
 
 /// The v1 default: no model, no network, no framework check. Candidates
@@ -154,6 +262,31 @@ public struct NoGenerator: CardGenerator {
     ) async -> ContextValidation {
         ContextValidation(.valid)
     }
+
+    /// No model means no overview -- the empty document, never a fabricated
+    /// one, matching `generateAdditional`'s "nothing invented" spirit. An
+    /// empty document is never persisted, so this writes no row.
+    public func generateOverview(
+        noteTitle: String, courseName: String, noteContext: String,
+        includeFormulas: Bool, partLabel: String?
+    ) async -> GeneratedOverview {
+        .empty
+    }
+
+    /// No model means no diagram. `""` rather than a stub graph: the view's
+    /// "no diagram" state is the right thing to show, where a placeholder
+    /// would look like a real answer that happened to be wrong.
+    public func generateDiagram(
+        noteTitle: String, courseName: String, conceptOutline: String
+    ) async -> String {
+        ""
+    }
+
+    public func generateFigures(
+        noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]
+    ) async -> [GeneratedFigure] {
+        []
+    }
 }
 
 /// Picks the best generator available on this machine, in the order the
@@ -164,8 +297,17 @@ public struct NoGenerator: CardGenerator {
 /// Models -- rather than assumed from what's installed.
 public enum CardGenerators {
     public static func select() async -> any CardGenerator {
-        let ollama = OllamaGenerator()
-        if await ollama.isAvailable { return ollama }
+        let probe = OllamaGenerator()
+        if await probe.isAvailable {
+            // A running server with the wrong model name answers every
+            // request with a 404 that `try?` turns into silence -- so the
+            // model is chosen from what's actually installed, never assumed.
+            let installed = await probe.installedModels()
+            let preferred = UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey)
+            if let model = OllamaModelChoice.resolve(preferred: preferred, installed: installed) {
+                return OllamaGenerator(model: model)
+            }
+        }
 
         if #available(macOS 26.0, *) {
             let foundationModels = FoundationModelsGenerator()
@@ -173,5 +315,31 @@ public enum CardGenerators {
         }
 
         return NoGenerator()
+    }
+}
+
+/// Which installed Ollama model GRASP talks to.
+public enum OllamaModelChoice {
+    /// Machine-wide rather than per profile: models are installed on this
+    /// Mac, not in anyone's account.
+    public static let defaultsKey = "GRASP.ollamaModel"
+
+    /// Best first, for when the student hasn't chosen. Ordered by how each
+    /// did on the same real lecture note -- following the lesson's style
+    /// rules and keeping its math straight -- not by size or reputation.
+    /// qwen3.5:9b wrote claim headings, covered every part of the lecture
+    /// and stated no false math; qwen2.5:7b titled the same lesson "Every
+    /// system of linear equations has a solution", which is the opposite of
+    /// what the lecture teaches. gemma4:12b is deliberately absent: on a
+    /// 16 GB laptop it made the whole machine lag.
+    public static let recommended = ["qwen3.5:9b", "qwen2.5:7b-instruct"]
+
+    /// The student's choice if it's installed; otherwise the best installed
+    /// recommended model; otherwise whatever is installed. nil only when
+    /// nothing is -- a server with no models can't answer anything.
+    public static func resolve(preferred: String?, installed: [String]) -> String? {
+        if let preferred, !preferred.isEmpty, installed.contains(preferred) { return preferred }
+        if let best = recommended.first(where: installed.contains) { return best }
+        return installed.first
     }
 }

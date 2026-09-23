@@ -19,6 +19,23 @@ struct ExamBiasTests {
         #expect(capped == exam.addingTimeInterval(-86400))
     }
 
+    @Test("inside the last day, a review still lands in the future and before the exam")
+    func lastDayCapStaysAhead() {
+        let now = Date()
+        let exam = now.addingTimeInterval(20 * 3600)
+        let capped = ExamBias.capDue(now.addingTimeInterval(3 * 86400), examDate: exam, now: now)
+        #expect(capped > now)
+        #expect(capped <= exam)
+        #expect(capped == exam.addingTimeInterval(-6 * 3600))
+    }
+
+    @Test("an exam less than an hour away caps to the exam itself, never after it")
+    func imminentExamCap() {
+        let now = Date()
+        let exam = now.addingTimeInterval(30 * 60)
+        #expect(ExamBias.capDue(now.addingTimeInterval(86400), examDate: exam, now: now) == exam)
+    }
+
     @Test("final week is true from 7 days out through the exam date")
     func finalWeekWindow() {
         let now = Date()

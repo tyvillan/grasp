@@ -60,6 +60,12 @@ struct TestSetupSheet: View {
     /// near-instant card-only path, and a silent multi-second pause with
     /// no feedback reads as a hang.
     @State private var isStarting = false
+    /// Set only while AI questions are being written -- the one slow part
+    /// of starting a test.
+    @State private var aiActivity: AIActivity?
+    /// Set when Start found nothing to ask, so the sheet says why instead
+    /// of just not starting.
+    @State private var noQuestions = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -80,10 +86,26 @@ struct TestSetupSheet: View {
 
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                 Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
+            } else if noQuestions {
+                Text(excludeMastered
+                     ? "No cards match -- every card here is marked as known. Turn off \"Only cards I haven't marked as known\" to test on them anyway."
+                     : "No cards match these settings, so there's nothing to test.")
+                    .font(.caption).foregroundStyle(.red)
+            }
+
+            if let aiActivity {
+                AIProgressStrip(
+                    activity: aiActivity,
+                    onStop: { store.skipAITestQuestions() },
+                    stopTitle: "Skip",
+                    stoppingTitle: "Starting…",
+                    stopHelp: "Starts the test now, with any AI questions already written.",
+                    isInline: true
+                )
             }
 
             HStack(spacing: 8) {
-                if isStarting {
+                if isStarting, aiActivity == nil {
                     ProgressView().controlSize(.small)
                     Text(store.isAITestQuestionsEnabled ? "Generating AI questions…" : "Starting test…")
                         .font(.caption)
@@ -99,10 +121,27 @@ struct TestSetupSheet: View {
                         excludeMastered: excludeMastered
                     )
                     isStarting = true
+                    noQuestions = false
+                    let run = (store.isAITestQuestionsEnabled && allowWritten)
+                        ? AIActivity(headline: "Writing AI questions from your notes")
+                        : nil
+                    aiActivity = run
                     Task {
-                        defer { isStarting = false }
-                        guard let (attemptId, questions, aiWarning) = try? await store.startTest(deckIds: deckIds, config: config),
-                              !questions.isEmpty else { return }
+                        defer {
+                            run?.finish()
+                            aiActivity = nil
+                            isStarting = false
+                        }
+                        let start = { try await store.startTest(deckIds: deckIds, config: config) }
+                        let result = if let run {
+                            try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }
+                        } else {
+                            try? await start()
+                        }
+                        guard let (attemptId, questions, aiWarning) = result, !questions.isEmpty else {
+                            noQuestions = true
+                            return
+                        }
                         onStart(attemptId, questions, aiWarning)
                     }
                 }
@@ -327,7 +366,7 @@ struct TestRunView: View {
 
     private func choiceList(_ question: LearnEngine.RoundQuestion) -> some View {
         VStack(spacing: 7) {
-            ForEach(Array((question.choices ?? []).enumerated()), id: \.element) { position, choice in
+            ForEach(Array((question.choices ?? []).enumerated()), id: \.offset) { position, choice in
                 Button {
                     guard !isAnswered else { return }
                     selectedChoice = choice

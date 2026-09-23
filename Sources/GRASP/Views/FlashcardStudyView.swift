@@ -23,6 +23,10 @@ struct FlashcardStudyView: View {
     @State private var reviewCount = 0
     @State private var understoodCount = 0
     @State private var editingCard: Card?
+    /// Cards already graded this session. Arrowing back onto one shows it
+    /// again but doesn't grade it a second time -- that was a second FSRS
+    /// review and a second history row for one look at the card.
+    @State private var markedIds: Set<String> = []
     @FocusState private var isFocused: Bool
 
     @AppStorage("focusWorkMinutes") private var workMinutes = 25
@@ -77,7 +81,11 @@ struct FlashcardStudyView: View {
         .sheet(item: $editingCard) { card in
             CardQuickEditSheet(card: card) { updated in
                 try? store.updateCard(updated)
-                if index < queue.count { queue[index] = updated }
+                // The stored card, not the sheet's copy: the copy predates any
+                // grading done since it opened.
+                if index < queue.count, let fresh = try? store.card(updated.id) {
+                    queue[index] = fresh
+                }
             }
         }
     }
@@ -289,6 +297,9 @@ struct FlashcardStudyView: View {
         case "s":
             try? store.setCardStatus(queue[index].id, status: .suspended)
             queue.remove(at: index)
+            // `index` didn't change, so the onChange that pauses the timer at
+            // the end of the queue never fires for the last card.
+            if index >= queue.count { focusTimer.pause() }
             return .handled
         default:
             return .ignored
@@ -297,9 +308,12 @@ struct FlashcardStudyView: View {
 
     private func submitMastery(_ understood: Bool) {
         guard index < queue.count else { return }
-        try? store.markCard(queue[index].id, understood: understood, source: "flashcards")
-        if understood { understoodCount += 1 } else { reviewCount += 1 }
-        focusTimer.countCard()
+        let cardId = queue[index].id
+        if markedIds.insert(cardId).inserted {
+            try? store.markCard(cardId, understood: understood, source: "flashcards")
+            if understood { understoodCount += 1 } else { reviewCount += 1 }
+            focusTimer.countCard()
+        }
         index += 1
         isFlipped = false
     }
@@ -319,13 +333,12 @@ private struct CardQuickEditSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    var saved = card
-                    saved.origin = .manual
-                    saved.updatedAt = Date()
-                    onSave(saved)
+                    onSave(card)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
