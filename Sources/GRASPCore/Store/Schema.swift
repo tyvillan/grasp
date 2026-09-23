@@ -329,6 +329,14 @@ enum Schema {
             // index would only cost writes.
         }
 
+        // Sync between devices: a one-row `syncState` and a `syncOutbox`
+        // that triggers fill as rows change -- see `SyncSchema`. Recording
+        // is off until the profile signs in to an account, so a local-only
+        // profile pays nothing but a trigger's WHEN check.
+        migrator.registerMigration("v8_sync") { db in
+            try SyncSchema.createTables(db)
+        }
+
         return migrator
     }
 }

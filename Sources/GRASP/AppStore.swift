@@ -140,6 +140,10 @@ final class AppStore {
     /// running on a throwaway in-memory one instead.
     let databaseOpenError: String?
 
+    /// Sync with the profile's account, when it has one. Set at the end of
+    /// `init` because it calls back into the store.
+    private(set) var sync: SyncController!
+
     /// This profile's own preferences, which every `@AppStorage` under the
     /// profile's window reads (see `GRASPApp`). They used to live in the
     /// shared defaults, so one person's daily goal, focus timer and sort
@@ -211,6 +215,8 @@ final class AppStore {
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? ""
         self.isAITestQuestionsEnabled = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
         reload()
+        sync = SyncController(database: db, profile: profile) { [weak self] in self?.reload() }
+        sync.start()
         Task { await refreshGeneratorStatus() }
     }
 
@@ -721,6 +727,8 @@ final class AppStore {
             importError = "Failed to read database: \(error)"
         }
         revision += 1
+        // Every local change comes through here; sync pushes it shortly.
+        sync?.noteLocalChange()
     }
 
     /// A course's display name straight from the already-loaded in-memory

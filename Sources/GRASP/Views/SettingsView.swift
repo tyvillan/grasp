@@ -44,6 +44,8 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
+            AccountSyncSection()
+
             Section("Card Generation") {
                 HStack {
                     Text(store.generatorStatus)
@@ -541,6 +543,104 @@ private struct OllamaModelPicker: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// Settings' view of sync for the open profile: who it's signed in as, how
+/// the last sync went, and signing in or out.
+private struct AccountSyncSection: View {
+    @Environment(AppStore.self) private var store
+    @State private var confirmingSignOut = false
+    @State private var pendingLink: SignedInAccount?
+    @State private var linkError: String?
+
+    var body: some View {
+        let sync = store.sync!
+        Section("Account & Sync") {
+            if let account = sync.account {
+                LabeledContent("Signed in as", value: account.email ?? "Your account")
+                HStack {
+                    statusText(sync)
+                    Spacer()
+                    Button("Sync Now") { sync.syncNow() }
+                        .disabled(sync.state == .syncing || sync.state == .signedOut)
+                }
+                if sync.state == .signedOut {
+                    Text("This Mac's sign-in has expired. Sign in again to keep syncing -- nothing here is lost.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    SignInButtons { signedIn in sync.resume(signedIn) }
+                }
+                Button("Sign Out…", role: .destructive) { confirmingSignOut = true }
+            } else {
+                Text("This profile's library is only on this Mac. Sign in to sync it with your other devices -- it's uploaded to your account, and anything you sign in to later gets a copy.")
+                    .font(.caption).foregroundStyle(.secondary)
+                SignInButtons { signedIn in link(signedIn) }
+                if let linkError {
+                    Text(linkError).font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+        // An emailed sign-in link opened while this section asked for it.
+        .onChange(of: AccountService.shared.completedFromLink) { _, _ in
+            guard let signedIn = AccountService.shared.consumeCompletedFromLink() else { return }
+            if sync.account == nil { link(signedIn) } else { sync.resume(signedIn) }
+        }
+        .confirmationDialog("Sign out of sync?", isPresented: $confirmingSignOut) {
+            Button("Sign Out", role: .destructive) { Task { await sync.signOut() } }
+        } message: {
+            Text("Your library stays on this Mac as a local profile. It stops syncing, and your other devices keep their own copies.")
+        }
+        .confirmationDialog(
+            "Your account already has a library",
+            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } })
+        ) {
+            Button("Combine Them") {
+                if let pendingLink { finishLink(pendingLink) }
+            }
+            Button("Cancel", role: .cancel) { pendingLink = nil }
+        } message: {
+            Text("This profile's library will be added to the one already in your account. If both came from the same notes you'll get duplicate cards -- to use your account's library on this Mac instead, switch profile and sign in from there.")
+        }
+    }
+
+    @ViewBuilder
+    private func statusText(_ sync: SyncController) -> some View {
+        switch sync.state {
+        case .syncing:
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing…") }
+        case .failed(let message):
+            Text(message).foregroundStyle(.red).font(.caption)
+        case .notConfigured:
+            Text("Sign-in isn't set up in this copy of GRASP.").font(.caption).foregroundStyle(.secondary)
+        default:
+            if let last = sync.lastSyncedAt {
+                Text("Last synced \(last.formatted(.relative(presentation: .named)))")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Not synced yet").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Links this profile, checking first whether the account already has
+    /// someone else's library that this one would be merged into.
+    private func link(_ signedIn: SignedInAccount) {
+        Task {
+            if await AccountService.shared.accountHasData(userId: signedIn.userId) == true {
+                pendingLink = signedIn
+            } else {
+                finishLink(signedIn)
+            }
+        }
+    }
+
+    private func finishLink(_ signedIn: SignedInAccount) {
+        pendingLink = nil
+        do {
+            try store.sync.link(signedIn, uploadLibrary: true)
+        } catch {
+            linkError = "Couldn't turn on sync: \(error.localizedDescription)"
         }
     }
 }

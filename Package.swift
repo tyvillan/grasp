@@ -10,6 +10,10 @@ let package = Package(
         // is the one reader for that shape; PDF/docx both ride Apple's own
         // PDFKit/AppKit readers with no library needed.
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.19"),
+        // Accounts and sync: Supabase's auth (Google / email sign-in, with
+        // the session kept in the Keychain) and its REST client for the
+        // one table sync reads and writes.
+        .package(url: "https://github.com/supabase/supabase-swift.git", from: "2.0.0"),
     ],
     targets: [
         // Pure logic: ingest, store, and the study engine (FSRS scheduling,
@@ -29,7 +33,10 @@ let package = Package(
         // UI layer while GRASPCore stays explicitly nonisolated.
         .executableTarget(
             name: "GRASP",
-            dependencies: ["GRASPCore"],
+            dependencies: [
+                "GRASPCore",
+                .product(name: "Supabase", package: "supabase-swift"),
+            ],
             path: "Sources/GRASP",
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),

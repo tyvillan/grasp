@@ -1,11 +1,9 @@
 import SwiftUI
 import GRASPCore
 
-/// Shown before the main app: pick (or create) a local profile. Purely a
-/// local data-separation convenience for more than one person sharing an
-/// installed copy of GRASP -- no network, no server, nothing shared
-/// between profiles. See `ProfileStore`'s header comment for the full
-/// design rationale, including why the PIN is not real security.
+/// Shown before the main app: pick a profile, create a local one, or sign
+/// in to an account to sync a library across devices. See `ProfileStore`
+/// for why the PIN is not real security.
 struct ProfilePickerView: View {
     let onSelect: (Profile) -> Void
 
@@ -13,6 +11,9 @@ struct ProfilePickerView: View {
     @State private var showingNewProfile = false
     @State private var unlockingProfile: Profile?
     @State private var loadError: String?
+    /// Someone who just signed in on this Mac with no profile of theirs here.
+    @State private var linking: SignedInAccount?
+    private let accounts = AccountService.shared
 
     var body: some View {
         VStack(spacing: 24) {
@@ -73,8 +74,27 @@ struct ProfilePickerView: View {
                 }
                 .padding(24)
             }
+
+            // Signing in is how a library follows you to another device.
+            // Local profiles above stay exactly as they were.
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                    Text("Sync across your devices")
+                        .graspType(.eyebrow)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize()
+                    Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                }
+                .frame(maxWidth: 420)
+                SignInButtons { account in signedIn(account) }
+                if let linkError = accounts.linkError {
+                    Text(linkError).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                }
+            }
+            .padding(.bottom, 28)
         }
-        .frame(minWidth: 480, minHeight: 420)
+        .frame(minWidth: 480, minHeight: 560)
         .background(GRASPColor.background)
         .tint(GRASPColor.accent)
         .task { load() }
@@ -89,6 +109,33 @@ struct ProfilePickerView: View {
             UnlockProfileSheet(profile: profile) {
                 onSelect(profile)
             }
+        }
+        .sheet(item: $linking) { account in
+            AccountLinkSheet(
+                account: account,
+                localProfiles: profiles.filter { $0.account == nil },
+                onDone: { profile in
+                    linking = nil
+                    onSelect(profile)
+                },
+                onCancel: { linking = nil }
+            )
+        }
+        // A sign-in finished by a link opened from Mail.
+        .onChange(of: accounts.completedFromLink) { _, _ in
+            if let account = accounts.consumeCompletedFromLink() { signedIn(account) }
+        }
+    }
+
+    /// Opens the profile that belongs to this account, or asks where its
+    /// library should come from when this Mac has none yet. Signing in is
+    /// a stronger check than a PIN, so a signed-in profile opens directly.
+    private func signedIn(_ account: SignedInAccount) {
+        load()
+        if let existing = profiles.first(where: { $0.account?.userId == account.userId }) {
+            onSelect(existing)
+        } else {
+            linking = account
         }
     }
 
@@ -124,6 +171,14 @@ private struct ProfileTile: View {
                             .font(.system(size: 9))
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
+                }
+                if let account = profile.account {
+                    Label(account.email ?? "Synced", systemImage: "arrow.triangle.2.circlepath")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 8)
                 }
             }
             .frame(width: 140, height: 140)

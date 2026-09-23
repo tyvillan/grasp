@@ -18,19 +18,27 @@ struct GRASPApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if let store {
-                ContentView()
-                    .environment(store)
-                    .defaultAppStorage(store.preferences)
-                    .environment(\.switchProfile) { self.store = nil }
-                    .frame(minWidth: 800, minHeight: 500)
-            } else {
-                ProfilePickerView { profile in
-                    store = AppStore(profile: profile)
+            Group {
+                if let store {
+                    ContentView()
+                        .environment(store)
+                        .defaultAppStorage(store.preferences)
+                        .environment(\.switchProfile) { self.store = nil }
+                        .frame(minWidth: 800, minHeight: 500)
+                } else {
+                    ProfilePickerView { profile in
+                        store = AppStore(profile: profile)
+                    }
+                    .task {
+                        if let profile = autoSelectedProfile() { store = AppStore(profile: profile) }
+                    }
                 }
-                .task {
-                    if let profile = autoSelectedProfile() { store = AppStore(profile: profile) }
-                }
+            }
+            // grasp:// links -- an emailed sign-in link or confirmation --
+            // land in the window that's already open instead of a new one.
+            .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+            .onOpenURL { url in
+                Task { await AccountService.shared.handle(url: url) }
             }
         }
         .windowStyle(.automatic)

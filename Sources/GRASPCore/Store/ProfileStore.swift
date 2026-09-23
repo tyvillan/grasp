@@ -3,23 +3,30 @@ import CryptoKit
 
 /// A named local profile so more than one person can use the same
 /// installed copy of GRASP with separate data -- each profile gets its
-/// own SQLite database under `Profiles/<id>/lectern.sqlite`. There is no
-/// account system beyond this: no network, no server, nothing shared
-/// between profiles. A PIN is a light deterrent against a sibling opening
-/// the wrong profile, not real access control -- it is hashed (SHA-256,
-/// fixed salt) only so it isn't sitting in plain text in a JSON file that
-/// syncs nowhere anyway.
+/// own SQLite database under `Profiles/<id>/lectern.sqlite`. A profile is
+/// local-only unless it's signed in to an account (`account`), in which
+/// case its library syncs with that account's other devices; profiles
+/// never share data with each other. A PIN is a light deterrent against a
+/// sibling opening the wrong profile, not real access control -- it is
+/// hashed (SHA-256, fixed salt) only so it isn't sitting in plain text in
+/// profiles.json.
 public struct Profile: Codable, Identifiable, Sendable, Equatable {
     public let id: String
     public var name: String
     public var pinHash: String?
     public let createdAt: Date
+    /// Set when the profile is signed in to an account and syncs its
+    /// library across devices. Nil for a local-only profile -- absent from
+    /// older profiles.json files, which decode as local-only.
+    public var account: LinkedAccount?
 
-    public init(id: String = UUID().uuidString, name: String, pinHash: String? = nil, createdAt: Date = Date()) {
+    public init(id: String = UUID().uuidString, name: String, pinHash: String? = nil,
+                createdAt: Date = Date(), account: LinkedAccount? = nil) {
         self.id = id
         self.name = name
         self.pinHash = pinHash
         self.createdAt = createdAt
+        self.account = account
     }
 
     /// A fixed id recognized by `AppStore` as "use an ephemeral in-memory
@@ -33,6 +40,21 @@ public struct Profile: Codable, Identifiable, Sendable, Equatable {
             .appendingPathComponent("Profiles", isDirectory: true)
             .appendingPathComponent(id, isDirectory: true)
             .appendingPathComponent("lectern.sqlite")
+    }
+}
+
+/// The account a synced profile belongs to.
+public struct LinkedAccount: Codable, Sendable, Equatable {
+    /// The account's id on the sync server; one profile per account on a Mac.
+    public var userId: String
+    public var email: String?
+    /// "google" or "email".
+    public var provider: String
+
+    public init(userId: String, email: String?, provider: String) {
+        self.userId = userId
+        self.email = email
+        self.provider = provider
     }
 }
 
@@ -87,6 +109,14 @@ public enum ProfileStore {
 
         try save(profiles, supportDirectory: supportDirectory)
         return profiles
+    }
+
+    /// Replaces one profile in the saved list, leaving the rest alone.
+    public static func update(_ profile: Profile, supportDirectory: URL) throws {
+        var profiles = try loadOrMigrate(supportDirectory: supportDirectory)
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
+        profiles[index] = profile
+        try save(profiles, supportDirectory: supportDirectory)
     }
 
     public static func save(_ profiles: [Profile], supportDirectory: URL) throws {
