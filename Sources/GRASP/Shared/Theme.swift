@@ -1,10 +1,14 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 /// GRASP's palette: warm amber (the "highlighter" running through a real
 /// set of lecture notes) as the accent against a black ground, with a
 /// muted teal reserved for mastery/success states so it never competes
-/// with the amber. Each token is a dynamic `NSColor` so it tracks the
+/// with the amber. Each token is a dynamic platform color so it tracks the
 /// system appearance automatically, including live switches -- no
 /// environment threading needed at call sites.
 ///
@@ -44,16 +48,35 @@ enum GRASPColor {
     static var stroke: Color { hairline }
     static var background: Color { canvas }
 
-    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(NSColor(name: nil) { appearance in
+    /// A color that switches with light and dark mode, on either platform.
+    ///
+    /// `nonisolated`, closure included: SwiftUI resolves colors on its
+    /// render thread, not the main actor. With the app's default main-actor
+    /// isolation the provider carried a runtime check that the thread was
+    /// main, and the first off-main redraw -- the Google sign-in sheet on
+    /// iPhone -- tripped it and crashed the app.
+    nonisolated static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        #if os(macOS)
+        Color(NSColor(name: nil) { @Sendable appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return NSColor(hex: isDark ? dark : light)
         })
+        #else
+        Color(UIColor { @Sendable traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+        #endif
     }
 }
 
-private extension NSColor {
-    convenience init(hex: UInt32) {
+#if os(macOS)
+private typealias PlatformColor = NSColor
+#else
+private typealias PlatformColor = UIColor
+#endif
+
+private extension PlatformColor {
+    nonisolated convenience init(hex: UInt32) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,
@@ -215,4 +238,64 @@ extension Font {
     static func graspMono(_ size: CGFloat) -> Font {
         .system(size: size, weight: .regular, design: .monospaced)
     }
+}
+
+extension View {
+    /// A menu drawn as a bare icon. macOS needs the borderless style for
+    /// that; on iOS a `Menu` with an icon label already looks like one.
+    @ViewBuilder
+    func borderlessMenu() -> some View {
+        #if os(macOS)
+        self.menuStyle(.borderlessButton)
+        #else
+        self
+        #endif
+    }
+}
+
+/// Puts text on the clipboard.
+enum Clipboard {
+    static func copy(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
+    }
+}
+
+extension View {
+    /// A minimum window size -- on the Mac, where these screens open as
+    /// sheets that would otherwise shrink to fit. On iPhone a screen is
+    /// the width of the phone, and a desktop minimum only pushed its edges
+    /// off the sides.
+    @ViewBuilder
+    func macWindowFrame(minWidth: CGFloat, minHeight: CGFloat) -> some View {
+        #if os(macOS)
+        self.frame(minWidth: minWidth, minHeight: minHeight)
+        #else
+        self
+        #endif
+    }
+
+    /// A fixed sheet size on the Mac; the full width available on iPhone.
+    @ViewBuilder
+    func macSheetFrame(width: CGFloat, height: CGFloat? = nil) -> some View {
+        #if os(macOS)
+        self.frame(width: width, height: height)
+        #else
+        self.frame(maxWidth: .infinity)
+        #endif
+    }
+}
+
+/// Whether to label buttons with their keyboard shortcuts. A Mac always
+/// has a keyboard; on a phone the hint is noise for a key that isn't there.
+enum KeyHints {
+    #if os(macOS)
+    static let shown = true
+    #else
+    static let shown = false
+    #endif
 }

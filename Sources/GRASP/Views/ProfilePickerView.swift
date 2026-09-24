@@ -147,9 +147,7 @@ struct ProfilePickerView: View {
         }
     }
 
-    static func supportDirectory() -> URL {
-        (try? GRASPDatabase.supportDirectory()) ?? FileManager.default.temporaryDirectory
-    }
+    static func supportDirectory() -> URL { AppPaths.supportDirectory() }
 }
 
 private struct ProfileTile: View {

@@ -48,6 +48,19 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
+# Desktop widgets. A widget has to be an app extension (.appex), which
+# SwiftPM can't produce, so it's built from the GRASPWidgetsMac target in the
+# iOS Xcode project -- the same widget code the iPhone uses -- and embedded
+# here. Signed below with the rest of the bundle, not by Xcode: this build
+# signs everything itself. Derived data stays outside iCloud (see above).
+WIDGET_DD="$HOME/Library/Developer/$(basename "$PWD")-widgets-dd"
+xcodebuild -project GRASPiOS/GRASPiOS.xcodeproj -scheme GRASPWidgetsMac \
+  -configuration Release -destination 'generic/platform=macOS' \
+  -derivedDataPath "$WIDGET_DD" ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGNING_ALLOWED=NO -quiet build
+mkdir -p "$APP_DIR/Contents/PlugIns"
+cp -R "$WIDGET_DD/Build/Products/Release/GRASPWidgets.appex" "$APP_DIR/Contents/PlugIns/"
+
 # This project lives on iCloud Drive: Finder/Spotlight sometimes re-stamps
 # AppleDouble/resource-fork extended attributes on freshly-created files
 # within moments of the cp above (a real race, not just a one-time cleanup),
@@ -64,14 +77,25 @@ for attempt in 1 2 3 4 5; do
   # something real: an unnotarized hardened binary gets silently denied by
   # TCC for privacy-gated APIs (Calendar, Contacts, ...) with no prompt at
   # all, which is exactly the bug that sent us here.
+  #
+  # Inside out: the widget first (macOS only loads a sandboxed one), then
+  # the app. Both carry the App Group they share the widget snapshot
+  # through; it's team-prefixed, so no provisioning profile is needed.
   if [ -n "$SIGNING_IDENTITY" ]; then
-    if codesign --force -s "$SIGNING_IDENTITY" "$APP_DIR" 2>/tmp/grasp-codesign-err; then
+    if codesign --force -s "$SIGNING_IDENTITY" \
+         --entitlements GRASPiOS/WidgetSupport/GRASPWidgets-macOS.entitlements \
+         "$APP_DIR/Contents/PlugIns/GRASPWidgets.appex" 2>/tmp/grasp-codesign-err \
+       && codesign --force -s "$SIGNING_IDENTITY" --entitlements GRASP.entitlements \
+         "$APP_DIR" 2>>/tmp/grasp-codesign-err; then
       echo "Signed with: $SIGNING_IDENTITY (attempt $attempt)"
       SIGN_OK=1
       break
     fi
   else
-    if codesign --force -s - "$APP_DIR" 2>/tmp/grasp-codesign-err; then
+    # Ad-hoc can't claim a team's App Group; the widgets will just show
+    # their "open GRASP" placeholder on such a build.
+    if codesign --force -s - "$APP_DIR/Contents/PlugIns/GRASPWidgets.appex" 2>/tmp/grasp-codesign-err \
+       && codesign --force -s - "$APP_DIR" 2>>/tmp/grasp-codesign-err; then
       echo "No local signing identity found -- signed ad-hoc"
       SIGN_OK=1
       break

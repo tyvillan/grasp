@@ -58,7 +58,7 @@ struct FlashcardStudyView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .frame(minWidth: 620, minHeight: 520)
+        .macWindowFrame(minWidth: 620, minHeight: 520)
         .task {
             queue = (try? store.dueCards(inDecks: deckIds)) ?? []
             isFocused = true
@@ -227,11 +227,13 @@ struct FlashcardStudyView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Text("Reveal answer").graspType(.body)
-                        Text("Space")
-                            .graspType(.meta)
-                            .foregroundStyle(GRASPColor.textTertiary)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        if KeyHints.shown {
+                            Text("Space")
+                                .graspType(.meta)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        }
                     }
                     .foregroundStyle(GRASPColor.textSecondary)
                     .frame(maxWidth: .infinity)
@@ -250,11 +252,13 @@ struct FlashcardStudyView: View {
         } label: {
             HStack(spacing: 7) {
                 Text(title)
-                Text(key)
-                    .graspType(.meta)
-                    .foregroundStyle(color.opacity(0.7))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                if KeyHints.shown {
+                    Text(key)
+                        .graspType(.meta)
+                        .foregroundStyle(color.opacity(0.7))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
             }
         }
         .buttonStyle(GRASPVerdictButton(tint: color))
@@ -342,6 +346,6 @@ private struct CardQuickEditSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 420)
+        .macSheetFrame(width: 420)
     }
 }

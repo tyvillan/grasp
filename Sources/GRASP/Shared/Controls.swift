@@ -92,3 +92,61 @@ struct GRASPVerdictButton: ButtonStyle {
             .animation(.easeOut(duration: 0.1), value: isHovering)
     }
 }
+
+/// A small tinted label -- a card's status, a note's "Out of date".
+struct PreviewChip: View {
+    let text: String
+    let tint: Color
+    let tintSoft: Color
+    var icon: String?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 8))
+            }
+            Text(text)
+        }
+        .graspType(.meta)
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(tintSoft, in: Capsule())
+    }
+}
+
+/// Small uppercase label that opens a section. Tracked positive, because
+/// capitals at 11pt jam together at default spacing.
+struct SectionLabel: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .graspType(.eyebrow)
+            .textCase(.uppercase)
+            .foregroundStyle(GRASPColor.textTertiary)
+    }
+}
+
+/// Initials-in-a-circle avatar, reused by the picker and this menu so
+/// switching profiles doesn't change what "you" look like in the UI.
+struct Avatar: View {
+    let name: String
+    var size: CGFloat = 32
+    var fontSize: CGFloat = 13
+
+    var body: some View {
+        ZStack {
+            Circle().fill(GRASPColor.accentSoft)
+            Text(initials)
+                .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                .foregroundStyle(GRASPColor.accent)
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var initials: String {
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first)
+        return letters.isEmpty ? "?" : String(letters).uppercased()
+    }
+}

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Same Supabase project as the Mac app (see ../Info.plist and
+         SYNC_SETUP.md): one account, one library, every device. -->
+    <key>GRASPSupabaseURL</key>
+    <string>https://bchmnuizhxtofmbbuqwu.supabase.co</string>
+    <key>GRASPSupabaseAnonKey</key>
+    <string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjaG1udWl6aHh0b2ZtYmJ1cXd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNzI5NDIsImV4cCI6MjEwNTc0ODk0Mn0.G4rcUGsb0Nzpa_rGh-GOllKscqONnosVHfkha-kRAps</string>
+    <!-- grasp:// -- where Google sign-in and emailed links return. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.tyvillan.grasp.auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>grasp</string>
+            </array>
+        </dict>
+    </array>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>GRASP reads your calendar to find exam and quiz dates and match them to your courses. It never adds, changes, or deletes anything in your calendar.</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.tyvillan.grasp.card</string>
+            <key>UTTypeDescription</key>
+            <string>GRASP Card</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

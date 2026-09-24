@@ -34,7 +34,7 @@ struct NoteViewerView: View {
             }
         }
         .padding(20)
-        .frame(width: 560, height: 480)
+        .macSheetFrame(width: 560, height: 480)
         .task(id: materialId) {
             material = try? store.material(materialId)
             noteText = try? store.noteText(forMaterial: materialId)

@@ -133,7 +133,7 @@ final class SyncController {
     func link(_ signedIn: SignedInAccount, uploadLibrary: Bool) throws {
         try engine.enable(accountUserId: signedIn.userId, uploadExisting: uploadLibrary)
         profile.account = signedIn.linked
-        try ProfileStore.update(profile, supportDirectory: ProfilePickerView.supportDirectory())
+        try ProfileStore.update(profile, supportDirectory: AppPaths.supportDirectory())
         account = profile.account
         state = .idle
         start()
@@ -147,7 +147,7 @@ final class SyncController {
         if let account = profile.account { await accounts.signOut(userId: account.userId) }
         try? engine.disable()
         profile.account = nil
-        try? ProfileStore.update(profile, supportDirectory: ProfilePickerView.supportDirectory())
+        try? ProfileStore.update(profile, supportDirectory: AppPaths.supportDirectory())
         account = nil
         state = .localOnly
         refreshStatus()

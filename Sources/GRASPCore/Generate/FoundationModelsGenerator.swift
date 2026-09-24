@@ -9,7 +9,7 @@ import FoundationModels
 /// for real via `SystemLanguageModel.default.availability`, never assumed
 /// from the OS version alone). Gated to macOS 26+ since the universal
 /// build still runs on older systems via `OllamaGenerator`/`NoGenerator`.
-@available(macOS 26.0, *)
+@available(macOS 26.0, iOS 26.0, *)
 public struct FoundationModelsGenerator: CardGenerator {
     public init() {}
 

@@ -150,7 +150,7 @@ struct TestSetupSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .macSheetFrame(width: 380)
     }
 }
 
@@ -190,7 +190,7 @@ struct TestRunView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .frame(minWidth: 620, minHeight: 520)
+        .macWindowFrame(minWidth: 620, minHeight: 520)
     }
 
     private func warningBanner(_ message: String) -> some View {
@@ -602,7 +602,7 @@ struct TestResultsView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .frame(minWidth: 520, minHeight: 520)
+        .macWindowFrame(minWidth: 520, minHeight: 520)
     }
 
     /// Flips this one item locally (so the score/progress bar above update

@@ -34,11 +34,16 @@ struct GRASPApp: App {
                     }
                 }
             }
-            // grasp:// links -- an emailed sign-in link or confirmation --
-            // land in the window that's already open instead of a new one.
+            // grasp:// links -- an emailed sign-in link or confirmation, or a
+            // widget tap -- land in the window that's already open instead
+            // of a new one.
             .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .onOpenURL { url in
-                Task { await AccountService.shared.handle(url: url) }
+                if let link = WidgetLink(url: url) {
+                    WidgetRouter.shared.pending = link
+                } else {
+                    Task { await AccountService.shared.handle(url: url) }
+                }
             }
         }
         .windowStyle(.automatic)

@@ -729,6 +729,7 @@ final class AppStore {
         revision += 1
         // Every local change comes through here; sync pushes it shortly.
         sync?.noteLocalChange()
+        WidgetPublisher.shared.schedule(from: self)
     }
 
     /// A course's display name straight from the already-loaded in-memory

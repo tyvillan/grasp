@@ -454,20 +454,6 @@ struct HomeView: View {
 
 // MARK: - Pieces
 
-/// Small uppercase label that opens a section. Tracked positive, because
-/// capitals at 11pt jam together at default spacing.
-struct SectionLabel: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .graspType(.eyebrow)
-            .textCase(.uppercase)
-            .foregroundStyle(GRASPColor.textTertiary)
-    }
-}
-
 private struct StatFigure: View {
     let value: Int
     let label: String

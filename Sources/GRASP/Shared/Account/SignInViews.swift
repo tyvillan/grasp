@@ -116,7 +116,8 @@ struct EmailSignInSheet: View {
 
             HStack {
                 Button("Email me a sign-in link") { sendLink() }
-                    .buttonStyle(.link)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(GRASPColor.accent)
                     .disabled(!emailLooksValid || isWorking)
                     .help("No password needed: open the link on this Mac and you're signed in.")
                 Spacer()
@@ -296,7 +297,7 @@ struct AccountLinkSheet: View {
     /// Links `profile` (or a new one) to the account and hands it back.
     private func finish(with existing: Profile?) {
         do {
-            let support = ProfilePickerView.supportDirectory()
+            let support = AppPaths.supportDirectory()
             var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
             var profile: Profile
             if let existing {

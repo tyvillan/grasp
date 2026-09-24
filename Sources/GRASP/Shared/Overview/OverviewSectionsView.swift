@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import GRASPCore
 
 /// Reading-column metrics for the lesson.
@@ -132,7 +131,7 @@ struct OverviewSectionsView: View {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 13))
                 }
-                .menuStyle(.borderlessButton)
+                .borderlessMenu()
                 .menuIndicator(.hidden)
                 // A borderless menu otherwise tints itself with the window
                 // accent, which put a bright amber dot in the corner that
@@ -203,8 +202,7 @@ struct OverviewSectionsView: View {
             lines.append("## Key takeaways")
             lines += overview.takeaways.map { "- \($0)" }
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        Clipboard.copy(lines.joined(separator: "\n"))
     }
 }
 

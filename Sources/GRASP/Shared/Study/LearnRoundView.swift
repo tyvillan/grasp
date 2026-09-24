@@ -48,7 +48,7 @@ struct LearnRoundView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .frame(minWidth: 620, minHeight: 540)
+        .macWindowFrame(minWidth: 620, minHeight: 540)
         .task { startRound() }
     }
 

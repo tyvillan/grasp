@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 import GRASPCore
 
@@ -15,7 +19,11 @@ import GRASPCore
 /// a font metric doesn't need the main thread.
 nonisolated enum DiagramTextMeasurer {
     static let pointSize: CGFloat = 12
+    #if os(macOS)
     static let weight: NSFont.Weight = .medium
+    #else
+    static let weight: UIFont.Weight = .medium
+    #endif
 
     /// What `ConceptDiagramView` draws with. This and `measureFont`
     /// describe the same type and must stay in step -- measuring one face
@@ -23,8 +31,13 @@ nonisolated enum DiagramTextMeasurer {
     /// clipped by two pixels while nothing else looks wrong.
     static var drawFont: Font { .system(size: pointSize, weight: .medium) }
 
+    #if os(macOS)
     nonisolated(unsafe) private static let measureFont =
         NSFont.systemFont(ofSize: pointSize, weight: weight)
+    #else
+    nonisolated(unsafe) private static let measureFont =
+        UIFont.systemFont(ofSize: pointSize, weight: weight)
+    #endif
 
     /// Metrics for `DiagramLayout`, with the measurement closure filled in.
     /// The layout tests deliberately use the unmeasured default so their
@@ -62,7 +75,8 @@ nonisolated enum DiagramTextMeasurer {
                     height: CGFloat.greatestFiniteMagnitude
                 ),
                 options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: measureFont]
+                attributes: [.font: measureFont],
+                context: nil
             )
             // A point of slack on width: `boundingRect` rounds down on
             // fractional advances, and a node label must never be the thing

@@ -246,6 +246,28 @@ struct ContentView: View {
             // wrong for a course you just clicked into.
             selectedDeckId = DeckListView.allCardsId
         }
+        .onAppear(perform: openWidgetLink)
+        .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
+    }
+
+    /// A widget tap: Home, the calendar, or straight to a deck.
+    private func openWidgetLink() {
+        guard let link = WidgetRouter.shared.consume() else { return }
+        switch link {
+        case .today:
+            selectedCourseId = Self.homeRoute
+        case .calendar:
+            selectedCourseId = Self.calendarRoute
+        case .deck(let id):
+            guard let deck = try? store.deck(id), deck.deletedAt == nil else {
+                selectedCourseId = Self.homeRoute
+                return
+            }
+            // Deck first: the course change handler keeps a deck that
+            // belongs to the new course.
+            selectedDeckId = id
+            selectedCourseId = deck.courseId
+        }
     }
 
     /// The course-picker sheet only records which course was chosen and

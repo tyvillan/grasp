@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import GRASPCore
 
 // MARK: - Palette
@@ -24,16 +23,7 @@ enum FigurePalette {
     static let highlight = dynamic(light: 0xC47A0B, dark: 0xFFFF00)
 
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            let hex = isDark ? dark : light
-            return NSColor(
-                red: CGFloat((hex >> 16) & 0xFF) / 255,
-                green: CGFloat((hex >> 8) & 0xFF) / 255,
-                blue: CGFloat(hex & 0xFF) / 255,
-                alpha: 1
-            )
-        })
+        GRASPColor.dynamic(light: light, dark: dark)
     }
 }
 

@@ -1,4 +1,21 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import AudioToolbox
+#endif
+
+/// The timer's end-of-interval sound.
+enum Chime {
+    static func play() {
+        #if os(macOS)
+        NSSound.beep()
+        #else
+        // The short system "tink": audible without being an alarm.
+        AudioServicesPlaySystemSound(1057)
+        #endif
+    }
+}
 
 /// A Pomodoro-style work/break timer for a study session.
 ///
@@ -137,7 +154,7 @@ final class FocusTimerModel {
                 if self.secondsRemaining == 0 {
                     self.isElapsed = true
                     self.ticker = nil
-                    NSSound.beep()
+                    Chime.play()
                     return
                 }
             }
@@ -293,7 +310,7 @@ private struct FocusTimerSettingsSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 400)
+        .macSheetFrame(width: 400)
         .background(GRASPColor.canvas)
     }
 

@@ -3,7 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "GRASP",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
+    // The core as a library, so the iOS app's Xcode project (GRASPiOS/)
+    // can build on the same ingest, study engine and sync code.
+    products: [
+        .library(name: "GRASPCore", targets: ["GRASPCore"]),
+    ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.29.0"),
         // .pptx is a zip of XML parts (slide text, speaker notes) -- this

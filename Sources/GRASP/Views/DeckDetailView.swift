@@ -1400,26 +1400,6 @@ private struct CardPreviewPane: View {
 /// second badge style for what is visually the same kind of fact.
 /// Not private: the overview reader uses the same chip for its card links
 /// and its "out of date" marker, and a second copy would drift.
-struct PreviewChip: View {
-    let text: String
-    let tint: Color
-    let tintSoft: Color
-    var icon: String?
-
-    var body: some View {
-        HStack(spacing: 3) {
-            if let icon {
-                Image(systemName: icon).font(.system(size: 8))
-            }
-            Text(text)
-        }
-        .graspType(.meta)
-        .foregroundStyle(tint)
-        .padding(.horizontal, 7).padding(.vertical, 2)
-        .background(tintSoft, in: Capsule())
-    }
-}
-
 private struct CardRow: View {
     let card: Card
     let mastery: LearnEngine.Level
