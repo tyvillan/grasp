@@ -95,9 +95,12 @@ winget install --id Microsoft.WindowsSDK.10.0.17763 -e --source winget
 
 Then download and run the **Windows App SDK 1.5 runtime** installer for your
 PC. For most PCs that's
-[x64](https://aka.ms/windowsappsdk/1.5/1.5.240205001-preview1/windowsappruntimeinstall-x64.exe);
+[x64](https://aka.ms/windowsappsdk/1.5/1.5.250108004/windowsappruntimeinstall-x64.exe);
 for Arm PCs use
-[arm64](https://aka.ms/windowsappsdk/1.5/1.5.240205001-preview1/windowsappruntimeinstall-arm64.exe).
+[arm64](https://aka.ms/windowsappsdk/1.5/1.5.250108004/windowsappruntimeinstall-arm64.exe).
+This is the stable 1.5 release SwiftCrossUI's WinUI bindings are built
+against. It doesn't need admin rights. If you installed the older
+`1.5-preview1` runtime, this one installs alongside it.
 
 Then:
 

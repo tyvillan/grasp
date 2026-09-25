@@ -117,6 +117,10 @@ try {
             # The app is its own package, so its SwiftCrossUI dependency
             # stays out of the Mac and iPhone builds.
             Set-Location (Join-Path $Repo 'Windows')
+            # Name SwiftCrossUI's backend outright. Left to DefaultBackend's
+            # platform conditions, Swift 6.4's build system still compiles
+            # the Linux-only Gtk targets and fails on a missing gtk/gtk.h.
+            $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
             Step 'swift run GRASPWindows'
             & swift run @flags @SwiftArgs GRASPWindows
         }

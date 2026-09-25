@@ -52,13 +52,13 @@ struct MatrixGrid: View {
     let matrix: RationalMatrix
     let changedRow: Int?
 
-    private let cellWidth = 44
+    private let cellWidth = 44.0
 
     var body: some View {
         HStack(spacing: 4) {
             Bracket(opening: true).stroke(.gray, style: StrokeStyle(width: 1.5)).frame(width: 7)
             VStack(spacing: 2) {
-                ForEach(0..<matrix.rowCount) { row in
+                ForEach(Array(0..<matrix.rowCount), id: \.self) { row in
                     rowView(row)
                 }
             }
@@ -70,7 +70,7 @@ struct MatrixGrid: View {
 extension MatrixGrid {
     private func rowView(_ row: Int) -> some View {
         HStack(spacing: 0) {
-            ForEach(0..<matrix.columnCount) { column in
+            ForEach(Array(0..<matrix.columnCount), id: \.self) { column in
                 cell(row: row, column: column)
             }
         }
@@ -83,9 +83,9 @@ extension MatrixGrid {
     private func cell(row: Int, column: Int) -> some View {
         let barBefore = matrix.augmentedColumns > 0 && column == matrix.coefficientColumns
         return HStack(spacing: 0) {
-            Rectangle().fill(barBefore ? Color.gray : Color.clear).frame(width: 1, height: 22)
+            Rectangle().fill(barBefore ? Color.gray : Color.clear).frame(width: 1.0, height: 22.0)
             Text(matrix[row, column].description)
-                .frame(width: cellWidth, height: 26)
+                .frame(width: cellWidth, height: 26.0)
         }
     }
 }
