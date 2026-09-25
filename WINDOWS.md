@@ -25,11 +25,7 @@ Then:
 - **Turn on Developer Mode**: Settings → System → For developers →
   Developer Mode. Swift's package manager needs it to create links between
   files.
-- **Close PowerShell, and from now on use "Developer PowerShell for VS 2022"**
-  from the Start menu instead of plain PowerShell. It has Visual Studio's
-  linker on the path. Plain PowerShell fails with `could not find CLI tool
-  'link'`. Opening a fresh window also picks up the `SDKROOT` setting the
-  Swift installer adds. Without it you'll see "unable to load standard library".
+- **Close PowerShell and open a new window.**
 
 Check it worked:
 
@@ -54,8 +50,15 @@ time, and a browser window opens for that.
 ## 3. Run the check
 
 ```powershell
-swift run grasp-check
+scripts\windows\grasp.cmd check
 ```
+
+Use this script instead of running `swift` directly. GRASP's database
+library needs SQLite, and Windows doesn't include one. On its first run the
+script downloads SQLite's official source, checks it against a pinned hash,
+and compiles it with the features GRASP uses. It also sets up Visual Studio's
+compiler and linker, so a plain PowerShell window works. The SQLite it builds
+stays in `.build-windows\`.
 
 The first run downloads GRASP's libraries and compiles everything, which takes
 several minutes. Then it runs nine checks against GRASP's core: it creates a
@@ -69,7 +72,7 @@ a matrix, and so on.
 ## 4. Run the full test suite (optional, but useful)
 
 ```powershell
-swift test
+scripts\windows\grasp.cmd test
 ```
 
 This runs the same 470+ tests the Mac passes. Some that read the Mac owner's
