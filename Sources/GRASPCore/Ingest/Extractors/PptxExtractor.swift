@@ -44,7 +44,8 @@ public enum PptxExtractor {
         let parser = SlideTextExtractor()
         let xmlParser = XMLParser(data: data)
         xmlParser.delegate = parser
-        xmlParser.parse()
+        // A part that fails to parse partway still yields the runs read so far.
+        _ = xmlParser.parse()
         return parser.textRuns
     }
 }

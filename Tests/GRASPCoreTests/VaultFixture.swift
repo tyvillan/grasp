@@ -79,7 +79,11 @@ private actor VaultFixtureCache {
 actor RealVaultScanGate {
     static let shared = RealVaultScanGate()
     func run<T>(_ body: () async throws -> T) async rethrows -> T {
+        // No setenv on Windows -- and nothing to skip there yet: OCR is
+        // Vision-only until Windows.Media.Ocr lands.
+        #if !os(Windows)
         setenv("GRASP_SKIP_OCR", "1", 1)
+        #endif
         return try await body()
     }
 }
