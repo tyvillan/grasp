@@ -29,5 +29,15 @@ let package = Package(
             ],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
+        // Diagnostic only: one control per window, for finding which one
+        // crashes UI Automation (see scripts/windows/grasp.ps1 uia-probe).
+        .executableTarget(
+            name: "UIAProbe",
+            dependencies: [
+                .product(name: "SwiftCrossUI", package: "swift-cross-ui"),
+                .product(name: "DefaultBackend", package: "swift-cross-ui"),
+            ],
+            swiftSettings: [.defaultIsolation(MainActor.self)]
+        ),
     ]
 )

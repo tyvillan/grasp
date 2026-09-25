@@ -4,6 +4,7 @@
 #   scripts\windows\grasp.cmd test     swift test
 #   scripts\windows\grasp.cmd build    swift build
 #   scripts\windows\grasp.cmd app      builds and opens the GRASP app (Windows\)
+#   scripts\windows\grasp.cmd uia-probe  finds which control crashes UI Automation
 #
 # Anything after the command is passed on to swift.
 #
@@ -17,7 +18,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('check', 'test', 'build', 'app')]
+    [ValidateSet('check', 'test', 'build', 'app', 'uia-probe')]
     [string]$Command = 'check',
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [string[]]$SwiftArgs = @()
@@ -105,6 +106,69 @@ $env:INCLUDE = "$Sqlite;$env:INCLUDE"
 $env:LIB = "$Sqlite;$env:LIB"
 $flags = @('-Xcc', "-I$Sqlite", '-Xswiftc', '-L', '-Xswiftc', $Sqlite)
 
+# --- UI Automation probe ---------------------------------------------------
+
+# Opens one window per control kind, walks each with UI Automation the way
+# Narrator would, and records which ones take the app down. Standard
+# output and error go to files: a GUI app writing to a console it failed
+# to attach to is a suspected cause of a separate startup crash.
+function Invoke-UiaProbe([string]$Bin) {
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    $logs = Join-Path $Repo '.build-windows\uia-probe'
+    New-Item -ItemType Directory -Force -Path $logs | Out-Null
+
+    # The GRASP app itself, as a renamed copy so SwiftCrossUI's
+    # single-instance redirect doesn't hand it to a GRASP window already open.
+    $appCopy = Join-Path $Bin 'GRASPWindowsUiaProbe.exe'
+    Copy-Item (Join-Path $Bin 'GRASPWindows.exe') $appCopy -Force
+
+    $cases = @('text', 'vstack', 'button', 'disabled-button', 'list', 'split', 'scroll', 'shape',
+               'rectangle', 'background', 'divider', 'textfield', 'toggle', 'spinner') |
+        ForEach-Object { @{ Name = $_; Exe = (Join-Path $Bin 'UIAProbe.exe') } }
+    $cases += @{ Name = 'grasp-app'; Exe = $appCopy }
+
+    $results = foreach ($case in $cases) {
+        $env:PROBE = $case.Name
+        $env:GRASP_SUPPORT_DIR = Join-Path $logs 'library'
+        $proc = Start-Process -FilePath $case.Exe -PassThru `
+            -RedirectStandardOutput (Join-Path $logs "$($case.Name).out.txt") `
+            -RedirectStandardError (Join-Path $logs "$($case.Name).err.txt")
+        $handle = [IntPtr]::Zero
+        for ($i = 0; $i -lt 80 -and $handle -eq [IntPtr]::Zero -and -not $proc.HasExited; $i++) {
+            Start-Sleep -Milliseconds 250
+            $proc.Refresh()
+            $handle = $proc.MainWindowHandle
+        }
+        $walk = 'no window'
+        if ($handle -ne [IntPtr]::Zero) {
+            Start-Sleep -Seconds 1
+            try {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+                $found = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                                       [System.Windows.Automation.Condition]::TrueCondition)
+                $walk = "walked $($found.Count) elements"
+            } catch {
+                $ex = $_.Exception
+                while ($ex.InnerException) { $ex = $ex.InnerException }
+                $walk = 'error ' + ('0x{0:X8}' -f $ex.HResult) + ': ' + $ex.Message
+            }
+        }
+        Start-Sleep -Seconds 2
+        $proc.Refresh()
+        $outcome = if ($proc.HasExited) { 'CRASHED (exit 0x{0:X8})' -f $proc.ExitCode } else { 'survived' }
+        if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+        Start-Sleep -Milliseconds 500
+        [pscustomobject]@{ Control = $case.Name; 'UI Automation' = $walk; App = $outcome }
+    }
+    Remove-Item Env:PROBE, Env:GRASP_SUPPORT_DIR -ErrorAction SilentlyContinue
+    Remove-Item $appCopy -ErrorAction SilentlyContinue
+
+    $table = $results | Format-Table -AutoSize -Wrap | Out-String -Width 200
+    Write-Host $table
+    $table | Set-Content (Join-Path $logs 'results.txt')
+    Write-Host "Logs and results: $logs"
+}
+
 # --- Swift -----------------------------------------------------------------
 
 Push-Location $Repo
@@ -123,6 +187,21 @@ try {
             $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
             Step 'swift run GRASPWindows'
             & swift run @flags @SwiftArgs GRASPWindows
+        }
+        'uia-probe' {
+            Set-Location (Join-Path $Repo 'Windows')
+            $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
+            Step 'Building the probe and the app'
+            & swift build @flags --product UIAProbe
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & swift build @flags --product GRASPWindows
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $bin = Get-ChildItem -Path .build -Recurse -Filter UIAProbe.exe |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+                ForEach-Object { $_.DirectoryName }
+            if (-not $bin) { throw 'Built UIAProbe.exe not found under Windows\.build.' }
+            Invoke-UiaProbe -Bin $bin
+            exit 0
         }
     }
     exit $LASTEXITCODE
