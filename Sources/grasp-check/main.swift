@@ -61,41 +61,11 @@ await step("Find the app's data folder") {
     try GRASPDatabase.supportDirectory().path
 }
 
-// A tiny vault in the shape the Mac app imports: College / semester / course / note.
-let lecture = """
-# 2026-08-27 · Lecture 2 - Row Reduction and Echelon Forms
-
-## Key Terms
-
-- **Echelon form** - a matrix with zero rows at the bottom, each leading entry right of the one above, and zeros below each leading entry.
-- **Free variable** - a variable whose column holds no pivot, which may be assigned any value at all.
-- **Pivot position** - a location corresponding to a leading 1 in the reduced echelon form.
-
-## Worked Example
-
-```
-[ 1  -7   0   6 |  5 ]
-[ 0   0   1  -2 | -3 ]
-[ -1  7  -4   2 |  7 ]
-```
-
-**Step 1** - R₃ → R₃ + R₁. **Step 2** - R₃ → R₃ + 4·R₂, giving a zero row.
-
-```
-[ 1  -7   0   6 |  5 ]
-[ 0   0   1  -2 | -3 ]
-[ 0   0   0   0 |  0 ]
-```
-
-The basic variables are x₁ and x₃; x₂ and x₄ are free, so there are infinitely many solutions.
-"""
+let lecture = SampleVault.lecture
 
 await step("Import a note") {
-    let course = workspace.appendingPathComponent("vault/College/Fall 2026/Matrix Theory", isDirectory: true)
-    try FileManager.default.createDirectory(at: course, withIntermediateDirectories: true)
-    try lecture.write(to: course.appendingPathComponent("2026-08-27_Lecture-02_Row-Reduction.md"),
-                      atomically: true, encoding: .utf8)
-    let summary = try await VaultScanner(database: database).scan(vaultRoot: workspace.appendingPathComponent("vault"))
+    let vault = try SampleVault.write(to: workspace.appendingPathComponent("vault", isDirectory: true))
+    let summary = try await VaultScanner(database: database).scan(vaultRoot: vault)
     guard summary.errors.isEmpty else { throw CheckFailure(summary.errors.joined(separator: "; ")) }
     guard summary.cardsCreated > 0 else { throw CheckFailure("no cards made from \(summary.filesScanned) file(s)") }
     return "\(summary.filesScanned) file, \(summary.courseCount) course, \(summary.cardsCreated) cards"

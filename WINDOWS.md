@@ -78,6 +78,36 @@ scripts\windows\grasp.cmd test
 This runs the same 470+ tests the Mac passes. Some that read the Mac owner's
 real notes vault skip themselves on other machines. Send over any failures.
 
+## 5. Open the app (prototype)
+
+The Windows app lives in `Windows\`. It's built with
+[SwiftCrossUI](https://github.com/moreSwift/swift-cross-ui), which draws
+native WinUI controls. For now it's a prototype: import notes (or try the
+built-in sample lecture), approve drafts, study due cards, and step through
+a row reduction from the notes.
+
+It needs two more things from Microsoft, once:
+
+```powershell
+# The Windows SDK version SwiftCrossUI's WinUI bindings are built against
+winget install --id Microsoft.WindowsSDK.10.0.17763 -e --source winget
+```
+
+Then download and run the **Windows App SDK 1.5 runtime** installer for your
+PC. For most PCs that's
+[x64](https://aka.ms/windowsappsdk/1.5/1.5.240205001-preview1/windowsappruntimeinstall-x64.exe);
+for Arm PCs use
+[arm64](https://aka.ms/windowsappsdk/1.5/1.5.240205001-preview1/windowsappruntimeinstall-arm64.exe).
+
+Then:
+
+```powershell
+scripts\windows\grasp.cmd app
+```
+
+The app keeps its library in `%LOCALAPPDATA%\GRASP`, the same folder
+grasp-check reports.
+
 ## What doesn't work on Windows yet
 
 | Feature | Status |
@@ -85,7 +115,7 @@ real notes vault skip themselves on other machines. Send over any failures.
 | Reading PDFs | Planned, using Windows' own PDF reader (Windows.Data.Pdf) |
 | Text in photos (OCR) | Planned, using Windows' own OCR (Windows.Media.Ocr) |
 | Apple's on-device AI | Mac and iPhone only. On Windows, AI runs through Ollama |
-| The app itself | Next step, once the core checks pass |
+| The app | A prototype (step 5): import, study, row-reduction figures. Overviews, calendar, sign-in and sync come next |
 
 For AI features, install [Ollama for Windows](https://ollama.com/download)
 and pull a model, for example `ollama pull qwen3.5:9b`. The check reports

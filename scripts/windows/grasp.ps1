@@ -3,6 +3,7 @@
 #   scripts\windows\grasp.cmd check    swift run grasp-check
 #   scripts\windows\grasp.cmd test     swift test
 #   scripts\windows\grasp.cmd build    swift build
+#   scripts\windows\grasp.cmd app      builds and opens the GRASP app (Windows\)
 #
 # Anything after the command is passed on to swift.
 #
@@ -16,7 +17,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('check', 'test', 'build')]
+    [ValidateSet('check', 'test', 'build', 'app')]
     [string]$Command = 'check',
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [string[]]$SwiftArgs = @()
@@ -112,6 +113,13 @@ try {
         'check' { Step 'swift run grasp-check'; & swift run @flags @SwiftArgs grasp-check }
         'test'  { Step 'swift test';            & swift test @flags @SwiftArgs }
         'build' { Step 'swift build';           & swift build @flags @SwiftArgs }
+        'app'   {
+            # The app is its own package, so its SwiftCrossUI dependency
+            # stays out of the Mac and iPhone builds.
+            Set-Location (Join-Path $Repo 'Windows')
+            Step 'swift run GRASPWindows'
+            & swift run @flags @SwiftArgs GRASPWindows
+        }
     }
     exit $LASTEXITCODE
 } finally {
