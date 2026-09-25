@@ -133,6 +133,9 @@ function Invoke-UiaProbe([string]$Bin) {
         $proc = Start-Process -FilePath $case.Exe -PassThru `
             -RedirectStandardOutput (Join-Path $logs "$($case.Name).out.txt") `
             -RedirectStandardError (Join-Path $logs "$($case.Name).err.txt")
+        # Read the handle now: without it PowerShell can't report the exit
+        # code once the process has ended.
+        $null = $proc.Handle
         $handle = [IntPtr]::Zero
         for ($i = 0; $i -lt 80 -and $handle -eq [IntPtr]::Zero -and -not $proc.HasExited; $i++) {
             Start-Sleep -Milliseconds 250
