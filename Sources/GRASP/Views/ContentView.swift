@@ -97,8 +97,13 @@ struct ContentView: View {
                             )
                         } else {
                             ContentUnavailableView("Select a deck", systemImage: "rectangle.stack")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
+                    // The pane's full size whatever is in it: with only the
+                    // placeholder's own width, the row shrank to the middle
+                    // and left grey bars either side.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 } else if let courseId = activeCourseId {
                     // A course with no decks at all: one clean empty state
                     // spanning the full width, not a narrow "No decks yet"

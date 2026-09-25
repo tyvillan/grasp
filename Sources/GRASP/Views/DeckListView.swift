@@ -121,7 +121,9 @@ struct DeckListView: View {
                 siblings: decks.filter { $0.id != deck.id }
             ) { targetId in
                 try? store.deleteDeck(deck.id, migrateCardsTo: targetId)
-                if selectedDeckId == deck.id { selectedDeckId = targetId }
+                // Land on where the cards went, or "All Cards" -- never on
+                // nothing, which left an empty pane.
+                if selectedDeckId == deck.id { selectedDeckId = targetId ?? Self.allCardsId }
                 load()
             }
         }
@@ -174,7 +176,7 @@ struct DeckListView: View {
         let count = (try? store.deckCardCount(deck.id)) ?? 0
         if count == 0 {
             try? store.deleteDeck(deck.id, migrateCardsTo: nil)
-            if selectedDeckId == deck.id { selectedDeckId = nil }
+            if selectedDeckId == deck.id { selectedDeckId = Self.allCardsId }
             load()
         } else {
             deletingDeckCardCount = count

@@ -57,7 +57,7 @@ struct OverviewComposerTests {
                         heading: "Claim \(index)a", paragraphs: ["Explained in call \(index)."],
                         terms: [OverviewDefinition(term: "Term \(index)", text: "Definition.")]
                     ),
-                    OverviewSection(heading: "Claim \(index)b", paragraphs: ["More."]),
+                    OverviewSection(heading: "Claim \(index)b", paragraphs: ["More: the transformation shears the plane."]),
                 ]
             ))
         }
@@ -129,9 +129,11 @@ struct OverviewComposerTests {
             )
         }
         let snapshot = progress.snapshot
-        // This stub reports nothing itself: each lesson counts as one step,
-        // plus a figures step per piece and the diagram.
-        #expect(snapshot.completed == generator.overviewCalls.count * 2 + 1)
+        // This stub reports nothing itself: per piece, one lesson step, one
+        // check per section and a figures step; then the repetition check
+        // (the merged lesson has more than two sections) and the diagram.
+        let pieces = generator.overviewCalls.count
+        #expect(snapshot.completed == pieces * 4 + 2)
         #expect(snapshot.completed == snapshot.expected)
         #expect(snapshot.step == "Drawing the concept map")
         #expect(snapshot.part == nil)
@@ -164,9 +166,10 @@ struct OverviewComposerTests {
                 using: ReportingGenerator(), noteTitle: "L", courseName: "Biology", note: note(words: 800)
             )
         }
-        // Plan + 3 sections + figures + diagram.
-        #expect(progress.snapshot.completed == 6)
-        #expect(progress.snapshot.expected == 6)
+        // Plan + 3 sections + a check for each of the 2 sections that came
+        // back + figures + diagram. Two sections is too few to repeat.
+        #expect(progress.snapshot.completed == 8)
+        #expect(progress.snapshot.expected == 8)
     }
 
     @Test("a single-chunk note is not told it is part of anything")

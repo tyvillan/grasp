@@ -47,13 +47,28 @@ struct RenderedSection: Identifiable, Sendable {
     let paragraphs: [String]
     let terms: [LinkedDefinition]
     let figure: RenderedFigure?
+    let example: OverviewWorkedExample?
     let check: OverviewCheck?
+    /// The note is about math, so plain-text notation is drawn as math.
+    let isMath: Bool
+    /// Code from the note that this section talks about.
+    let code: NoteCode.Snippet?
 }
 
 /// A figure with its geometry already computed from the model's numbers.
 enum RenderedFigure: Sendable {
     case lines(LinesFigure)
     case transform(TransformFigure)
+    case rowReduction(RowReductionFigure)
+}
+
+struct RowReductionFigure: Sendable {
+    let caption: String?
+    /// The matrix before any step, then after each -- `states.count` is
+    /// always `steps.count + 1`.
+    let states: [RationalMatrix]
+    let steps: [RowOperation]
+    let stepsFromNote: Bool
 }
 
 struct LinesFigure: Sendable {
@@ -76,6 +91,11 @@ struct LinkedDefinition: Identifiable, Sendable {
     /// Cards from this same note whose front names this term. Empty is the
     /// ordinary case.
     let cardIds: [String]
+    let example: String?
+    let nonExample: String?
+    /// Two matrices, one that is this and one that isn't -- for the terms
+    /// of linear algebra that describe a matrix's shape.
+    let matrixContrast: MatrixContrasts.Contrast?
 }
 
 struct IdentifiedFormula: Identifiable, Sendable {
@@ -212,7 +232,8 @@ extension AppStore {
             }
             entries.append(render(
                 material: material, stored: stored, document: document,
-                cards: cardsByMaterial[material.id] ?? []
+                cards: cardsByMaterial[material.id] ?? [],
+                note: notes[material.id]
             ))
         }
 
@@ -236,9 +257,29 @@ extension AppStore {
     }
 
     private func render(
-        material: Material, stored: NoteOverview, document: OverviewDocument, cards: [Card]
+        material: Material, stored: NoteOverview, document storedDocument: OverviewDocument, cards: [Card],
+        note: NoteText?
     ) -> RenderedOverview {
+        let noteText = note?.reflowed ?? ""
+        // The clean-up rules run on read too, so lessons written before a
+        // rule existed get it without being rewritten.
+        let document = OverviewReview.cleaned(storedDocument, noteText: noteText)
+        let codePlacements = NoteCode.placements(of: NoteCode.snippets(in: note?.raw ?? ""), in: document.sections)
         let links = OverviewCardLinker.link(terms: document.allTerms.map(\.term), to: cards)
+        let figures = document.sections.map { $0.figure.flatMap(Self.renderFigure) }
+        // Contrasts are computed at read time, so every lesson gets them --
+        // including ones written before they existed. The pool is the
+        // note's own matrices plus every state of its walkthroughs, which
+        // is what lets "not echelon form" be the lecture's starting matrix
+        // and "echelon form" the same matrix reduced.
+        let linearAlgebra = NoteMath.isLinearAlgebra(noteText)
+        let isMath = NoteMath.isMathematical(noteText)
+        let contrastPool: [RationalMatrix] = linearAlgebra
+            ? NoteMatrices.matrices(in: noteText).map(\.matrix) + figures.flatMap { figure -> [RationalMatrix] in
+                if case .rowReduction(let walk) = figure { return walk.states }
+                return []
+            }
+            : []
         let diagram = stored.mermaidSource.flatMap { laidOutDiagram(for: stored, source: $0) }
         let nodeLinks = diagram.map { laid in
             OverviewCardLinker.link(
@@ -261,11 +302,18 @@ extension AppStore {
                     terms: section.terms.enumerated().map { termIndex, term in
                         LinkedDefinition(
                             id: "\(material.id)#s\(index)t\(termIndex)", term: term.term,
-                            text: term.text, cardIds: links[term.term] ?? []
+                            text: term.text, cardIds: links[term.term] ?? [],
+                            example: term.example, nonExample: term.nonExample,
+                            matrixContrast: linearAlgebra
+                                ? MatrixContrasts.contrast(forTerm: term.term, noteMatrices: contrastPool)
+                                : nil
                         )
                     },
-                    figure: section.figure.flatMap(Self.renderFigure),
-                    check: section.check
+                    figure: figures[index],
+                    example: section.example,
+                    check: section.check,
+                    isMath: isMath,
+                    code: codePlacements[index]
                 )
             },
             takeaways: document.takeaways,
@@ -302,6 +350,15 @@ extension AppStore {
         case .linearTransform:
             guard let rows = valid.matrix, let matrix = Matrix2(rows: rows) else { return nil }
             return .transform(TransformFigure(caption: valid.caption, matrix: matrix))
+        case .rowReduction:
+            guard let rows = valid.matrix,
+                  let start = RationalMatrix(doubles: rows, augmentedColumns: valid.augmentedColumns ?? 0)
+            else { return nil }
+            let walked = start.walk(valid.steps ?? [])
+            return .rowReduction(RowReductionFigure(
+                caption: valid.caption, states: walked.states, steps: walked.steps,
+                stepsFromNote: valid.stepsFromNote ?? false
+            ))
         }
     }
 

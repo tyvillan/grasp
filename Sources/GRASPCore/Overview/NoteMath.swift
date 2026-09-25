@@ -278,6 +278,7 @@ public enum NoteMath {
         var kinds: Set<OverviewFigure.Kind> = []
         if !systems(in: text).isEmpty { kinds.insert(.systemOfLines) }
         if matrixVocabularyCount(in: text) >= 2 { kinds.insert(.linearTransform) }
+        if !NoteMatrices.walkthroughs(in: text).isEmpty { kinds.insert(.rowReduction) }
         return kinds
     }
 
@@ -291,6 +292,12 @@ public enum NoteMath {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
         let range = NSRange(text.startIndex..., in: text)
         return regex.numberOfMatches(in: text, range: range) >= 3
+    }
+
+    /// Whether the note is linear algebra enough that "pivot" means a
+    /// matrix entry rather than a change of business plan.
+    public static func isLinearAlgebra(_ text: String) -> Bool {
+        matrixVocabularyCount(in: text) >= 2 || !NoteMatrices.matrices(in: text).isEmpty
     }
 
     private static func matrixVocabularyCount(in text: String) -> Int {
@@ -308,7 +315,7 @@ public enum NoteMath {
         let values: [Double]
         switch figure.kind {
         case .systemOfLines: values = (figure.equations ?? []).flatMap { $0 }
-        case .linearTransform: values = (figure.matrix ?? []).flatMap { $0 }
+        case .linearTransform, .rowReduction: values = (figure.matrix ?? []).flatMap { $0 }
         }
         guard !values.isEmpty else { return false }
         return values.allSatisfy { value in

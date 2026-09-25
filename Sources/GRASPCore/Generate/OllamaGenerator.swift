@@ -244,7 +244,10 @@ public struct OllamaGenerator: CardGenerator {
                     lessonHeadings: plan.sections.map(\.heading)
                 )
                 progress?.begin("Writing section \(index + 1) of \(plan.sections.count)")
-                let response = try? await chat(prompt: prompt, maxTokens: 1_000)
+                // Room for a worked example, its pictures and is/isn't pairs
+                // on top of the paragraphs -- 1,000 cut the example off
+                // mid-JSON.
+                let response = try? await chat(prompt: prompt, maxTokens: 1_800)
                 progress?.advance()
                 guard let response,
                       let section = Self.parseSectionResponse(response, heading: planned.heading)
@@ -284,6 +287,58 @@ public struct OllamaGenerator: CardGenerator {
         )
         guard let content = try? await chat(prompt: prompt, json: false, maxTokens: 600) else { return "" }
         return Self.salvageMermaid(content)
+    }
+
+    public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
+        guard !noteContext.isEmpty, !section.paragraphs.isEmpty else { return [] }
+        let prompt = Self.reviewPrompt(noteContext: noteContext, section: section)
+        guard let content = try? await chat(prompt: prompt, maxTokens: 700),
+              let data = Self.salvageJSON(content).data(using: .utf8),
+              let dto = try? JSONDecoder().decode(ReviewDTO.self, from: data)
+        else { return [] }
+        return (dto.items ?? []).compactMap { item in
+            guard let original = Self.clean(item.original) else { return nil }
+            return OverviewFix(original: original, corrected: Self.clean(item.corrected))
+        }
+    }
+
+    public func findRepetition(in document: OverviewDocument) async -> OverviewRepetition {
+        guard document.sections.count > 2 else { return .none }
+        let prompt = Self.repetitionPrompt(document: document)
+        guard let content = try? await chat(prompt: prompt, maxTokens: 300),
+              let data = Self.salvageJSON(content).data(using: .utf8),
+              let dto = try? JSONDecoder().decode(RepetitionDTO.self, from: data)
+        else { return .none }
+        // The prompt numbers from 1, the way a person reads a list. Only
+        // "most" counts as a repeat; "some" overlap is ordinary in a lesson
+        // that builds one idea on the last.
+        let sections = (dto.overlaps ?? []).compactMap { entry -> (repeated: Int, original: Int)? in
+            guard let section = entry.section, let closest = entry.closest,
+                  entry.repeats?.lowercased() == "most" else { return nil }
+            return (section - 1, closest - 1)
+        }
+        // Its takeaway verdicts aren't used: on a real lesson it marked three
+        // of four distinct takeaways as repeats. The deterministic
+        // near-duplicate check in `OverviewReview.cleaned` handles those.
+        return OverviewRepetition(sections: sections, takeaways: [])
+    }
+
+    private struct ReviewDTO: Decodable {
+        let items: [Item]?
+        struct Item: Decodable {
+            let original: String?
+            let corrected: String?
+        }
+    }
+
+    private struct RepetitionDTO: Decodable {
+        let overlaps: [Overlap]?
+        let takeaways: [Int]?
+        struct Overlap: Decodable {
+            let section: Int?
+            let closest: Int?
+            let repeats: String?
+        }
     }
 
     public func generateFigures(
@@ -327,6 +382,56 @@ public struct OllamaGenerator: CardGenerator {
         struct DefinitionDTO: Decodable {
             let term: String?
             let definition: String?
+            let example: String?
+            let nonExample: String?
+        }
+
+        struct ExampleDTO: Decodable {
+            let title: String?
+            let setup: String?
+            let steps: [StepDTO]?
+            let outcome: String?
+
+            struct StepDTO: Decodable {
+                let action: String?
+                let result: String?
+                let why: String?
+                let label: String?
+                let visual: VisualDTO?
+            }
+
+            /// Every field optional, and `rows` forgiving of numbers written
+            /// as numbers: a model asked for a grid of strings writes
+            /// `[[1, 2], [3, 4]]` as often as `[["1", "2"], ...]`.
+            struct VisualDTO: Decodable {
+                let kind: String?
+                let caption: String?
+                let rows: [[FlexibleString]]?
+                let bar: Int?
+                let highlightRows: [Int]?
+                let highlightColumns: [Int]?
+                let vectors: [VectorDTO]?
+                let combine: Bool?
+                let nodes: [String]?
+                let highlight: Int?
+            }
+
+            struct VectorDTO: Decodable {
+                let label: String?
+                let x: Double?
+                let y: Double?
+                let weight: Double?
+            }
+
+            struct FlexibleString: Decodable {
+                let value: String
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.singleValueContainer()
+                    if let string = try? container.decode(String.self) { value = string }
+                    else if let int = try? container.decode(Int.self) { value = String(int) }
+                    else { value = OverviewFigures.format(try container.decode(Double.self)).replacingOccurrences(of: "−", with: "-") }
+                }
+            }
         }
 
         struct CheckDTO: Decodable {
@@ -497,6 +602,7 @@ public struct OllamaGenerator: CardGenerator {
         let claim: String?
         let paragraphs: [String]?
         let terms: [OverviewDTO.DefinitionDTO]?
+        let example: OverviewDTO.ExampleDTO?
         let check: OverviewDTO.CheckDTO?
     }
 
@@ -555,7 +661,8 @@ public struct OllamaGenerator: CardGenerator {
         guard !paragraphs.isEmpty else { return nil }
         let terms = (dto.terms ?? []).compactMap { term -> OverviewDefinition? in
             guard let name = clean(term.term), let text = clean(term.definition) else { return nil }
-            return OverviewDefinition(term: name, text: text)
+            return OverviewDefinition(term: name, text: text,
+                                      example: clean(term.example), nonExample: clean(term.nonExample))
         }.prefix(OverviewLimits.termsPerSection)
         let check = dto.check.flatMap { check -> OverviewCheck? in
             guard let question = clean(check.question), let answer = clean(check.answer) else { return nil }
@@ -563,7 +670,35 @@ public struct OllamaGenerator: CardGenerator {
         }
         return OverviewSection(
             heading: readsAsClaim(clean(dto.claim)) ?? heading,
-            paragraphs: Array(paragraphs), terms: Array(terms), check: check
+            paragraphs: Array(paragraphs), terms: Array(terms),
+            example: dto.example.flatMap(workedExample), check: check
+        )
+    }
+
+    /// A worked example with at least two usable steps, or nil. The
+    /// composer separately drops any whose numbers aren't in the note.
+    private static func workedExample(_ dto: OverviewDTO.ExampleDTO) -> OverviewWorkedExample? {
+        let steps = (dto.steps ?? []).compactMap { step -> OverviewExampleStep? in
+            guard let action = clean(step.action) else { return nil }
+            return OverviewExampleStep(action: action, result: clean(step.result), why: clean(step.why),
+                                       label: clean(step.label), visual: step.visual.flatMap(stepVisual))
+        }.prefix(OverviewLimits.exampleSteps)
+        guard steps.count >= 2 else { return nil }
+        return OverviewWorkedExample(title: clean(dto.title), setup: clean(dto.setup),
+                                     steps: Array(steps), outcome: clean(dto.outcome))
+    }
+
+    private static func stepVisual(_ dto: OverviewDTO.ExampleDTO.VisualDTO) -> OverviewStepVisual? {
+        guard let raw = dto.kind?.lowercased(), let kind = OverviewStepVisual.Kind(rawValue: raw) else { return nil }
+        return OverviewStepVisual(
+            kind: kind, caption: clean(dto.caption),
+            rows: dto.rows?.map { $0.map(\.value) }, bar: dto.bar,
+            highlightRows: dto.highlightRows, highlightColumns: dto.highlightColumns,
+            vectors: dto.vectors?.compactMap { v in
+                guard let x = v.x, let y = v.y else { return nil }
+                return VisualVector(label: clean(v.label), x: x, y: y, weight: v.weight)
+            },
+            combine: dto.combine, nodes: dto.nodes?.compactMap(clean), highlight: dto.highlight
         )
     }
 
@@ -1124,6 +1259,65 @@ public struct OllamaGenerator: CardGenerator {
         """
     }
 
+    /// The fact-check. The model is asked for *quoted* problems only -- a
+    /// fix is applied by finding its exact `original` in the section, so a
+    /// reviewer that paraphrases changes nothing rather than something
+    /// random -- and told plainly that finding nothing is the usual result,
+    /// or it will invent problems to report.
+    static func reviewPrompt(noteContext: String, section: OverviewSection) -> String {
+        var lines = ["Heading: \(section.heading)"]
+        lines += section.paragraphs.map { "Paragraph: \($0)" }
+        lines += section.terms.map { "Term: \($0.term) -- \($0.text)" }
+        if let check = section.check {
+            lines.append("Question: \(check.question)")
+            lines.append("Answer: \(check.answer)")
+        }
+        if let example = section.example {
+            for step in example.steps {
+                lines.append("Example step: \(step.action)" + (step.result.map { " -> \($0)" } ?? ""))
+            }
+        }
+        let written = lines.joined(separator: "\n")
+        return noteOpening(courseName: "this course", noteContext: noteContext) + """
+        You are checking a lesson section a student will study from, written about the notes \
+        above. Find only statements that are false: they contradict the notes, get the subject's \
+        facts or math wrong, or give a wrong answer to the question. A true statement the notes \
+        don't happen to mention is NOT an error -- leave it alone. Style, wording and missing \
+        detail are not errors either. Most sections have no errors, and at most one or two \
+        sentences in a section are ever wrong -- an empty list is the normal result.
+
+        The section:
+        \(written)
+
+        For each false statement, copy the sentence exactly, character for character, as \
+        original, and give corrected: the sentence rewritten to be true. Use an empty string only \
+        when the sentence cannot be fixed and should be removed.
+
+        Respond with ONLY one JSON object shaped {"items": [{"original": "...", "corrected": \
+        "..."}]}. No other text.
+        """
+    }
+
+    /// Repetition across a whole lesson. Asked as a yes/no question ("is
+    /// anything repeated?") a 9B answered no even for a lesson with three
+    /// sections on the same inheritance problem. Asked to grade every
+    /// section's overlap with its closest earlier one, it has to look.
+    static func repetitionPrompt(document: OverviewDocument) -> String {
+        let sections = document.sections.enumerated().map { index, section in
+            "Section \(index + 1): \(section.heading)\n" + String(section.paragraphs.joined(separator: " ").prefix(500))
+        }.joined(separator: "\n\n")
+        return """
+        Below are the sections of one lesson.
+
+        \(sections)
+
+        For every section after the first, find the earlier section whose content it overlaps \
+        most, and grade how much of this section just repeats that one: most, some or little. \
+        Respond with ONLY one JSON object shaped {"overlaps": [{"section": 2, "closest": 1, \
+        "repeats": "little"}]}. No other text.
+        """
+    }
+
     static func lessonPlanPrompt(
         noteTitle: String, courseName: String, noteContext: String,
         includeFormulas: Bool, partLabel: String? = nil
@@ -1158,13 +1352,14 @@ public struct OllamaGenerator: CardGenerator {
 
         \(partLine)Produce:
         - title: a short claim capturing the lecture's central insight.
-        - hook: two or three sentences opening with a real question this lecture answers, \
-        \(hookRule). No stories, characters or metaphors.
+        - hook: one real question this lecture answers, \(hookRule), then a sentence on why it \
+        matters. A single question, not a list of them. No stories, characters or metaphors.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with a \
         verb.
         - sections: 4 or 5, each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it teaches, including any example equations or \
-        numbers it should use. Combine closely related parts rather than giving each its own.
+        numbers it should use. Combine closely related parts rather than giving each its own; no \
+        two sections may teach the same idea.
         - takeaways: 3 to 5 sentences, each one idea worth remembering.
 
         Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
@@ -1197,10 +1392,13 @@ public struct OllamaGenerator: CardGenerator {
         let concreteRules = NoteMath.isMathematical(noteContext)
             ? """
             - Use only equations and numbers that appear in the notes. Do not make up new ones.
-            - Do not state the solution of a system or the result of a row operation yourself. The \
-            lesson has an interactive figure that shows every exact number; describe what the reader \
-            should notice instead, like which line moves and what stays fixed.
-            - Write math in plain text, like x + 5y = 7 or R2 -> R2 - 2R1.
+            - Do not compute the solution of a system or the result of a row operation yourself. \
+            The lesson draws the notes' matrices and steps through every row operation in a figure \
+            beside this section, with exact numbers. Point the reader at it, like step through the \
+            figure and watch the -1 in row 3, and never try to describe a matrix's entries in a \
+            sentence -- nobody can follow a matrix written out in prose.
+            - Write math as notation in plain text, like x + 5y = 7, R2 -> R2 - 2R1, x3, a11 or \
+            (-5, 3, 0). Never spell it out in words like negative five comma three or x sub three.
             - Never invent a story, character or metaphor -- no treasure, maps, detectives, recipes \
             or games. The concrete case is always actual math.
             """
@@ -1210,6 +1408,23 @@ public struct OllamaGenerator: CardGenerator {
             they do not already contain.
             - Never invent a story, character or metaphor -- no treasure, maps, detectives, recipes \
             or games. The concrete case is always something the notes actually describe.
+            """
+        // Matrices and arrows only make sense for math; a process diagram
+        // suits a procedure in any course.
+        let visualShapes = NoteMath.isMathematical(noteContext)
+            ? """
+            A matrix or table: {"kind": "matrix", "rows": [["a11", "a12"], ["a21", "a22"]], \
+            "bar": 1, "highlightColumns": [0]} -- entries short numbers or symbols, bar is how many \
+            columns sit right of an augmentation bar, highlight what the step changes or uses. \
+            Vectors in the plane: {"kind": "vectors", "vectors": [{"label": "u", "x": 2, "y": 1, \
+            "weight": 3}], "combine": true} -- only 2D vectors whose numbers are in the notes; \
+            combine draws the weighted sum tip to tail. A process: {"kind": "flow", "nodes": \
+            ["...", "..."], "highlight": 1}.
+            """
+            : """
+            A process diagram: {"kind": "flow", "nodes": ["Request arrives", "Controller picks a \
+            view", "View renders"], "highlight": 1} -- two to five short stages, highlight the one \
+            this step is at.
             """
         return noteOpening(courseName: courseName, noteContext: noteContext) + """
         You are writing one section of a lesson on the notes above, in the style of 3Blue1Brown: \
@@ -1225,19 +1440,35 @@ public struct OllamaGenerator: CardGenerator {
         How to write it:
         - Two or three paragraphs, each two to four sentences.
         - Open with a specific example from the notes. Show what happens to it, then name the \
-        general idea.
+        general idea. Say what this section adds -- the lesson's other sections cover their own \
+        claims, so don't repeat them.
         \(concreteRules)
-        - Explain why the claim has to be true. Point at what the reader would notice, using \
-        phrases like notice that, or what if we.
+        - Explain why the claim has to be true, and point at what the reader should see.
+        - Vary how paragraphs begin. Never open two paragraphs the same way, and don't lean on \
+        stock openers like Notice that, Look at, Consider, Imagine or What if.
         - Talk to the reader as you and we.
         - You may use what you know about the subject to explain this claim, but stay on it.
         - Never copy the notes' sentences. If a line could be pasted into the notes without \
         anyone noticing, rewrite it.
         - terms: at most three key terms this section introduces, each defined in one sentence \
-        and worded the way the notes word it. An empty list is fine.
-        - check: one question that makes the reader think about why the claim holds or what would \
-        change if something were different -- not one that requires solving new equations. Give an \
-        answer that explains the reasoning in one or two sentences.
+        and worded the way the notes word it. For each, also give example: one concrete case from \
+        the notes that is this, and nonExample: a near miss that is not this, and exactly what \
+        disqualifies it -- the boundary is how a definition is learned. Leave either empty if the \
+        notes give nothing to base it on. An empty list is fine.
+        - example: if this part of the notes works through something step by step -- a \
+        calculation, a derivation, an algorithm, a procedure, a process -- give those steps here \
+        instead of narrating them in a paragraph. A title naming what is worked, a setup stating \
+        the starting point, two to six steps each with a label of two to four words, the action \
+        taken, the result it produced copied from the notes, and why that step, then the outcome. \
+        Use only steps and values the notes actually show. Use null if the notes don't work one \
+        through here.
+        - visual: for any step where a picture would make it clearer to someone new to the \
+        subject, add one. \(visualShapes) Use null for a step a picture wouldn't help.
+        - check: one question that makes the reader think, of whichever kind fits this section \
+        best: predict an outcome, spot the mistake in a plausible but wrong statement, apply the \
+        idea to a case from the notes, or explain why. Don't default to what would happen if. \
+        Not one that requires solving new equations. Give an answer that explains the reasoning \
+        in one or two sentences.
         - claim: last of all, one sentence of at most twelve words stating the single insight of \
         what you just wrote, like Every choice costs you the best thing you did not pick. A full \
         sentence, never a topic name.
@@ -1246,8 +1477,11 @@ public struct OllamaGenerator: CardGenerator {
         no quotation marks inside the text.
 
         Respond with ONLY one JSON object shaped {"paragraphs": ["..."], "terms": [{"term": \
-        "...", "definition": "..."}], "check": {"question": "...", "answer": "..."}, "claim": \
-        "..."}. No other text.
+        "...", "definition": "...", "example": "...", "nonExample": "..."}], "example": {"title": \
+        "...", "setup": "...", "steps": [{"label": "...", "action": "...", "result": "...", "why": \
+        "...", "visual": null}], \
+        "outcome": "..."}, "check": {"question": "...", "answer": "..."}, "claim": "..."}. No other \
+        text.
         """
     }
 

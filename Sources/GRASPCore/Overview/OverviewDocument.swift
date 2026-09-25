@@ -68,15 +68,130 @@ public struct OverviewSection: Codable, Sendable, Equatable {
     /// Key terms introduced in this section, shown right beside it.
     public var terms: [OverviewDefinition]
     public var figure: OverviewFigure?
+    /// A procedure the note works through, shown as numbered steps instead
+    /// of narrated in a paragraph. Optional (and absent from bodies written
+    /// before it existed), so older lessons still decode.
+    public var example: OverviewWorkedExample?
     public var check: OverviewCheck?
 
     public init(heading: String, paragraphs: [String], terms: [OverviewDefinition] = [],
-                figure: OverviewFigure? = nil, check: OverviewCheck? = nil) {
+                figure: OverviewFigure? = nil, example: OverviewWorkedExample? = nil,
+                check: OverviewCheck? = nil) {
         self.heading = heading
         self.paragraphs = paragraphs
         self.terms = terms
         self.figure = figure
+        self.example = example
         self.check = check
+    }
+}
+
+/// A worked example, step by step: what was done, what it produced, and
+/// why. The general answer to a paragraph like "performing R3 -> R3 + R1
+/// turns that bottom -1 into a zero, creating a staircase..." -- a process
+/// described in prose is unreadable, the same process as numbered steps
+/// with the state after each one is not. Any course: a proof's moves, a
+/// refactoring's stages, an algorithm's passes, a pathway's reactions.
+public struct OverviewWorkedExample: Codable, Sendable, Equatable {
+    /// What's being worked, e.g. "Exercise 12: solving a 3-equation system".
+    public var title: String?
+    /// The starting point, stated concretely.
+    public var setup: String?
+    public var steps: [OverviewExampleStep]
+    /// What the example shows, once it's done.
+    public var outcome: String?
+
+    public init(title: String? = nil, setup: String? = nil, steps: [OverviewExampleStep], outcome: String? = nil) {
+        self.title = title
+        self.setup = setup
+        self.steps = steps
+        self.outcome = outcome
+    }
+}
+
+public struct OverviewExampleStep: Codable, Sendable, Equatable {
+    /// The move itself: "Add row 1 to row 3".
+    public var action: String
+    /// What it produced -- the new state, written out.
+    public var result: String?
+    /// Why this move, now.
+    public var why: String?
+    /// Two to four words naming the step, for the example's step map.
+    public var label: String?
+    /// A small picture of this step, when one helps.
+    public var visual: OverviewStepVisual?
+
+    public init(action: String, result: String? = nil, why: String? = nil,
+                label: String? = nil, visual: OverviewStepVisual? = nil) {
+        self.action = action
+        self.result = result
+        self.why = why
+        self.label = label
+        self.visual = visual
+    }
+}
+
+/// A picture for one step of a worked example, as the model specified it.
+/// Flat with optional fields for the same reason `OverviewFigure` is: it's
+/// what a small model writes most reliably, and what decodes most
+/// forgivingly. `StepVisuals.validate` decides whether it's drawable.
+public struct OverviewStepVisual: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, Equatable {
+        /// A grid of numbers or symbols -- a matrix, or a small table.
+        case matrix
+        /// Arrows on a plane, optionally added tip to tail.
+        case vectors
+        /// Boxes joined by arrows: a process, with the current stage lit.
+        case flow
+    }
+
+    public var kind: Kind
+    public var caption: String?
+    /// `.matrix`: entries as written ("a11", "3", "-1/2", "x1").
+    public var rows: [[String]]?
+    /// `.matrix`: columns right of an augmentation bar.
+    public var bar: Int?
+    /// `.matrix`: 0-based rows and columns to highlight.
+    public var highlightRows: [Int]?
+    public var highlightColumns: [Int]?
+    /// `.vectors`: 2D vectors from the origin.
+    public var vectors: [VisualVector]?
+    /// `.vectors`: also draw the weighted sum, tip to tail.
+    public var combine: Bool?
+    /// `.flow`: the stages, in order.
+    public var nodes: [String]?
+    /// `.flow`: the stage this step is at, 0-based.
+    public var highlight: Int?
+
+    public init(kind: Kind, caption: String? = nil, rows: [[String]]? = nil, bar: Int? = nil,
+                highlightRows: [Int]? = nil, highlightColumns: [Int]? = nil,
+                vectors: [VisualVector]? = nil, combine: Bool? = nil,
+                nodes: [String]? = nil, highlight: Int? = nil) {
+        self.kind = kind
+        self.caption = caption
+        self.rows = rows
+        self.bar = bar
+        self.highlightRows = highlightRows
+        self.highlightColumns = highlightColumns
+        self.vectors = vectors
+        self.combine = combine
+        self.nodes = nodes
+        self.highlight = highlight
+    }
+}
+
+public struct VisualVector: Codable, Sendable, Equatable {
+    public var label: String?
+    public var x: Double
+    public var y: Double
+    /// The scalar in front of it in a linear combination; 1 when absent.
+    public var weight: Double?
+
+    public init(label: String? = nil, x: Double, y: Double, weight: Double? = nil) {
+        self.label = label
+        self.x = x
+        self.y = y
+        self.weight = weight
     }
 }
 
@@ -96,10 +211,18 @@ public struct OverviewCheck: Codable, Sendable, Equatable {
 public struct OverviewDefinition: Codable, Sendable, Equatable {
     public var term: String
     public var text: String
+    /// A concrete case that *is* this, from the notes.
+    public var example: String?
+    /// A near miss that *isn't*, and what disqualifies it. A definition is
+    /// learned at its boundary: "echelon form" means little until you've
+    /// seen the matrix that almost is and why it fails.
+    public var nonExample: String?
 
-    public init(term: String, text: String) {
+    public init(term: String, text: String, example: String? = nil, nonExample: String? = nil) {
         self.term = term
         self.text = text
+        self.example = example
+        self.nonExample = nonExample
     }
 }
 
@@ -137,6 +260,9 @@ public struct OverviewFigure: Codable, Sendable, Equatable {
         case systemOfLines
         /// A 2x2 matrix, drawn as the plane it deforms.
         case linearTransform
+        /// A matrix of any size row-reduced one operation at a time, with
+        /// the changed row, the pivots and the free variables shown.
+        case rowReduction
     }
 
     public var kind: Kind
@@ -145,16 +271,25 @@ public struct OverviewFigure: Codable, Sendable, Equatable {
     public var equations: [[Double]]?
     /// For `.systemOfLines`: the row operations to step through, in order.
     public var steps: [RowOperation]?
-    /// For `.linearTransform`: rows of a 2x2 matrix.
+    /// For `.linearTransform`: rows of a 2x2 matrix. For `.rowReduction`:
+    /// the starting matrix, any size.
     public var matrix: [[Double]]?
+    /// For `.rowReduction`: columns right of the augmentation bar.
+    public var augmentedColumns: Int?
+    /// For `.rowReduction`: the steps are the note's own rather than
+    /// computed, so the figure can say whose they are.
+    public var stepsFromNote: Bool?
 
     public init(kind: Kind, caption: String? = nil, equations: [[Double]]? = nil,
-                steps: [RowOperation]? = nil, matrix: [[Double]]? = nil) {
+                steps: [RowOperation]? = nil, matrix: [[Double]]? = nil,
+                augmentedColumns: Int? = nil, stepsFromNote: Bool? = nil) {
         self.kind = kind
         self.caption = caption
         self.equations = equations
         self.steps = steps
         self.matrix = matrix
+        self.augmentedColumns = augmentedColumns
+        self.stepsFromNote = stepsFromNote
     }
 }
 
@@ -176,12 +311,29 @@ public struct RowOperation: Codable, Sendable, Equatable {
     /// The k in R_target + k * R_source, or the scale factor. Unused by
     /// `.swap`.
     public var multiplier: Double?
+    /// The same k as an exact fraction `[numerator, denominator]`, when it
+    /// has one. A `Double` can't hold 1/3 exactly, and row reduction on a
+    /// larger matrix produces fractions whose decimal form can't be turned
+    /// back into the fraction it came from.
+    public var exactMultiplier: [Int]?
 
     public init(kind: Kind, target: Int, source: Int? = nil, multiplier: Double? = nil) {
         self.kind = kind
         self.target = target
         self.source = source
         self.multiplier = multiplier
+    }
+
+    public init(kind: Kind, target: Int, source: Int? = nil, exact: Rational) {
+        self.init(kind: kind, target: target, source: source, multiplier: exact.doubleValue)
+        self.exactMultiplier = [exact.numerator, exact.denominator]
+    }
+
+    /// k exactly: the stored fraction, else the simple fraction nearest the
+    /// stored decimal.
+    public var rationalMultiplier: Rational? {
+        if let pair = exactMultiplier, pair.count == 2, let exact = Rational(pair[0], pair[1]) { return exact }
+        return multiplier.flatMap { Rational(approximating: $0) }
     }
 }
 
@@ -198,6 +350,7 @@ public enum OverviewLimits {
     /// A lesson with a figure in every section is a slideshow. Two
     /// well-chosen ones carry the visual weight of the whole page.
     public static let figures = 3
+    public static let exampleSteps = 6
 }
 
 public enum OverviewCoding {

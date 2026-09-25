@@ -218,6 +218,42 @@ public extension CardGenerator {
     /// 7-8B model's 8k window comfortable room for the prompt and a full
     /// answer. `FoundationModelsGenerator` overrides this downward.
     var overviewContextWordBudget: Int { 1_200 }
+
+    /// The second pass over a written section: corrections for statements
+    /// the note contradicts or that are simply wrong. Empty by default --
+    /// a generator that can't check reliably shouldn't pretend to.
+    func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] { [] }
+
+    /// The second pass over a whole lesson: sections and takeaways that
+    /// repeat an earlier one.
+    func findRepetition(in document: OverviewDocument) async -> OverviewRepetition { .none }
+}
+
+/// One correction from the review pass: `original` is text the section
+/// contains; `corrected` replaces it, or nil removes it.
+public struct OverviewFix: Sendable, Equatable {
+    public let original: String
+    public let corrected: String?
+    public init(original: String, corrected: String?) {
+        self.original = original
+        self.corrected = corrected
+    }
+}
+
+/// What the lesson-level review found repeated, as 0-based indices.
+public struct OverviewRepetition: Sendable, Equatable {
+    /// Each repeated section, and the earlier one that already teaches it.
+    public let sections: [(repeated: Int, original: Int)]
+    public let takeaways: [Int]
+    public init(sections: [(repeated: Int, original: Int)], takeaways: [Int]) {
+        self.sections = sections
+        self.takeaways = takeaways
+    }
+    public static let none = OverviewRepetition(sections: [], takeaways: [])
+    public static func == (a: Self, b: Self) -> Bool {
+        a.takeaways == b.takeaways && a.sections.map(\.repeated) == b.sections.map(\.repeated)
+            && a.sections.map(\.original) == b.sections.map(\.original)
+    }
 }
 
 /// The v1 default: no model, no network, no framework check. Candidates

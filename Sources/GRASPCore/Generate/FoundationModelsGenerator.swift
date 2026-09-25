@@ -85,6 +85,38 @@ public struct FoundationModelsGenerator: CardGenerator {
         var term: String
         @Guide(description: "A one-sentence definition")
         var definition: String
+        @Guide(description: "One concrete case from the note that is this. Empty string if the note gives none.")
+        var example: String
+        @Guide(description: "A near miss that is not this, and exactly what disqualifies it. Empty string if the note gives nothing to base it on.")
+        var nonExample: String
+    }
+
+    @Generable
+    fileprivate struct ExampleStepDraft {
+        @Guide(description: "The action taken in this step")
+        var action: String
+        @Guide(description: "The result it produced, copied from the note. Empty string if none.")
+        var result: String
+        @Guide(description: "Why this step. Empty string if obvious.")
+        var why: String
+        @Guide(description: "Two to four words naming the step")
+        var label: String
+        @Guide(description: "If a process diagram would help, its two to five short stages in order; the stage this step is at goes in flowHighlight. Empty if no diagram.")
+        var flowStages: [String]
+        @Guide(description: "Which of flowStages this step is at, counting from 0")
+        var flowHighlight: Int
+    }
+
+    @Generable
+    fileprivate struct ExampleDraft {
+        @Guide(description: "What is being worked through. Empty string if the note works nothing through step by step here.")
+        var title: String
+        @Guide(description: "The starting point, stated concretely. Empty string if none.")
+        var setup: String
+        @Guide(description: "The steps the note shows, in order. Empty if the note works nothing through here.")
+        var steps: [ExampleStepDraft]
+        @Guide(description: "What the example shows once done. Empty string if none.")
+        var outcome: String
     }
 
     @Generable
@@ -103,6 +135,8 @@ public struct FoundationModelsGenerator: CardGenerator {
         var paragraphs: [String]
         @Guide(description: "Key terms first introduced in this section. Empty if none.")
         var terms: [DefinitionDraft]
+        @Guide(description: "A calculation, derivation or procedure the note works through step by step, given as steps rather than narrated in the paragraphs. Leave the steps empty if the note works nothing through here.")
+        var example: ExampleDraft
         var check: CheckDraft
     }
 
@@ -151,7 +185,10 @@ public struct FoundationModelsGenerator: CardGenerator {
                 3Blue1Brown: curious, visual, and built so the reader discovers each idea instead \
                 of being told it. Start from a concrete question. Show a concrete case with real \
                 numbers before the general rule, then give it its name. Explain why each idea \
-                has to be true. Talk to the reader using you and we.
+                has to be true. Talk to the reader using you and we. Vary how paragraphs \
+                begin -- no stock openers like Notice that or Imagine -- and open with one \
+                question, not a list of them. Write math as notation (x3, (-5, 3, 0)), never \
+                spelled out in words. Never repeat an earlier section's idea.
 
                 You may draw on what you know about the subject to explain the concepts in the \
                 note, but do not introduce concepts it never raises. Never repeat the note's own \
@@ -185,13 +222,29 @@ public struct FoundationModelsGenerator: CardGenerator {
             let terms = entry.terms.compactMap { term -> OverviewDefinition? in
                 guard let name = optional(term.term), let text = optional(term.definition)
                 else { return nil }
-                return OverviewDefinition(term: name, text: text)
+                return OverviewDefinition(term: name, text: text, example: optional(term.example),
+                                          nonExample: optional(term.nonExample))
             }.prefix(OverviewLimits.termsPerSection)
+            let steps = entry.example.steps.compactMap { step -> OverviewExampleStep? in
+                guard let action = optional(step.action) else { return nil }
+                // Only a process diagram: the on-device model can't be
+                // trusted to copy a matrix's numbers out exactly.
+                let visual = step.flowStages.count >= 2
+                    ? OverviewStepVisual(kind: .flow, nodes: step.flowStages, highlight: step.flowHighlight)
+                    : nil
+                return OverviewExampleStep(action: action, result: optional(step.result), why: optional(step.why),
+                                           label: optional(step.label), visual: visual)
+            }.prefix(OverviewLimits.exampleSteps)
+            let example = steps.count >= 2
+                ? OverviewWorkedExample(title: optional(entry.example.title), setup: optional(entry.example.setup),
+                                        steps: Array(steps), outcome: optional(entry.example.outcome))
+                : nil
             let check = optional(entry.check.question).flatMap { question in
                 optional(entry.check.answer).map { OverviewCheck(question: question, answer: $0) }
             }
             return OverviewSection(
-                heading: heading, paragraphs: Array(paragraphs), terms: Array(terms), check: check
+                heading: heading, paragraphs: Array(paragraphs), terms: Array(terms),
+                example: example, check: check
             )
         }.prefix(OverviewLimits.sections)
 

@@ -184,8 +184,21 @@ struct OverviewSectionsView: View {
             }
             for term in section.terms {
                 lines.append("> **\(term.term)** — \(term.text)")
+                if let example = term.example { lines.append(">  - Is: \(example)") }
+                if let nonExample = term.nonExample { lines.append(">  - Isn't: \(nonExample)") }
             }
             if !section.terms.isEmpty { lines.append("") }
+            if let example = section.example {
+                lines.append("**Worked example\(example.title.map { ": \($0)" } ?? "")**")
+                if let setup = example.setup { lines.append(setup) }
+                for (index, step) in example.steps.enumerated() {
+                    lines.append("\(index + 1). \(step.action)"
+                        + (step.result.map { " → `\($0)`" } ?? "")
+                        + (step.why.map { " (\($0))" } ?? ""))
+                }
+                if let outcome = example.outcome { lines.append(outcome) }
+                lines.append("")
+            }
             if let check = section.check {
                 lines.append("> **Pause and check:** \(check.question)")
                 lines.append(">")
@@ -214,16 +227,22 @@ private struct LessonSectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(overviewInline(section.heading))
+            Text(overviewInline(section.isMath ? MathNotation.prettify(section.heading) : section.heading))
                 .graspType(.proseH2)
                 .foregroundStyle(GRASPColor.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                Text(overviewInline(paragraph))
+                Text(overviewInline(section.isMath ? MathNotation.prettify(paragraph) : paragraph))
                     .graspType(.prose)
                     .foregroundStyle(GRASPColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let code = section.code {
+                CodeSnippetView(snippet: code,
+                                sectionText: ([section.heading] + section.paragraphs).joined(separator: " "))
+                    .padding(.top, 2)
             }
 
             if !section.terms.isEmpty {
@@ -234,6 +253,11 @@ private struct LessonSectionView: View {
             if let figure = section.figure {
                 FigureCard(figure: figure)
                     .padding(.top, 6)
+            }
+
+            if let example = section.example {
+                WorkedExampleView(example: example, isMath: section.isMath)
+                    .padding(.top, 4)
             }
 
             if let check = section.check {
@@ -334,6 +358,8 @@ private struct KeyTermsCallout: View {
                             .graspType(.prose)
                             .foregroundStyle(GRASPColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        TermContrastView(term: term)
+                            .padding(.top, 6)
                     }
                 }
             }
@@ -418,6 +444,7 @@ private struct FigureCard: View {
         switch figure {
         case .lines(let lines): return lines.caption
         case .transform(let transform): return transform.caption
+        case .rowReduction(let walk): return walk.caption
         }
     }
 
@@ -426,6 +453,7 @@ private struct FigureCard: View {
             switch figure {
             case .lines(let lines): SystemOfLinesView(figure: lines)
             case .transform(let transform): LinearTransformView(figure: transform)
+            case .rowReduction(let walk): RowReductionView(figure: walk)
             }
             if let caption {
                 Text(overviewInline(caption))

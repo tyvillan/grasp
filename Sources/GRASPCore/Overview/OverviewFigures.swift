@@ -51,8 +51,23 @@ public enum OverviewFigures {
             cleaned.equations = nil
             cleaned.steps = nil
             return cleaned
+
+        case .rowReduction:
+            guard let rows = figure.matrix,
+                  let start = RationalMatrix(doubles: rows, augmentedColumns: figure.augmentedColumns ?? 0)
+            else { return nil }
+            let walked = start.walk(Array((figure.steps ?? []).prefix(maximumRowReductionSteps)))
+            guard !walked.steps.isEmpty else { return nil }
+            var cleaned = figure
+            cleaned.steps = walked.steps
+            cleaned.equations = nil
+            return cleaned
         }
     }
+
+    /// A walkthrough longer than this is a page of matrices; lectures work
+    /// examples that fit on a board.
+    static let maximumRowReductionSteps = 12
 
     // MARK: - Formatting
 
@@ -91,18 +106,19 @@ public enum OverviewFigures {
         case .swap:
             return "\(target) ↔ R\(subscriptDigits(operation.source ?? 0))"
         case .scale:
-            let factor = format(operation.multiplier ?? 1)
+            let factor = operation.rationalMultiplier?.description ?? format(operation.multiplier ?? 1)
             return "\(target) → \(factor) \(target)"
         case .replace:
             let k = operation.multiplier ?? 0
             let source = "R\(subscriptDigits(operation.source ?? 0))"
             let magnitude = abs(k)
-            let coefficient = abs(magnitude - 1) < 1e-9 ? "" : format(magnitude)
+            let exact = operation.rationalMultiplier.map { $0.numerator < 0 ? $0.negated : $0 }
+            let coefficient = abs(magnitude - 1) < 1e-9 ? "" : (exact?.description ?? format(magnitude))
             return "\(target) → \(target) \(k < 0 ? "−" : "+") \(coefficient)\(source)"
         }
     }
 
-    static func subscriptDigits(_ value: Int) -> String {
+    public static func subscriptDigits(_ value: Int) -> String {
         let digits: [Character: Character] = [
             "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
             "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",

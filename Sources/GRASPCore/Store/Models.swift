@@ -184,7 +184,12 @@ public struct NoteOverview: Codable, FetchableRecord, PersistableRecord, Sendabl
     /// older version read as stale, so the existing "Rewrite" path picks
     /// them up with no data migration -- which is the whole reason this
     /// number exists.
-    public static let currentBodySchemaVersion = 3
+    /// v4 adds worked examples, is/isn't pairs on key terms and
+    /// row-reduction figures -- all optional fields, so a v3 body still
+    /// decodes and is shown (marked out of date) until it's rewritten.
+    public static let currentBodySchemaVersion = 4
+    /// Older versions whose bodies this build can still read.
+    public static let readableBodySchemaVersions: Set<Int> = [3, 4]
 
     /// True when the note this was written from has changed since, or when
     /// the body predates the current document shape.
@@ -202,7 +207,7 @@ public struct NoteOverview: Codable, FetchableRecord, PersistableRecord, Sendabl
     /// nil when the body predates the current schema version or is corrupt
     /// -- both of which a caller treats exactly like "not written yet".
     public func document() -> OverviewDocument? {
-        guard bodySchemaVersion == Self.currentBodySchemaVersion else { return nil }
+        guard Self.readableBodySchemaVersions.contains(bodySchemaVersion) else { return nil }
         return OverviewCoding.decode(bodyJSON)
     }
 }
