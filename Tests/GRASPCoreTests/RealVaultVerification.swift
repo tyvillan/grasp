@@ -13,17 +13,13 @@ import GRDB
 /// sitting directly under a semester folder rather than inside a course
 /// subfolder (a schedule doc, an audit doc -- neither is lecture content),
 /// and 1 Jupyter `.ipynb_checkpoints` artifact excluded by the ignore list.
-@Suite("RealVaultVerification")
+@Suite("RealVaultVerification", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct RealVaultVerificationTests {
     static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
 
     @Test("scans the real vault and reports counts")
     func scansRealVault() async throws {
-        guard FileManager.default.fileExists(atPath: Self.vaultRoot.path) else {
-            Issue.record("Real vault not present on this machine -- skipping")
-            return
-        }
         let db = try GRASPDatabase.inMemory()
         let scanner = VaultScanner(database: db)
         // Routed through the same gate `VaultFixture` uses -- see

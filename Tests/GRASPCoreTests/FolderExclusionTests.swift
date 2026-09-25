@@ -44,8 +44,10 @@ struct FolderExclusionTests {
         """
         try note.write(to: courseDir.appendingPathComponent("Schedule.md"), atomically: true, encoding: .utf8)
 
-        let discovered = try FileManager.default
-            .contentsOfDirectory(at: tempBase, includingPropertiesForKeys: nil)
+        // Best effort: listing Windows' Temp folder can fail on some
+        // entry another program has locked, and `root` is fine there.
+        let discovered = (try? FileManager.default
+            .contentsOfDirectory(at: tempBase, includingPropertiesForKeys: nil))?
             .first { $0.lastPathComponent == dirName }
         return discovered ?? root
     }
@@ -91,7 +93,8 @@ struct FolderExclusionTests {
         }
     }
 
-    @Test("excluding, then deleting, a real vault-backed course keeps it from coming back on rescan")
+    @Test("excluding, then deleting, a real vault-backed course keeps it from coming back on rescan",
+          .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
     func excludedCourseStaysGoneAfterRescan() async throws {
         let db = try await VaultFixture.database()
 
@@ -125,7 +128,8 @@ struct FolderExclusionTests {
         }
     }
 
-    @Test("deleting a real vault-backed course WITHOUT excluding it does resurrect on rescan -- the exact bug this feature fixes")
+    @Test("deleting a real vault-backed course WITHOUT excluding it does resurrect on rescan -- the exact bug this feature fixes",
+          .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
     func plainDeleteWithoutExclusionResurrectsOnRescan() async throws {
         let db = try await VaultFixture.database()
 

@@ -27,7 +27,10 @@ enum TestZip {
             let file = staging.appendingPathComponent(path)
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
-            try text.write(to: file, atomically: true, encoding: .utf8)
+            // Not atomically: an atomic write swaps a temp file into place,
+            // and on Windows that swap fails with a sharing violation if
+            // anything (the indexer, Defender) has just opened the file.
+            try Data(text.utf8).write(to: file)
         }
         let root = ProcessInfo.processInfo.environment["SystemRoot"] ?? #"C:\Windows"#
         let process = Process()

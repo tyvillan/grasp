@@ -40,6 +40,9 @@ struct ProfileStoreTests {
         try legacyDB.queue.write { conn in
             try Semester(name: "Fall 2025", slug: "fall-2025", sortKey: 1).insert(conn)
         }
+        // Closed first, as it is in the app, which migrates at launch before
+        // opening any database -- Windows won't move an open file.
+        try legacyDB.queue.close()
 
         let profiles = try ProfileStore.loadOrMigrate(supportDirectory: dir)
         #expect(profiles.count == 1)

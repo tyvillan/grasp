@@ -9,7 +9,7 @@ import GRDB
 /// `recordLearnAnswer` climbs the ladder gradually. This verifies both
 /// paths against real content, and that a test built with
 /// `excludeMastered` actually excludes what Study just approved.
-@Suite("MasteryIntegration")
+@Suite("MasteryIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct MasteryIntegrationTests {
     private func markCard(_ cardId: String, understood: Bool, db: GRASPDatabase) async throws {
         try await db.queue.write { conn in

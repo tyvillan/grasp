@@ -10,7 +10,7 @@ import GRDB
 /// content, not just trusting the SQL reads correctly -- GRDB's
 /// synchronized-FTS5 rowid semantics are exactly the kind of thing that's
 /// easy to get subtly wrong.
-@Suite("SearchIntegration")
+@Suite("SearchIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct SearchIntegrationTests {
     private static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
