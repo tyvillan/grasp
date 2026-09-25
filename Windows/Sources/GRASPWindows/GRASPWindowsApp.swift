@@ -67,6 +67,7 @@ struct ContentView: View {
                 } else if let status = library.status {
                     Text(status).font(.caption)
                 }
+                AccountPanel(account: library.account)
             }
             .padding(12)
             .frame(minWidth: 240)

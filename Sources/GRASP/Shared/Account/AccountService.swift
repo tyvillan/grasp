@@ -189,6 +189,14 @@ final class AccountService {
         return rows.map { !$0.isEmpty }
     }
 
+    /// Adds (or changes) the account's password, so it can sign in with
+    /// email and password where Google sign-in isn't available -- GRASP on
+    /// Windows, for now. Same account, same library.
+    func setPassword(_ password: String, userId: String) async throws {
+        let client = try client(for: userId)
+        try await client.auth.update(user: UserAttributes(password: password))
+    }
+
     func signOut(userId: String) async {
         guard let client = try? client(for: userId) else { return }
         try? await client.auth.signOut(scope: .local)

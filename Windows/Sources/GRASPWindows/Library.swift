@@ -23,6 +23,9 @@ final class Library {
     /// The result of the last import, or why it failed.
     var status: String?
     private(set) var isImporting = false
+    /// Sign-in and sync. Set up after the library loads, since it reloads
+    /// the library when another device's changes arrive.
+    private(set) var account: Account!
 
     init() throws {
         let support = try Self.supportDirectory()
@@ -34,6 +37,9 @@ final class Library {
         }
         database = try GRASPDatabase(path: profiles[0].databaseURL(supportDirectory: support))
         reload()
+        account = Account(database: database, profile: profiles[0], supportDirectory: support) { [weak self] in
+            self?.reload()
+        }
     }
 
     /// Where the library lives. `GRASP_SUPPORT_DIR` overrides it -- on a
@@ -89,6 +95,7 @@ final class Library {
             status = "Import failed: \(error.localizedDescription)"
         }
         reload()
+        account.noteLocalChange()
     }
 
     /// Imports the built-in one-lecture Matrix Theory vault.
@@ -110,11 +117,13 @@ final class Library {
     func approveDrafts(inDeck deckId: String) {
         try? database.queue.write { try Study.approveDrafts(inDecks: [deckId], db: $0) }
         reload()
+        account.noteLocalChange()
     }
 
     func grade(_ card: Card, _ grade: FSRS.Grade) {
         try? database.queue.write { try Study.grade(card.id, grade: grade, source: "flashcards", db: $0) }
         reload()
+        account.noteLocalChange()
     }
 
     // MARK: - Figures

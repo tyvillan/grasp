@@ -549,6 +549,48 @@ private struct OllamaModelPicker: View {
 
 /// Settings' view of sync for the open profile: who it's signed in as, how
 /// the last sync went, and signing in or out.
+/// Lets a Google account add a password, for signing in where Google
+/// sign-in isn't available yet (GRASP on Windows).
+private struct PasswordForOtherDevices: View {
+    let userId: String
+    @State private var password = ""
+    @State private var working = false
+    @State private var result: String?
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Password for other devices").font(.headline)
+            Text("GRASP on Windows signs in with email and password. Set a password here, then sign in there with this account's email.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                SecureField("New password (at least 6 characters)", text: $password)
+                Button("Set Password") { save() }
+                    .disabled(working || password.count < 6)
+            }
+            if let result {
+                Text(result).font(.caption).foregroundStyle(failed ? .red : .secondary)
+            }
+        }
+    }
+
+    private func save() {
+        working = true
+        Task {
+            do {
+                try await AccountService.shared.setPassword(password, userId: userId)
+                result = "Password set. Use it with this account's email on Windows."
+                failed = false
+                password = ""
+            } catch {
+                result = "Couldn't set the password: \(error.localizedDescription)"
+                failed = true
+            }
+            working = false
+        }
+    }
+}
+
 private struct AccountSyncSection: View {
     @Environment(AppStore.self) private var store
     @State private var confirmingSignOut = false
@@ -570,6 +612,9 @@ private struct AccountSyncSection: View {
                     Text("This Mac's sign-in has expired. Sign in again to keep syncing -- nothing here is lost.")
                         .font(.caption).foregroundStyle(.secondary)
                     SignInButtons { signedIn in sync.resume(signedIn) }
+                }
+                if account.provider == "google" {
+                    PasswordForOtherDevices(userId: account.userId)
                 }
                 Button("Sign Out…", role: .destructive) { confirmingSignOut = true }
             } else {
