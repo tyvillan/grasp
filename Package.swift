@@ -33,9 +33,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
-        // .pptx is a zip of XML parts (slide text, speaker notes) -- this
-        // is the one reader for that shape; PDF/docx both ride Apple's own
-        // PDFKit/AppKit readers with no library needed.
+        // .pptx and .docx are zips of XML parts; this reads them everywhere
+        // but Windows (see ZipReader).
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.19"),
         // Accounts and sync: Supabase's auth (Google / email sign-in, with
         // the session kept in the Keychain) and its REST client for the
@@ -54,7 +53,10 @@ let package = Package(
             name: "GRASPCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                // Not on Windows, where it doesn't compile -- ZipReader
+                // falls back to Windows' own tar.exe there.
+                .product(name: "ZIPFoundation", package: "ZIPFoundation",
+                         condition: .when(platforms: [.macOS, .iOS, .linux])),
                 .product(name: "Crypto", package: "swift-crypto",
                          condition: .when(platforms: [.windows, .linux])),
             ],
@@ -73,10 +75,10 @@ let package = Package(
             name: "GRASPCoreTests",
             dependencies: [
                 "GRASPCore",
-                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "ZIPFoundation", package: "ZIPFoundation",
+                         condition: .when(platforms: [.macOS, .iOS, .linux])),
             ],
-            path: "Tests/GRASPCoreTests",
-            resources: [.copy("Fixtures")]
+            path: "Tests/GRASPCoreTests"
         )
     ] + appTargets
 )

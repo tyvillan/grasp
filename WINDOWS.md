@@ -25,8 +25,11 @@ Then:
 - **Turn on Developer Mode**: Settings → System → For developers →
   Developer Mode. Swift's package manager needs it to create links between
   files.
-- **Close PowerShell and open a new window**, so it finds the newly installed
-  `swift` and `git`.
+- **Close PowerShell, and from now on use "Developer PowerShell for VS 2022"**
+  from the Start menu instead of plain PowerShell. It has Visual Studio's
+  linker on the path. Plain PowerShell fails with `could not find CLI tool
+  'link'`. Opening a fresh window also picks up the `SDKROOT` setting the
+  Swift installer adds. Without it you'll see "unable to load standard library".
 
 Check it worked:
 

@@ -1,6 +1,5 @@
 import Testing
 import Foundation
-import ZIPFoundation
 @testable import GRASPCore
 
 /// Builds real, minimal `.pptx` zip archives at test time (just the
@@ -18,13 +17,7 @@ struct PptxExtractorTests {
 
     private func makeArchive(_ entries: [String: String]) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("pptx-test-\(UUID().uuidString).pptx")
-        let archive = try Archive(url: url, accessMode: .create, pathEncoding: nil)
-        for (path, xml) in entries {
-            let data = Data(xml.utf8)
-            try archive.addEntry(with: path, type: .file, uncompressedSize: Int64(data.count)) { position, size in
-                data.subdata(in: Int(position)..<(Int(position) + size))
-            }
-        }
+        try TestZip.write(entries, to: url)
         return url
     }
 
