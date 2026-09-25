@@ -1,8 +1,8 @@
 import Foundation
 #if canImport(AppKit)
 import AppKit
-#else
-import ZIPFoundation
+#elseif canImport(FoundationXML)
+import FoundationXML
 #endif
 
 /// Plain-text extraction for .docx.
@@ -22,11 +22,7 @@ public enum DocxExtractor {
         ) else { return nil }
         return attributed.string
         #else
-        guard let archive = try? Archive(url: url, accessMode: .read, pathEncoding: nil),
-              let entry = archive["word/document.xml"]
-        else { return nil }
-        var data = Data()
-        guard (try? archive.extract(entry, consumer: { data.append($0) })) != nil else { return nil }
+        guard let data = ZipReader(url: url)?.data(at: "word/document.xml") else { return nil }
         let reader = ParagraphReader()
         let parser = XMLParser(data: data)
         parser.delegate = reader

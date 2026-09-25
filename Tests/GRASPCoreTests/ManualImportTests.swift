@@ -1,7 +1,6 @@
 import Testing
 import Foundation
 import GRDB
-import ZIPFoundation
 @testable import GRASPCore
 
 /// `VaultScanner.importPaths(_:intoCourse:)` -- the manual counterpart to
@@ -168,11 +167,7 @@ struct ManualImportTests {
         let slideXML = "<p:sld xmlns:a=\"a\" xmlns:p=\"p\"><p:cSld><p:spTree><p:sp><p:txBody>\(runs)</p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
 
         let fileURL = dir.appendingPathComponent("Lecture Slides.pptx")
-        let archive = try Archive(url: fileURL, accessMode: .create, pathEncoding: nil)
-        let data = Data(slideXML.utf8)
-        try archive.addEntry(with: "ppt/slides/slide1.xml", type: .file, uncompressedSize: Int64(data.count)) {
-            position, size in data.subdata(in: Int(position)..<(Int(position) + size))
-        }
+        try TestZip.write(["ppt/slides/slide1.xml": slideXML], to: fileURL)
 
         let scanner = VaultScanner(database: db)
         let summary = try await scanner.importPaths([fileURL], intoCourse: courseId)

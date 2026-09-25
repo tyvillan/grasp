@@ -146,8 +146,10 @@ struct TimelineTests {
         """
         try note.write(to: courseDir.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
 
-        let discovered = try FileManager.default
-            .contentsOfDirectory(at: tempBase, includingPropertiesForKeys: nil)
+        // Best effort: listing Windows' Temp folder can fail on some
+        // entry another program has locked, and `root` is fine there.
+        let discovered = (try? FileManager.default
+            .contentsOfDirectory(at: tempBase, includingPropertiesForKeys: nil))?
             .first { $0.lastPathComponent == dirName }
         return discovered ?? root
     }

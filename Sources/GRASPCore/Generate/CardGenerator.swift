@@ -333,11 +333,12 @@ public struct NoGenerator: CardGenerator {
 /// Models -- rather than assumed from what's installed.
 public enum CardGenerators {
     public static func select() async -> any CardGenerator {
-        // Ollama is a Mac thing: it runs on the Mac and GRASP reaches it at
-        // this device's own address. On iPhone there's nothing there -- and
-        // in the simulator, which shares the Mac's network, it found the
-        // Mac's Ollama and claimed to be using it, which no real phone could.
-        #if os(macOS)
+        // Ollama runs on a computer -- Mac, Windows or Linux -- and GRASP
+        // reaches it at this device's own address. On iPhone there's nothing
+        // there -- and in the simulator, which shares the Mac's network, it
+        // found the Mac's Ollama and claimed to be using it, which no real
+        // phone could.
+        #if !os(iOS)
         let probe = OllamaGenerator()
         if await probe.isAvailable {
             // A running server with the wrong model name answers every

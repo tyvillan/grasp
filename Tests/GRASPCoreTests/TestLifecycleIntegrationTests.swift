@@ -7,7 +7,7 @@ import GRDB
 /// score -> feed misses back into FSRS) against real vault content in an
 /// in-memory database, mirroring what AppStore.startTest/submitTestAnswer/
 /// finishTest do.
-@Suite("TestLifecycleIntegration")
+@Suite("TestLifecycleIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct TestLifecycleIntegrationTests {
     private static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")

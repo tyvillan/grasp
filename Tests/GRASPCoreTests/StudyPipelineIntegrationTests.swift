@@ -7,7 +7,7 @@ import GRDB
 /// sequence AppStore.gradeCard runs) against real vault content in an
 /// in-memory database -- proves the primitives compose correctly without
 /// writing fabricated study history into the real production database.
-@Suite("StudyPipelineIntegration")
+@Suite("StudyPipelineIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct StudyPipelineIntegrationTests {
     private static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")

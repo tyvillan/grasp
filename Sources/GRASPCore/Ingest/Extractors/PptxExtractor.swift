@@ -1,5 +1,8 @@
 import Foundation
-import ZIPFoundation
+#if canImport(FoundationXML)
+// XMLParser lives here off Apple platforms.
+import FoundationXML
+#endif
 
 /// Plain-text extraction for PowerPoint decks. A `.pptx` is a zip of XML
 /// parts; this reads only the two kinds it needs -- `ppt/slides/slideN.xml`
@@ -10,22 +13,20 @@ import ZIPFoundation
 /// explanation in the notes, not on the slide itself.
 public enum PptxExtractor {
     public static func extractText(from url: URL) -> String? {
-        guard let archive = try? Archive(url: url, accessMode: .read, pathEncoding: nil) else { return nil }
+        guard let archive = ZipReader(url: url) else { return nil }
 
         // Sorted numerically, not lexically -- "slide10.xml" must not sort
         // before "slide2.xml", which a plain string sort would do.
-        let slideEntries = archive
-            .filter { $0.path.hasPrefix("ppt/slides/slide") && $0.path.hasSuffix(".xml") }
-            .sorted { slideNumber(in: $0.path) < slideNumber(in: $1.path) }
-        guard !slideEntries.isEmpty else { return "" }
+        let slidePaths = archive.paths
+            .filter { $0.hasPrefix("ppt/slides/slide") && $0.hasSuffix(".xml") }
+            .sorted { slideNumber(in: $0) < slideNumber(in: $1) }
+        guard !slidePaths.isEmpty else { return "" }
 
         var sections: [String] = []
-        for entry in slideEntries {
-            var lines = textRuns(in: entry, archive: archive)
-            let notesPath = "ppt/notesSlides/notesSlide\(slideNumber(in: entry.path)).xml"
-            if let notesEntry = archive[notesPath] {
-                lines += textRuns(in: notesEntry, archive: archive)
-            }
+        for path in slidePaths {
+            var lines = textRuns(in: path, archive: archive)
+            let notesPath = "ppt/notesSlides/notesSlide\(slideNumber(in: path)).xml"
+            lines += textRuns(in: notesPath, archive: archive)
             guard !lines.isEmpty else { continue }
             sections.append(lines.joined(separator: "\n"))
         }
@@ -38,13 +39,13 @@ public enum PptxExtractor {
         return Int(digits) ?? 0
     }
 
-    private static func textRuns(in entry: Entry, archive: Archive) -> [String] {
-        var data = Data()
-        guard (try? archive.extract(entry) { data.append($0) }) != nil else { return [] }
+    private static func textRuns(in path: String, archive: ZipReader) -> [String] {
+        guard let data = archive.data(at: path) else { return [] }
         let parser = SlideTextExtractor()
         let xmlParser = XMLParser(data: data)
         xmlParser.delegate = parser
-        xmlParser.parse()
+        // A part that fails to parse partway still yields the runs read so far.
+        _ = xmlParser.parse()
         return parser.textRuns
     }
 }

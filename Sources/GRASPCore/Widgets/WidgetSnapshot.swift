@@ -223,9 +223,14 @@ public nonisolated enum WidgetSnapshotFile {
     public static let fileName = "widget-snapshot.json"
 
     public static func url() -> URL? {
+        #if canImport(Darwin)
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
             .appendingPathComponent(fileName)
+        #else
+        // No App Groups (or widgets) off Apple platforms.
+        nil
+        #endif
     }
 
     public static func read(from url: URL? = url()) -> WidgetSnapshot? {

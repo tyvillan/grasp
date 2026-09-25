@@ -1,5 +1,10 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto: the same API as CryptoKit, for Windows and Linux.
+import Crypto
+#endif
 
 /// A named local profile so more than one person can use the same
 /// installed copy of GRASP with separate data -- each profile gets its

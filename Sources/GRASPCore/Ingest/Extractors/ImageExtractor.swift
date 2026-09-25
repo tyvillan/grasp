@@ -1,7 +1,9 @@
 import Foundation
+#if canImport(Vision)
 import ImageIO
 import CoreGraphics
 import Vision
+#endif
 
 /// On-device OCR for PNG/JPEG images, via Vision -- no network call, no
 /// model download, works the moment the app launches. A photo/diagram with
@@ -11,6 +13,10 @@ import Vision
 /// it. `nil` is reserved for the file itself failing to load at all.
 public enum ImageExtractor {
     public static func extractText(from url: URL) -> String? {
+        #if !canImport(Vision)
+        // Windows: not yet -- Windows.Media.Ocr is the planned reader.
+        return nil
+        #else
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return nil }
@@ -39,5 +45,6 @@ public enum ImageExtractor {
 
         let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
         return lines.joined(separator: "\n")
+        #endif
     }
 }

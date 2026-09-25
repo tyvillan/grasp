@@ -37,7 +37,8 @@ struct SearchIntegrationTests {
         }
     }
 
-    @Test("searching a real, distinctive term finds its source note")
+    @Test("searching a real, distinctive term finds its source note",
+          .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
     func findsDistinctiveTerm() async throws {
         let db = try await VaultFixture.database()
 

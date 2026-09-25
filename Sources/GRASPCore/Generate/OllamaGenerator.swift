@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// URLSession lives here off Apple platforms.
+import FoundationNetworking
+#endif
 
 /// Talks to a local Ollama server (`127.0.0.1:11434`) for card refinement
 /// and distractor generation. Ollama isn't installed on the machine this
@@ -825,6 +829,11 @@ public struct OllamaGenerator: CardGenerator {
     /// it takes most of a minute -- and a local model occasionally runs on
     /// far past what was asked for. Each cap is about twice a normal answer.
     private func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
+        // Check the server is there first, in the 2-second budget. A refused
+        // connection fails at once on Apple platforms, but on Windows
+        // URLSession sits out the full 300-second timeout -- five minutes
+        // before any AI action with Ollama stopped fell back.
+        guard await isAvailable else { throw URLError(.cannotConnectToHost) }
         var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

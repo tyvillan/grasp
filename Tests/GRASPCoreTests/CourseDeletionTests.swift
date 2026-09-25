@@ -12,7 +12,7 @@ import GRDB
 /// `card.materialId` -> `material.courseId`, so a hand-typed card
 /// (`materialId` is nil for those) doesn't survive the course it's
 /// actually filed under.
-@Suite("CourseDeletion")
+@Suite("CourseDeletion", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct CourseDeletionTests {
     private static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")

@@ -1,5 +1,10 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#else
+// swift-crypto: the same API as CryptoKit, for Windows and Linux.
+import Crypto
+#endif
 import GRDB
 
 public struct ImportSummary: Sendable, Equatable {
