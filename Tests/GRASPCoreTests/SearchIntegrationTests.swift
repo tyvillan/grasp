@@ -10,7 +10,7 @@ import GRDB
 /// content, not just trusting the SQL reads correctly -- GRDB's
 /// synchronized-FTS5 rowid semantics are exactly the kind of thing that's
 /// easy to get subtly wrong.
-@Suite("SearchIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
+@Suite("SearchIntegration")
 struct SearchIntegrationTests {
     private static let vaultRoot = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
@@ -37,7 +37,8 @@ struct SearchIntegrationTests {
         }
     }
 
-    @Test("searching a real, distinctive term finds its source note")
+    @Test("searching a real, distinctive term finds its source note",
+          .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
     func findsDistinctiveTerm() async throws {
         let db = try await VaultFixture.database()
 
