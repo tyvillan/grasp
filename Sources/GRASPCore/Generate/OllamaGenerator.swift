@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(FoundationNetworking)
+// URLSession lives here off Apple platforms.
+import FoundationNetworking
+#endif
 
 /// Talks to a local Ollama server (`127.0.0.1:11434`) for card refinement
 /// and distractor generation. Ollama isn't installed on the machine this

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(PDFKit)
 import PDFKit
+#endif
 
 /// Plain-text extraction for PDFs (Calculus 2's 33 homework/exam-review
 /// files, plus scattered PDFs in other courses). A scanned-image PDF with
@@ -8,7 +10,13 @@ import PDFKit
 /// file, it just has nothing OCR-able to extract here).
 public enum PDFExtractor {
     public static func extractText(from url: URL) -> String? {
+        #if canImport(PDFKit)
         guard let document = PDFDocument(url: url) else { return nil }
         return document.string
+        #else
+        // Windows: not yet -- Windows.Data.Pdf is the planned reader. nil
+        // reads as "couldn't extract", so the file is listed, not guessed at.
+        return nil
+        #endif
     }
 }

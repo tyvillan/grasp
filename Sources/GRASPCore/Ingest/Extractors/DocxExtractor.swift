@@ -3,6 +3,9 @@ import Foundation
 import AppKit
 #else
 import ZIPFoundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 #endif
 
 /// Plain-text extraction for .docx.

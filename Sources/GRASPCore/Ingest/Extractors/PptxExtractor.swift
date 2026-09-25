@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(FoundationXML)
+// XMLParser lives here off Apple platforms.
+import FoundationXML
+#endif
 import ZIPFoundation
 
 /// Plain-text extraction for PowerPoint decks. A `.pptx` is a zip of XML
