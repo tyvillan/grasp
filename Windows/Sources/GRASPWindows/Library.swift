@@ -65,15 +65,32 @@ final class Library {
     /// Sign-in and sync. Set up after the library loads, since it reloads
     /// the library when another device's changes arrive.
     private(set) var account: Account!
+    /// The open profile (there's no profile picker yet, so the first).
+    private(set) var profile: Profile
+    /// This profile's preferences.
+    let settings: AppSettings
+    /// Archived courses, for Settings' "Hidden Courses".
+    private(set) var archivedCourses: [Course] = []
+    /// Vault folders imports skip, for Settings' "Excluded Folders".
+    private(set) var excludedFolders: [String] = []
+    /// Bumped by every reload. Screens that query the database directly
+    /// (the calendar, Home's figures) read it so they redraw after an edit
+    /// or a sync, the Mac's `AppStore.revision`.
+    private(set) var revision = 0
+    private let supportDirectory: URL
 
     init() throws {
         let support = try Self.supportDirectory()
+        supportDirectory = support
         var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
         // No profile picker or sign-in yet: a fresh install gets one profile.
         if profiles.isEmpty {
             profiles = [Profile(name: "Me")]
             try ProfileStore.save(profiles, supportDirectory: support)
         }
+        profile = profiles[0]
+        settings = AppSettings(file: profiles[0].databaseURL(supportDirectory: support)
+            .deletingLastPathComponent().appendingPathComponent("settings.json"))
         database = try GRASPDatabase(path: profiles[0].databaseURL(supportDirectory: support))
         reload()
         account = Account(database: database, profile: profiles[0], supportDirectory: support) { [weak self] in
@@ -119,7 +136,28 @@ final class Library {
                 DeckRow(id: row["id"], courseId: row["courseId"], courseName: row["courseName"],
                         name: row["name"], total: row["total"], due: row["due"], drafts: row["drafts"])
             }
+            archivedCourses = try Course
+                .filter(Column("isArchived") == true)
+                .order(Column("updatedAt").desc)
+                .fetchAll(db)
+            excludedFolders = try ExcludedFolder
+                .order(Column("excludedAt").desc)
+                .fetchAll(db)
+                .map(\.folderPath)
         }
+        revision += 1
+    }
+
+    /// Runs a write, then reloads and schedules a sync, as every change does.
+    private func change(_ body: (Database) throws -> Void) {
+        try? database.queue.write { try body($0) }
+        reload()
+        account?.noteLocalChange()
+    }
+
+    /// A course's name, archived ones included (an exam keeps its label).
+    func courseName(_ courseId: String) -> String? {
+        course(courseId)?.name ?? archivedCourses.first { $0.id == courseId }?.name
     }
 
     /// Courses newest semester first, then "No Timeline", as the Mac's
@@ -192,6 +230,73 @@ final class Library {
         reload()
         account.noteLocalChange()
     }
+
+    // MARK: - Calendar
+
+    func calendarEvents(from start: Date, to end: Date) -> [CalendarEvent] {
+        (try? database.queue.read { try CalendarActions.events(from: start, to: end, db: $0) }) ?? []
+    }
+
+    func upcomingExams(within days: Int = 30, limit: Int = 3) -> [CalendarEvent] {
+        (try? database.queue.read { try CalendarActions.upcomingExams(within: days, limit: limit, db: $0) }) ?? []
+    }
+
+    func dailyCardLoad(from start: Date, to end: Date, calendar: Calendar) -> [Date: Int] {
+        (try? database.queue.read {
+            try CalendarActions.dailyCardLoad(from: start, to: end, calendar: calendar, db: $0)
+        }) ?? [:]
+    }
+
+    func addEvent(_ event: CalendarEvent) { change { try CalendarActions.add(event, db: $0) } }
+    func updateEvent(_ event: CalendarEvent) { change { try CalendarActions.update(event, db: $0) } }
+    func deleteEvent(_ eventId: String) { change { try CalendarActions.delete(eventId, db: $0) } }
+
+    func plannableCardCount(for event: CalendarEvent) -> Int {
+        (try? database.queue.read { try CalendarActions.plannableCardCount(for: event, db: $0) }) ?? 0
+    }
+
+    func hasStudyPlan(for eventId: String) -> Bool {
+        (try? database.queue.read { try CalendarActions.hasStudyPlan(for: eventId, db: $0) }) ?? false
+    }
+
+    func generateStudyPlan(for event: CalendarEvent) {
+        let courseName = event.courseId.flatMap { courseName($0) }
+        change { try CalendarActions.generateStudyPlan(for: event, courseName: courseName, db: $0) }
+    }
+
+    // MARK: - Progress
+
+    func studyStreak() -> StudyProgress.Streak {
+        (try? database.queue.read { try StudyProgress.streak(db: $0) })
+            ?? StudyProgress.Streak(days: 0, studiedToday: false, reviewsToday: 0)
+    }
+
+    // MARK: - Settings
+
+    func renameProfile(to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != profile.name else { return }
+        profile.name = trimmed
+        try? ProfileStore.update(profile, supportDirectory: supportDirectory)
+    }
+
+    /// Shows an archived course again (the Mac's `setCourseArchived`).
+    func unarchiveCourse(_ courseId: String) {
+        change { db in
+            guard var course = try Course.fetchOne(db, key: courseId) else { return }
+            course.isArchived = false
+            course.updatedAt = Date()
+            try course.save(db)
+        }
+    }
+
+    /// Lets imports walk a folder again (the Mac's `includeFolder`).
+    func includeFolder(_ path: String) {
+        change { _ = try ExcludedFolder.deleteOne($0, key: path) }
+    }
+
+    /// Where this profile's library and log live, for Settings.
+    var libraryFolder: URL { supportDirectory }
 
     // MARK: - Figures
 

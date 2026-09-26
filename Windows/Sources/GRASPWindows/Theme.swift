@@ -21,8 +21,11 @@ enum GRASPColor {
 
     static let accent = adaptive(light: 0x9C6208, dark: 0xF2B84B)
     static let accentSoft = adaptive(light: 0xF6E7C9, dark: 0x332B18)
+    static let accentMuted = adaptive(light: 0xC79A4A, dark: 0x8A6B2A)
     static let success = adaptive(light: 0x14705E, dark: 0x5FC9B5)
+    static let successSoft = adaptive(light: 0xDBEDE8, dark: 0x112824)
     static let rejected = adaptive(light: 0xB2453F, dark: 0xE08A83)
+    static let rejectedSoft = adaptive(light: 0xF5DEDA, dark: 0x2E1714)
 
     static let textPrimary = adaptive(light: 0x1A1B24, dark: 0xEFEEF6)
     static let textSecondary = adaptive(light: 0x5F5E6D, dark: 0x9695A6)

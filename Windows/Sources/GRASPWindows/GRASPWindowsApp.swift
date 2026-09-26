@@ -30,9 +30,11 @@ struct GRASPWindowsApp: App {
     }
 }
 
-/// Where the main pane is: the dashboard, or one course.
+/// Where the main pane is.
 enum Route: Hashable {
     case home
+    case calendar
+    case settings
     case course(String)
 }
 
@@ -67,7 +69,11 @@ struct ContentView: View {
     private var detail: some View {
         switch route {
         case .home:
-            HomeView(library: library, route: $route)
+            HomeView(library: library, route: $route, onStudy: study)
+        case .calendar:
+            CalendarScreen(library: library, onStudy: study)
+        case .settings:
+            SettingsScreen(library: library)
         case .course(let courseId):
             if let course = library.course(courseId) {
                 CourseView(
@@ -80,9 +86,16 @@ struct ContentView: View {
                 )
             } else {
                 // The course went away (archived or deleted on another device).
-                HomeView(library: library, route: $route)
+                HomeView(library: library, route: $route, onStudy: study)
             }
         }
+    }
+
+    /// Straight into the deck an exam is about, or the course's All Cards
+    /// when the event names no deck.
+    private func study(courseId: String, deckId: String?) {
+        selectedDecks[courseId] = deckId
+        route = .course(courseId)
     }
 }
 
@@ -109,6 +122,9 @@ struct Sidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     SidebarRow(title: "Home", dot: nil, isSelected: route == .home) {
                         route = .home
+                    }
+                    SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) {
+                        route = .calendar
                     }
                     ForEach(library.courseSections, id: \.title) { section in
                         SectionLabel(section.title)
@@ -141,6 +157,8 @@ struct Sidebar: View {
                             allowSelectingFiles: false,
                             allowSelectingDirectories: true
                         ) else { return }
+                        // Remembered for Settings' "Import Now".
+                        library.settings.notesFolder = folder.path
                         await library.importVault(at: folder)
                     }
                 }
@@ -155,6 +173,9 @@ struct Sidebar: View {
                     ProgressView("Importing…")
                 } else if let status = library.status {
                     Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
+                }
+                SidebarRow(title: "Settings", dot: nil, isSelected: route == .settings) {
+                    route = .settings
                 }
                 AccountPanel(account: library.account)
             }

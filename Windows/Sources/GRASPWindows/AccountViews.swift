@@ -2,8 +2,8 @@ import Foundation
 import GRASPCore
 import SwiftCrossUI
 
-/// The sidebar's account panel: who's signed in and how sync is doing, or
-/// a way to sign in.
+/// The sidebar's account line: how sync is doing, or a way to sign in.
+/// Sync Now and Sign Out live in Settings, as on the Mac.
 struct AccountPanel: View {
     let account: Account
     @State var showingSignIn = false
@@ -11,19 +11,10 @@ struct AccountPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let email = account.email {
-                Text("Signed in as \(email)").font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
-                if account.isSyncing {
-                    Text("Syncing…").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
-                } else if let status = account.status {
-                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
-                }
-                HStack(spacing: 8) {
-                    Button("Sync now") { Task { await account.syncNow() } }
-                        .disabled(account.isSyncing)
-                        .fixedSize()
-                    Button("Sign out") { Task { await account.signOut() } }
-                        .fixedSize()
-                }
+                Text(email).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary).lineLimit(1)
+                Text(account.isSyncing ? "Syncing…" : (account.status ?? "Signed in"))
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
             } else {
                 if let status = account.status {
                     Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)

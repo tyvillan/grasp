@@ -81,6 +81,10 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - `GeometryReader` can be offered an infinite width while SwiftCrossUI measures. Check `isFinite` before converting a size to `Int`, or the app crashes.
 - There's no grid (`LazyVGrid`); lay tiles out as rows of fixed-width views (see `HomeView.gridLayout`).
 - Tap targets (`onTapGesture`) cover their whole frame, so full-width clickable rows work.
+- **Sheets need the window to be up.** Presenting a `.sheet` during the first `onAppear` crashes with "This element does not have a XamlRoot" (WinUIBackend+Sheets.swift). From a click it's fine; from code, wait a moment first.
+- `Picker(of:selection:)` is a drop-down that labels options with `"\(option)"`, so give option types a `description` (see `Choice` in `EventEditor.swift`).
+- WinUI's `Toggle` draws in Windows' accent colour (pink here), not GRASP's amber. Use `SegmentedChoice` pills instead. Labels inside a row of pills need `.fixedSize()`.
+- `DatePicker` maps to WinUI's native date and time pickers and works well.
 
 **GRASPCore data**
 - `RowOperation.target`/`source` are **1-based**, as written (R₁); subtract 1 for array indices.
@@ -91,7 +95,9 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 |---|---|
 | `Launcher.swift` | The real `@main`: makes GUI launches safe (see gotchas), then runs `GRASPWindowsApp` |
 | `GRASPWindowsApp.swift` | The app; `ContentView` (sidebar of semesters/courses, then Home or a course), `CourseView` + `DeckColumn` (Mac-style deck column with All Cards), `DeckView` |
-| `HomeView.swift` | The dashboard: wordmark, greeting, figures, course tiles |
+| `HomeView.swift` | The dashboard: wordmark, greeting, figures with streak and daily-goal bar, upcoming exams, course tiles |
+| `CalendarScreen.swift`, `EventEditor.swift` | The calendar (month / week / agenda, workload dots) and the event sheet (study plans, delete), over GRASPCore's `CalendarActions` |
+| `SettingsScreen.swift`, `AppSettings.swift` | Settings, and this profile's preferences in `Profiles\<id>\settings.json` (daily goal, week start, calendar view, notes folder) |
 | `Theme.swift` | The Mac's `GRASPColor` palette and type scale, `SectionLabel`, `DueBadge` |
 | `Library.swift` | `@Observable` model: opens the profile's DB, semesters/courses/decks with the Mac's ordering, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
 | `ConsoleOutput.swift`, `WindowIcon.swift` | Windows plumbing: log file and CRT handler for GUI launches; puts the embedded icon on the window |
@@ -120,7 +126,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 1. ~~Sidebar layout bug~~ **Done.** Cause: `NavigationSplitView` on WinUI (see gotchas); the window is now an `HStack`.
 2. ~~Sign-in, first real test~~ **Done.** Tyler signed in with email + password and his whole library downloaded (16 courses, ~1,860 cards). The real data exposed the flat deck list, so the window now follows the Mac's layout: Home dashboard, semesters/courses sidebar, deck column. There's also an app icon and a desktop shortcut (`%USERPROFILE%\Desktop\GRASP.lnk` → the debug exe).
    - Still to check with real data: studying a big deck, and approving drafts in bulk.
-   - Home still lacks the Mac's upcoming exams, "pick up where you left off" card, recent decks and streak.
+   - Home still lacks the Mac's "pick up where you left off" card and recent decks.
+   - **Calendar and Settings: done** (Tyler asked for them ahead of overviews). Calendar logic moved into GRASPCore (`CalendarActions`, `StudyProgress`, marked `[needs Mac check]`). Not ported: the Mac's "Sync Calendar", which reads macOS Calendar. Settings covers what works on Windows; the Mac's focus timer, AI test questions and duplicate/off-topic sweeps get their settings when those features arrive.
 3. **Overviews.**
    - The Mac generates overviews and they sync as `noteOverview` rows, so after sign-in they're already in the Windows DB.
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.

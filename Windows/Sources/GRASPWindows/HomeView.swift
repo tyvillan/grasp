@@ -3,22 +3,32 @@ import GRASPCore
 import SwiftCrossUI
 
 /// The dashboard, after the Mac's `HomeView`: the wordmark, a greeting,
-/// a strip of figures, and a shelf of course tiles. The Mac's upcoming
-/// exams, "pick up where you left off" card, recent decks and streak come
-/// later.
+/// a strip of figures with today's goal, upcoming exams, and a shelf of
+/// course tiles. The Mac's "pick up where you left off" card and recent
+/// decks come later.
 struct HomeView: View {
     let library: Library
     @Binding var route: Route
+    /// Opens a course at a deck (nil for All Cards).
+    let onStudy: (String, String?) -> Void
 
     private static let horizontalPadding = 32.0
 
     var body: some View {
+        // Read so a review or a sync redraws the figures.
+        let _ = library.revision
+        let streak = library.studyStreak()
+        let upcoming = library.upcomingExams()
         // Outside the ScrollView, where the width is known, as on the Mac.
         GeometryReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    statStrip.padding(.top, 26)
+                    statStrip(streak: streak).padding(.top, 26)
+                    dailyGoalBar(streak: streak).padding(.top, 14)
+                    if !upcoming.isEmpty {
+                        upcomingExams(upcoming).padding(.top, 32)
+                    }
                     coursesShelf(width: proxy.size.width - 2 * Self.horizontalPadding)
                         .padding(.top, 34)
                 }
@@ -43,7 +53,7 @@ struct HomeView: View {
                     .foregroundColor(GRASPColor.textTertiary)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Welcome back")
+                Text(greeting)
                     .font(GRASPFont.display)
                     .foregroundColor(GRASPColor.textPrimary)
                 Text(Self.dateLine(Date()))
@@ -51,6 +61,14 @@ struct HomeView: View {
                     .foregroundColor(GRASPColor.textTertiary)
             }
         }
+    }
+
+    /// "Welcome back, Tyler", by the profile's first name. A fresh Windows
+    /// profile is called "Me", which reads oddly, so that one gets no name
+    /// until it's renamed in Settings.
+    private var greeting: String {
+        let first = library.profile.name.split(separator: " ").first.map(String.init) ?? ""
+        return first.isEmpty || first == "Me" ? "Welcome back" : "Welcome back, \(first)"
     }
 
     /// "Friday, September 25", as the Mac formats it.
@@ -62,18 +80,84 @@ struct HomeView: View {
 
     // MARK: - Figures
 
-    private var statStrip: some View {
-        let due = library.decks.reduce(0) { $0 + $1.due }
+    private var totalDue: Int { library.decks.reduce(0) { $0 + $1.due } }
+
+    private func statStrip(streak: StudyProgress.Streak) -> some View {
         let cards = library.decks.reduce(0) { $0 + $1.total }
         let courses = library.courseSections.reduce(0) { $0 + $1.courses.count }
         return HStack(spacing: 0) {
-            StatFigure(value: due, label: "Due today", tint: due > 0 ? GRASPColor.accent : nil)
+            StatFigure(value: totalDue, label: "Due today", tint: totalDue > 0 ? GRASPColor.accent : nil)
             statDivider
             StatFigure(value: cards, label: "Cards", tint: nil)
             statDivider
             StatFigure(value: courses, label: "Courses", tint: nil)
+            statDivider
+            // Teal only while it's alive: a grey 0 isn't news.
+            StatFigure(value: streak.days, label: "Day streak",
+                       tint: streak.days > 0 ? GRASPColor.success : nil)
             Spacer()
         }
+    }
+
+    /// Today's progress toward the daily goal (Settings), as on the Mac.
+    /// Hidden once the goal is met and nothing is left due: a finished day
+    /// should feel finished.
+    @ViewBuilder
+    private func dailyGoalBar(streak: StudyProgress.Streak) -> some View {
+        let goal = library.settings.dailyGoal
+        if goal > 0 && !(streak.reviewsToday >= goal && totalDue == 0) {
+            let met = streak.reviewsToday >= goal
+            let progress = min(1, Double(streak.reviewsToday) / Double(goal))
+            let barWidth = 420.0
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(met ? "Daily goal met -- \(streak.reviewsToday) cards reviewed"
+                             : "\(streak.reviewsToday) of \(goal) cards today")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(met ? GRASPColor.success : GRASPColor.textSecondary)
+                    if !streak.studiedToday && streak.days > 0 {
+                        Text("Study today to keep your \(streak.days)-day streak")
+                            .font(GRASPFont.meta)
+                            .foregroundColor(GRASPColor.accent)
+                    }
+                }
+                HStack(spacing: 0) {
+                    Rectangle().fill(met ? GRASPColor.success : GRASPColor.accent)
+                        .frame(width: (barWidth * progress).rounded(), height: 4.0)
+                    // hairlineStrong, not inset: on the black canvas an inset
+                    // track disappears and the bar reads as nothing.
+                    Rectangle().fill(GRASPColor.hairlineStrong)
+                        .frame(width: (barWidth * (1 - progress)).rounded(), height: 4.0)
+                }
+                .cornerRadius(2)
+            }
+        }
+    }
+
+    // MARK: - Upcoming exams
+
+    private func upcomingExams(_ events: [CalendarEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SectionLabel("Upcoming")
+                Spacer()
+                Text("Open calendar")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.accent)
+                    .onTapGesture { route = .calendar }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(events, id: \.id) { event in
+                    ExamAlertRow(
+                        event: event,
+                        courseName: event.courseId.flatMap { library.courseName($0) }
+                    ) {
+                        if let courseId = event.courseId { onStudy(courseId, event.deckId) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 720.0)
     }
 
     private var statDivider: some View {
@@ -169,6 +253,62 @@ private struct StatFigure: View {
                 .foregroundColor(GRASPColor.textTertiary)
         }
         .fixedSize()
+    }
+}
+
+/// One upcoming exam: what, which course, when, how long you have, and a
+/// way to start studying for it. The tint escalates as the date closes in:
+/// neutral a month out, amber inside a week, terracotta in the last three
+/// days, as on the Mac.
+private struct ExamAlertRow: View {
+    let event: CalendarEvent
+    let courseName: String?
+    let onStudy: () -> Void
+
+    private var tint: Color {
+        let days = event.daysAway(from: Date())
+        if days <= 3 { return GRASPColor.rejected }
+        if days <= 7 { return GRASPColor.accent }
+        return GRASPColor.textSecondary
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(tint).frame(width: 3.0, height: 34.0).cornerRadius(2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.displayTitle)
+                    .font(GRASPFont.rowTitle)
+                    .foregroundColor(GRASPColor.textPrimary)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(event.countdownText())
+                .font(GRASPFont.meta.weight(.semibold))
+                .foregroundColor(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(GRASPColor.inset)
+                .cornerRadius(10)
+            if event.courseId != nil {
+                Button("Study") { onStudy() }.fixedSize()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(GRASPColor.surface)
+        .cornerRadius(10)
+    }
+
+    private var detail: String {
+        var parts: [String] = []
+        if let courseName { parts.append(courseName) }
+        parts.append(CalendarFormat.string(event.startsAt, template: "MMMd"))
+        if let timeText = event.timeText { parts.append(timeText) }
+        return parts.joined(separator: " · ")
     }
 }
 
