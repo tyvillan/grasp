@@ -234,9 +234,15 @@ final class Library {
     // MARK: - Cards
 
     func cards(inDecks deckIds: [String]) -> [Card] {
-        _ = revision
-        return (try? database.queue.read { try CardActions.cards(inDecks: deckIds, db: $0) }) ?? []
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = cardsCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try CardActions.cards(inDecks: deckIds, db: $0) }) ?? []
+        cardsCache = (key, value)
+        return value
     }
+
+    /// The last card list read, for the same reason as `overviewCache`.
+    @ObservationIgnored private var cardsCache: (key: String, value: [Card])?
 
     func editCard(_ cardId: String, front: String, back: String) {
         change { _ = try CardActions.updateText(cardId: cardId, front: front, back: back, db: $0) }
@@ -354,13 +360,54 @@ final class Library {
     /// tab reads them. Overviews are written on the Mac (or later, here via
     /// Ollama) and arrive with sync.
     func deckOverview(inDecks deckIds: [String]) -> DeckOverview? {
-        _ = revision
-        return try? database.queue.read { db in
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = overviewCache, cached.key == key { return cached.value }
+        let value = try? database.queue.read { db in
             try DeckOverviewReader.read(deckIds: deckIds, db: db, metrics: Self.diagramMetrics, cache: diagramCache)
         }
+        overviewCache = (key, value)
+        return value
     }
 
+    /// The last overview read. A deck's page redraws on every click inside
+    /// it, and assembling a course's lessons (clean-up, card links, figures)
+    /// is the heaviest read in the app; it only changes with `revision`.
+    @ObservationIgnored private var overviewCache: (key: String, value: DeckOverview?)?
     @ObservationIgnored private let diagramCache = DiagramLayoutCache()
+
+    /// The overview run for each course, if one has started.
+    private(set) var overviewJobs: [String: OverviewJob] = [:]
+
+    func overviewJob(forCourse courseId: String?) -> OverviewJob? {
+        overviewJobs[courseId ?? ""]
+    }
+
+    /// Starts writing overviews for these notes with the local model.
+    func writeOverviews(_ notes: [(materialId: String, title: String)], courseId: String?) {
+        guard overviewJob(forCourse: courseId).map({ $0.isFinished }) ?? true else { return }
+        let job = OverviewJob(courseId: courseId, headline: "Starting the local model…")
+        overviewJobs[courseId ?? ""] = job
+        job.run(notes, library: self)
+    }
+
+    func dismissOverviewJob(forCourse courseId: String?) {
+        overviewJobs[courseId ?? ""] = nil
+    }
+
+    /// A lesson was just saved: show it, and sync it to the Mac.
+    func overviewsChanged() {
+        reload()
+        account.noteLocalChange()
+    }
+
+    /// Whether the local model is up, and which one GRASP would use.
+    func localModel() async -> String? {
+        let probe = OllamaGenerator()
+        guard await probe.isAvailable else { return nil }
+        return OllamaModelChoice.resolve(
+            preferred: UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey),
+            installed: await probe.installedModels())
+    }
 
     /// Concept-map labels at 12 pt Segoe UI: about 6.6 pt a character on
     /// average, rounded up so a label never clips.

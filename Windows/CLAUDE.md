@@ -27,6 +27,7 @@ scripts\windows\grasp.cmd check       # core smoke test
 scripts\windows\grasp.cmd test        # full core test suite (vault tests skip off the Mac)
 scripts\windows\grasp.cmd app         # build and open the Windows app (blocks while it runs)
 scripts\windows\grasp.cmd app-build   # build the app without opening it
+scripts\windows\grasp.cmd app-release # optimised build (~12 min, recompiles WinUI); the desktop shortcut runs this one
 scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Automation
 ```
 
@@ -55,6 +56,13 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - **Screenshots instead:** capture just the GRASP window with .NET `Graphics.CopyFromScreen` over its window rectangle (or `PrintWindow`), and look at the PNG.
 - **Screens that need clicks:** add a temporary env-var hook for the check, e.g. `if ProcessInfo.processInfo.environment["DEMO_STUDY"] != nil { ... }`, that opens a sheet or starts a session. Screenshot it, then **remove the hook before committing.**
 - **Ask Tyler to click through** anything that needs real input, such as sign-in.
+
+## Speed (Tyler found the app slow)
+
+- **Tyler runs the release build.** `Desktop\GRASP.lnk` points at `Windows\.build\out\Products\Release-windows-x86_64\GRASPWindows.exe`. After shipping a change, rebuild it with `grasp.cmd app-release` (close his window first). Debug is for development only: it opened the window in 7.1 s against 2.4 s, and switched screens about twice as slowly.
+- **Cost is per view on screen, not per modifier.** Measured (debug): each Text or shape costs about 2.5 ms to create, `.padding`/`.background`/`.cornerRadius`/`.onTapGesture` add almost nothing, and every screen change also pays about 150 ms to re-measure the whole window (sidebar included). Database reads are 0-30 ms and not the problem.
+- So: keep rows light (no per-row `Menu`: 50 card rows with one each took 1.6 s), page long lists (cards show 25 at a time), and put actions in a sheet or a single toolbar instead of on every row.
+- `Library.cards(inDecks:)` and `deckOverview(inDecks:)` cache on `revision`; follow that for any other read a body makes.
 
 ## Windows gotchas already learned (don't rediscover these)
 
@@ -136,13 +144,11 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - Still to check with real data: studying a big deck, and approving drafts in bulk.
    - Home still lacks the Mac's "pick up where you left off" card and recent decks.
    - **Calendar and Settings: done** (Tyler asked for them ahead of overviews). Calendar logic moved into GRASPCore (`CalendarActions`, `StudyProgress`, marked `[needs Mac check]`). Not ported: the Mac's "Sync Calendar", which reads macOS Calendar. Settings covers what works on Windows; the Mac's focus timer, AI test questions and duplicate/off-topic sweeps get their settings when those features arrive.
-3. **Overviews: read-only reader done.** Deck page has Cards / Overview tabs; lessons render one at a time (picker, Previous/Next) with objectives, sections, key terms with is/isn't and matrix contrasts, figures (row reduction, two lines, 2x2 transform), worked examples, checks, code, takeaways and the concept map. Assembly is GRASPCore's `DeckOverviewReader` (moved from the Mac's OverviewStore, `[needs Mac check]`). Still to do: writing overviews via Ollama, the Mac's \"On this page\" rail, and polishing the concept map against real diagrams.
+3. **Overviews: read-only reader done.** Deck page has Cards / Overview tabs; lessons render one at a time (picker, Previous/Next) with objectives, sections, key terms with is/isn't and matrix contrasts, figures (row reduction, two lines, 2x2 transform), worked examples, checks, code, takeaways and the concept map. Assembly is GRASPCore's `DeckOverviewReader` (moved from the Mac's OverviewStore, `[needs Mac check]`). Writing works too: Ollama 0.34 and `qwen3.5:9b` are installed on this PC (RTX 5060, 8 GB; about 2.5 minutes a lecture). `OverviewJob` runs the Mac's per-note loop over GRASPCore's `OverviewWriter` (`[needs Mac check]`), loading the model first. Still to do: the Mac's \"On this page\" rail, and polishing the concept map against real diagrams.
    - The Mac generates overviews and they sync as `noteOverview` rows, so after sign-in they're already in the Windows DB.
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.
-   - Generating overviews on Windows (via Ollama) comes later.
 4. **The rest of the Mac feature set**, roughly in order of use:
    - ~~card editing and draft review, search~~ **Done:** the Cards tab lists cards (status filter, text filter, 50 at a time) with a menu to edit, approve, suspend, move, revert an AI refinement or delete, plus New Card; Search (sidebar) finds cards and notes and opens a note to read. Logic is GRASPCore's `CardActions` (`[needs Mac check]`). Not yet: multi-select bulk actions, duplicate review, AI refine.
-   - writing overviews via Ollama: blocked until Ollama is installed on this PC (it isn't yet)
    - Learn mode (`LearnEngine`), custom tests (`TestBuilder`)
    - calendar and exams
    - profile picker and PIN lock, settings screen

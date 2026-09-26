@@ -5,6 +5,7 @@
 #   scripts\windows\grasp.cmd build    swift build
 #   scripts\windows\grasp.cmd app      builds and opens the GRASP app (Windows\)
 #   scripts\windows\grasp.cmd app-build  builds the app without opening it
+#   scripts\windows\grasp.cmd app-release  optimised build, for everyday use
 #   scripts\windows\grasp.cmd uia-probe  finds which control crashes UI Automation
 #
 # Anything after the command is passed on to swift.
@@ -19,7 +20,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('check', 'test', 'build', 'app', 'app-build', 'uia-probe')]
+    [ValidateSet('check', 'test', 'build', 'app', 'app-build', 'app-release', 'uia-probe')]
     [string]$Command = 'check',
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [string[]]$SwiftArgs = @()
@@ -220,6 +221,16 @@ try {
             $appFlags = Get-AppLinkFlags
             Step 'swift build --product GRASPWindows'
             & swift build @flags @appFlags @SwiftArgs --product GRASPWindows
+        }
+        'app-release' {
+            # The optimised build the desktop shortcut runs. A debug build
+            # of SwiftCrossUI is many times slower -- seconds to open a
+            # screen -- so day-to-day use should never run one.
+            Set-Location (Join-Path $Repo 'Windows')
+            $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
+            $appFlags = Get-AppLinkFlags
+            Step 'swift build -c release --product GRASPWindows'
+            & swift build @flags @appFlags -c release @SwiftArgs --product GRASPWindows
         }
         'uia-probe' {
             Set-Location (Join-Path $Repo 'Windows')

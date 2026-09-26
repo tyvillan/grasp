@@ -3,9 +3,8 @@ import GRASPCore
 import SwiftCrossUI
 
 /// A deck's cards, after the Mac's `DeckDetailView` list: a rail down each
-/// row tinted by status, the front and back, and a menu to edit, approve,
-/// suspend, move or delete. Filters by status and by text; a click opens
-/// the card to edit.
+/// row tinted by status, and the front and back. Filters by status and by
+/// text; a click opens the card to edit, approve, suspend, move or delete.
 struct CardList: View {
     let library: Library
     let scope: DeckScope
@@ -16,7 +15,7 @@ struct CardList: View {
     @State var shown = CardList.pageSize
     @State var editing: CardEditorTarget?
 
-    static let pageSize = 50
+    static let pageSize = 25
 
     var body: some View {
         let cards = library.cards(inDecks: scope.deckIds)
@@ -45,7 +44,7 @@ struct CardList: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(matching.prefix(shown)), id: \.id) { card in
-                        CardRowView(library: library, card: card, scope: scope) {
+                        CardRowView(card: card) {
                             editing = CardEditorTarget(card: card, deckId: nil)
                         }
                     }
@@ -69,7 +68,7 @@ struct CardList: View {
         }
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
-                CardEditor(library: library, target: editing, deckChoices: deckChoices) { self.editing = nil }
+                CardEditor(library: library, target: editing, deckChoices: deckChoices, moveTargets: moveTargets) { self.editing = nil }
             }
         }
     }
@@ -85,6 +84,12 @@ struct CardList: View {
     private var deckChoices: [Choice] {
         let courseId = library.decks.first { scope.deckIds.contains($0.id) }?.courseId
         return library.decks.filter { $0.courseId == courseId }.map { Choice(id: $0.id, description: $0.name) }
+    }
+
+    /// Where a card can move: the course's other decks. From All Cards
+    /// every deck is a target; moving a card into its own deck does nothing.
+    private var moveTargets: [Choice] {
+        deckChoices.filter { !(scope.deckIds.count == 1 && scope.deckIds[0] == $0.id) }
     }
 }
 
@@ -110,38 +115,35 @@ enum CardFilter: CaseIterable, Equatable {
     }
 }
 
-/// One card in the list.
+/// One card in the list. Deliberately light: a list page builds every row
+/// at once, and a row with its own drop-down menu and badge views cost
+/// about 30 ms each, so a 50-card page took well over a second to open.
+/// The actions live in the card's window instead, a click away.
 private struct CardRowView: View {
-    let library: Library
     let card: Card
-    let scope: DeckScope
     let open: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 // The Mac's rail: pending amber, suspended rose, approved a
                 // muted gold -- so a long list can be scanned for what
                 // still needs a look without reading a word.
                 Rectangle().fill(railTint).frame(width: 2.0, height: 34.0)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(card.front)
-                        .font(GRASPFont.rowTitle)
-                        .foregroundColor(GRASPColor.textPrimary)
-                    Text(card.back)
-                        .font(GRASPFont.body)
-                        .foregroundColor(GRASPColor.textSecondary)
-                        .lineLimit(3)
+                    Text(card.front).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                    Text(card.back).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary).lineLimit(2)
                 }
-                .onTapGesture(perform: open)
                 Spacer()
-                badges
-                actions
+                if let label = statusLabel {
+                    Text(label).font(GRASPFont.badge).foregroundColor(railTint).fixedSize()
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
         }
+        .onTapGesture(perform: open)
     }
 
     private var railTint: Color {
@@ -152,56 +154,15 @@ private struct CardRowView: View {
         }
     }
 
-    @ViewBuilder
-    private var badges: some View {
-        HStack(spacing: 6) {
-            if card.status == .draft {
-                Chip(text: "Pending", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
-            } else if card.status == .suspended {
-                Chip(text: "Suspended", tint: GRASPColor.rejected, soft: GRASPColor.rejectedSoft)
-            }
-            if card.isContextRefined {
-                Chip(text: "AI refined", tint: GRASPColor.success, soft: GRASPColor.successSoft)
-            }
-            if card.origin == .aiGenerated {
-                Chip(text: "AI", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
-            }
-        }
-    }
-
-    private var actions: some View {
-        Menu("•••") {
-            Button("Edit…") { open() }
-            if card.status == .draft {
-                Button("Approve") { library.setStatus([card.id], to: .active) }
-            }
-            Button(card.status == .suspended ? "Reactivate" : "Suspend") {
-                library.setStatus([card.id], to: card.status == .suspended ? .active : .suspended)
-            }
-            if card.isContextRefined {
-                Button("Revert AI Refinement") { library.revertContextRefinement(card.id) }
-            }
-            let targets = moveTargets
-            if !targets.isEmpty {
-                Menu("Move to") {
-                    ForEach(targets, id: \.id) { deck in
-                        Button(deck.name) { library.moveCards([card.id], toDeck: deck.id) }
-                    }
-                }
-            }
-            Button("Delete") { library.deleteCards([card.id]) }
-        }
-        .fixedSize()
-    }
-
-    /// The course's other decks. From All Cards every deck is a target;
-    /// moving a card into the deck it's already in does nothing.
-    private var moveTargets: [DeckRow] {
-        let courseId = library.decks.first { scope.deckIds.contains($0.id) }?.courseId
-        return library.decks.filter { $0.courseId == courseId && !(scope.deckIds.count == 1 && scope.deckIds[0] == $0.id) }
+    private var statusLabel: String? {
+        var parts: [String] = []
+        if card.status == .draft { parts.append("PENDING") }
+        if card.status == .suspended { parts.append("SUSPENDED") }
+        if card.isContextRefined { parts.append("AI REFINED") }
+        if card.origin == .aiGenerated { parts.append("AI") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
-
 // MARK: - Editing
 
 struct CardEditorTarget {
@@ -217,6 +178,7 @@ struct CardEditor: View {
     let library: Library
     let target: CardEditorTarget
     let deckChoices: [Choice]
+    let moveTargets: [Choice]
     let close: () -> Void
 
     @State var front: String
@@ -224,10 +186,12 @@ struct CardEditor: View {
     @State var deckId: String?
     @State var confirmingDelete = false
 
-    init(library: Library, target: CardEditorTarget, deckChoices: [Choice], close: @escaping () -> Void) {
+    init(library: Library, target: CardEditorTarget, deckChoices: [Choice], moveTargets: [Choice],
+         close: @escaping () -> Void) {
         self.library = library
         self.target = target
         self.deckChoices = deckChoices
+        self.moveTargets = moveTargets
         self.close = close
         _front = State(wrappedValue: target.card?.front ?? "")
         _back = State(wrappedValue: target.card?.back ?? "")
@@ -268,6 +232,9 @@ struct CardEditor: View {
                     .font(GRASPFont.meta)
                     .foregroundColor(GRASPColor.textTertiary)
             }
+            if let card = target.card {
+                CardActionsBar(library: library, card: card, moveTargets: moveTargets, close: close)
+            }
             if confirmingDelete {
                 HStack(spacing: 8) {
                     Text("Delete this card? Its review history is kept.")
@@ -305,6 +272,46 @@ struct CardEditor: View {
         } else if let deckId {
             library.createCard(front: front, back: back, deckId: deckId)
         }
+        close()
+    }
+}
+
+/// What you can do to a card besides editing its text, each applied at once
+/// and closing the window: approve or suspend, move to another deck, revert
+/// an AI rewrite.
+private struct CardActionsBar: View {
+    let library: Library
+    let card: Card
+    let moveTargets: [Choice]
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if card.status == .draft {
+                Button("Approve") { apply { library.setStatus([card.id], to: .active) } }.fixedSize()
+            }
+            Button(card.status == .suspended ? "Reactivate" : "Suspend") {
+                apply { library.setStatus([card.id], to: card.status == .suspended ? .active : .suspended) }
+            }
+            .fixedSize()
+            if card.isContextRefined {
+                Button("Revert AI Rewrite") { apply { library.revertContextRefinement(card.id) } }.fixedSize()
+            }
+            Spacer()
+            if !moveTargets.isEmpty {
+                Text("Move to").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()
+                Picker(of: moveTargets, selection: Binding(
+                    get: { nil },
+                    set: { choice in
+                        if let id = choice?.id { apply { library.moveCards([card.id], toDeck: id) } }
+                    }
+                ))
+            }
+        }
+    }
+
+    private func apply(_ action: () -> Void) {
+        action()
         close()
     }
 }

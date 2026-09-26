@@ -365,8 +365,10 @@ private struct DayCell: View {
                     .font(GRASPFont.meta)
                     .foregroundColor(GRASPColor.textTertiary)
             }
-            Spacer()
         }
+        // Top-aligned by the frame rather than a trailing Spacer: 42 cells
+        // redraw together, and every view in them costs (see CLAUDE.md).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(5)
         .background(isInMonth ? GRASPColor.canvas : GRASPColor.inset)
         .onHover { isHovering = $0 }

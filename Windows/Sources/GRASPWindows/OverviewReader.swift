@@ -4,8 +4,8 @@ import SwiftCrossUI
 
 /// The Overview tab of a deck: the notes behind it, each taught as a
 /// lesson, in reading order. The Windows counterpart of the Mac's
-/// `DeckOverviewView`, over GRASPCore's `DeckOverviewReader`. Read-only for
-/// now: overviews are written on the Mac and arrive with sync.
+/// `DeckOverviewView`, over GRASPCore's `DeckOverviewReader`. Lessons come
+/// from the Mac through sync, or are written here with Ollama.
 ///
 /// One lesson at a time, with a picker and Previous / Next, where the Mac
 /// stacks every lesson on one page beside an "On this page" rail. A
@@ -15,15 +15,31 @@ struct OverviewPane: View {
     let library: Library
     let scope: DeckScope
     @State var lessonIndex = 0
+    /// Notes waiting on "Write Them" in the confirmation panel.
+    @State var pending: [MissingNote]?
+    /// Which local model would write, or nil when Ollama isn't up. Checked
+    /// when the tab opens, since the server can come and go.
+    @State var model: String?
+    @State var checkedModel = false
 
     /// The reading measure, as on the Mac: near 75 characters a line.
     static let measure = 680.0
 
     var body: some View {
         let overview = library.deckOverview(inDecks: scope.deckIds)
+        let job = library.overviewJob(forCourse: courseId)
         VStack(alignment: .leading, spacing: 0) {
-            if let overview, !overview.staleEntries.isEmpty {
-                staleNotice(count: overview.staleEntries.count)
+            if let job {
+                JobStrip(job: job) { library.dismissOverviewJob(forCourse: courseId) }
+            } else if let pending {
+                ConfirmWrite(count: pending.count, model: model ?? "the local model",
+                             onCancel: { self.pending = nil },
+                             onConfirm: {
+                                 library.writeOverviews(pending.map { ($0.materialId, $0.title) }, courseId: courseId)
+                                 self.pending = nil
+                             })
+            } else if let overview, !overview.staleEntries.isEmpty {
+                staleNotice(overview.staleEntries)
             }
             if let overview, !overview.entries.isEmpty {
                 let index = min(lessonIndex, overview.entries.count - 1)
@@ -43,7 +59,25 @@ struct OverviewPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onChange(of: scope.id) { lessonIndex = 0 }
+        .onChange(of: scope.id) {
+            lessonIndex = 0
+            pending = nil
+        }
+        .task {
+            model = await library.localModel()
+            checkedModel = true
+        }
+    }
+
+    /// The course this deck (or All Cards) belongs to: one overview run per
+    /// course at a time.
+    private var courseId: String? {
+        if scope.id.hasPrefix("all:") { return String(scope.id.dropFirst(4)) }
+        return library.decks.first { $0.id == scope.id }?.courseId
+    }
+
+    private var canWrite: Bool {
+        model != nil && library.overviewJob(forCourse: courseId).map(\.isFinished) != false
     }
 
     private func lessonPage(_ overview: DeckOverview, index: Int) -> some View {
@@ -87,14 +121,20 @@ struct OverviewPane: View {
         .background(GRASPColor.surface)
     }
 
-    private func staleNotice(count: Int) -> some View {
+    private func staleNotice(_ stale: [RenderedOverview]) -> some View {
         HStack(spacing: 10) {
-            Text(count == 1
-                 ? "1 note changed since its overview was written. Rewrite it from the Mac to bring it up to date."
-                 : "\(count) notes changed since their overviews were written. Rewrite them from the Mac to bring them up to date.")
+            Text(stale.count == 1
+                 ? "1 note changed since its overview was written."
+                 : "\(stale.count) notes changed since their overviews were written.")
                 .font(GRASPFont.body)
                 .foregroundColor(GRASPColor.textSecondary)
             Spacer()
+            if canWrite {
+                Button(stale.count == 1 ? "Rewrite It…" : "Rewrite Them…") {
+                    pending = stale.map { MissingNote(materialId: $0.materialId, title: $0.title) }
+                }
+                .fixedSize()
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -102,7 +142,7 @@ struct OverviewPane: View {
     }
 
     private func footer(_ overview: DeckOverview) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if overview.handTypedCardCount > 0 {
                 Text("\(overview.handTypedCardCount) card"
                      + "\(overview.handTypedCardCount == 1 ? " in this deck was" : "s in this deck were") "
@@ -111,14 +151,24 @@ struct OverviewPane: View {
             if !overview.writable.isEmpty {
                 Text("\(overview.writable.count) more note\(overview.writable.count == 1 ? " has" : "s have") "
                      + "no overview yet.")
+                if canWrite {
+                    Button("Write \(overview.writable.count) More…") { pending = missing(overview) }
+                        .fixedSize()
+                }
             }
         }
         .font(GRASPFont.meta)
         .foregroundColor(GRASPColor.textTertiary)
+        .padding(.top, 32)
+    }
+
+    private func missing(_ overview: DeckOverview) -> [MissingNote] {
+        overview.writable.map { MissingNote(materialId: $0.materialId, title: LessonText.noteTitle($0.title)) }
     }
 
     private func emptyState(_ overview: DeckOverview?) -> some View {
-        VStack(spacing: 8) {
+        let writable = overview?.writable ?? []
+        return VStack(spacing: 10) {
             Text(overview?.writable.isEmpty == false || overview == nil ? "No overview yet" : "Nothing to summarise")
                 .font(GRASPFont.title)
                 .foregroundColor(GRASPColor.textPrimary)
@@ -126,7 +176,12 @@ struct OverviewPane: View {
                 .font(GRASPFont.body)
                 .foregroundColor(GRASPColor.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420.0)
+                .frame(maxWidth: 440.0)
+            if !writable.isEmpty && canWrite, let overview {
+                Button("Write Overview\(writable.count == 1 ? "" : "s")…") { pending = missing(overview) }
+                    .fixedSize()
+                    .padding(.top, 4)
+            }
         }
         .padding(28)
     }
@@ -137,9 +192,13 @@ struct OverviewPane: View {
         }
         let writable = overview.writable.count
         if writable > 0 {
-            return "An overview is a short lesson written from each note: the key ideas, terms, worked "
-                + "examples and a concept map. Write them from this deck's Overview tab on your Mac and "
-                + "they'll appear here after the next sync."
+            let what = "GRASP can read the \(writable) note\(writable == 1 ? "" : "s") behind this deck and write "
+                + "a short lesson for each: the key ideas, terms, worked examples and a concept map."
+            if !checkedModel { return what }
+            return model == nil
+                ? what + " That needs Ollama running on this PC (Settings shows its status), or write them on "
+                    + "your Mac and they'll arrive with the next sync."
+                : what
         }
         let tooShort = overview.missing.filter { if case .tooShort = $0.reason { return true } else { return false } }.count
         let tooLong = overview.missing.count - tooShort
@@ -151,6 +210,99 @@ struct OverviewPane: View {
             parts.append("\(tooLong) note\(tooLong == 1 ? " is" : "s are") long enough to be reference material rather than a lecture")
         }
         return parts.joined(separator: ", and ") + "."
+    }
+}
+
+struct MissingNote {
+    let materialId: String
+    let title: String
+}
+
+/// "Write overviews for 5 notes?" with what it costs, before a run that
+/// can take a long while -- the one action long enough that the estimate
+/// can change the decision.
+private struct ConfirmWrite: View {
+    let count: Int
+    let model: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(count == 1 ? "Write an overview?" : "Write overviews for \(count) notes?")
+                    .font(GRASPFont.rowTitle.weight(.semibold))
+                    .foregroundColor(GRASPColor.textPrimary)
+                Text("\(model) on this PC writes each lesson: sections, key terms, worked examples and a concept "
+                     + "map. Takes \(estimate). You can keep using GRASP while it runs, and stop it any time.")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textSecondary)
+            }
+            Spacer()
+            Button("Cancel") { onCancel() }.fixedSize()
+            Button(count == 1 ? "Write It" : "Write Them") { onConfirm() }.fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(GRASPColor.surface)
+    }
+
+    /// About two minutes a note with qwen3.5:9b on this PC's RTX 5060
+    /// (the Mac's laptop estimate is four).
+    private var estimate: String {
+        let minutes = count * 2
+        if minutes < 90 { return "roughly \(minutes) minutes" }
+        return "roughly \(Int((Double(minutes) / 60).rounded())) hours"
+    }
+}
+
+/// The run in progress: what it's doing, how far along, and Stop -- or,
+/// once it's done, what went wrong.
+private struct JobStrip: View {
+    let job: OverviewJob
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(job.isFinished ? (job.failure ?? "Overviews written.") : job.headline)
+                    .font(GRASPFont.body)
+                    .foregroundColor(job.failure != nil ? GRASPColor.rejected : GRASPColor.textSecondary)
+                Spacer()
+                if job.isFinished {
+                    Button("Dismiss") { dismiss() }.fixedSize()
+                } else {
+                    Text("\(Int(job.fraction * 100))%")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
+                        .fixedSize()
+                    Button("Stop") { job.stop() }.fixedSize()
+                }
+            }
+            if !job.isFinished {
+                ProgressBar(fraction: job.fraction)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(GRASPColor.accentSoft)
+    }
+}
+
+/// A thin amber bar. GeometryReader rather than WinUI's ProgressBar, which
+/// draws in Windows' accent colour.
+private struct ProgressBar: View {
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width.isFinite ? Double(proxy.size.width) : 0
+            ZStack(alignment: .leading) {
+                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: width, height: 4.0)
+                Rectangle().fill(GRASPColor.accent).frame(width: max(0, min(1, fraction)) * width, height: 4.0)
+            }
+        }
+        .frame(height: 4.0)
     }
 }
 
@@ -653,4 +805,16 @@ struct LessonChoice: Equatable, CustomStringConvertible {
     let index: Int
     let title: String
     var description: String { "\(index + 1). \(LessonText.clean(title))" }
+}
+
+extension LessonText {
+    /// "Row Reduction" from `2026-08-27_Lecture-02_Row-Reduction`, the way a
+    /// lesson's fallback title reads.
+    static func noteTitle(_ fileName: String) -> String {
+        let topic = FilenameParsing.parse(fileNameWithoutExtension: fileName).topic?
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return (topic?.isEmpty == false ? topic : nil) ?? fileName
+    }
 }
