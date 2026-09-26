@@ -87,6 +87,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - WinUI's `Toggle` draws in Windows' accent colour (pink here), not GRASP's amber. Use `SegmentedChoice` pills instead. Labels inside a row of pills need `.fixedSize()`.
 - `DatePicker` maps to WinUI's native date and time pickers and works well.
 - **Don't use SwiftCrossUI's URL schemes (`urlSchemes` / `onOpenURL`).** WinUIBackend delivers a redirected link on a background thread, and the open window crashes in `dispatch.dll` (0xc000001d) about 15 s later while the second copy hangs. `SignInLink.swift` does it instead: it registers `grasp://` in HKCU itself, and a link launch hands the URL to the open window through `sign-in-link.txt` and quits before SwiftCrossUI starts.
+- **Stack size:** Windows gives the main thread 1 MB; SwiftCrossUI's recursive layout of a long overview lesson overflowed it (0xc00000fd in swiftCore, crash appears a few seconds after the screen opens, often with no backtrace). `grasp.ps1` links with `/STACK:16777216`. Keep it, and still prefer small named subviews over one giant body.
+- A process that crashed stays alive for several seconds while it writes its backtrace, so check for a window handle and the crash text, not just `HasExited`.
 - `print` output doesn't reach `GRASPWindows.log` promptly (stdout is fully buffered there); write to stderr for debugging.
 
 **GRASPCore data**
@@ -132,7 +134,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - Still to check with real data: studying a big deck, and approving drafts in bulk.
    - Home still lacks the Mac's "pick up where you left off" card and recent decks.
    - **Calendar and Settings: done** (Tyler asked for them ahead of overviews). Calendar logic moved into GRASPCore (`CalendarActions`, `StudyProgress`, marked `[needs Mac check]`). Not ported: the Mac's "Sync Calendar", which reads macOS Calendar. Settings covers what works on Windows; the Mac's focus timer, AI test questions and duplicate/off-topic sweeps get their settings when those features arrive.
-3. **Overviews.**
+3. **Overviews: read-only reader done.** Deck page has Cards / Overview tabs; lessons render one at a time (picker, Previous/Next) with objectives, sections, key terms with is/isn't and matrix contrasts, figures (row reduction, two lines, 2x2 transform), worked examples, checks, code, takeaways and the concept map. Assembly is GRASPCore's `DeckOverviewReader` (moved from the Mac's OverviewStore, `[needs Mac check]`). Still to do: writing overviews via Ollama, the Mac's \"On this page\" rail, and polishing the concept map against real diagrams.
    - The Mac generates overviews and they sync as `noteOverview` rows, so after sign-in they're already in the Windows DB.
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.
    - Generating overviews on Windows (via Ollama) comes later.

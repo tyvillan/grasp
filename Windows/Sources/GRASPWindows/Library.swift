@@ -298,6 +298,29 @@ final class Library {
     /// Where this profile's library and log live, for Settings.
     var libraryFolder: URL { supportDirectory }
 
+    // MARK: - Overviews
+
+    /// The lessons behind these decks, one per note, as the Mac's Overview
+    /// tab reads them. Overviews are written on the Mac (or later, here via
+    /// Ollama) and arrive with sync.
+    func deckOverview(inDecks deckIds: [String]) -> DeckOverview? {
+        _ = revision
+        return try? database.queue.read { db in
+            try DeckOverviewReader.read(deckIds: deckIds, db: db, metrics: Self.diagramMetrics, cache: diagramCache)
+        }
+    }
+
+    @ObservationIgnored private let diagramCache = DiagramLayoutCache()
+
+    /// Concept-map labels at 12 pt Segoe UI: about 6.6 pt a character on
+    /// average, rounded up so a label never clips.
+    private static let diagramMetrics: DiagramMetrics = {
+        var metrics = DiagramMetrics()
+        metrics.characterWidth = 7
+        metrics.lineHeight = 16
+        return metrics
+    }()
+
     // MARK: - Figures
 
     /// The first row reduction in these decks' notes, walked step by step.

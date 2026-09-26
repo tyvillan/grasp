@@ -31,6 +31,10 @@ enum GRASPColor {
     static let textSecondary = adaptive(light: 0x5F5E6D, dark: 0x9695A6)
     static let textTertiary = adaptive(light: 0x8C8A97, dark: 0x646374)
 
+    /// The lesson figures' two line colours (the Mac's `FigurePalette`).
+    static let figureBlue = adaptive(light: 0x2F6FD0, dark: 0x58C4DD)
+    static let figureAmber = adaptive(light: 0xC47A0B, dark: 0xF2B84B)
+
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         .adaptive(light: Color(rgb: light), dark: Color(rgb: dark))
     }

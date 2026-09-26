@@ -326,16 +326,47 @@ struct DeckView: View {
     let library: Library
     let scope: DeckScope
     @State var session: [Card]? = nil
+    /// Cards or Overview, as on the Mac. Kept when you switch decks, so
+    /// reading through a course's lessons stays on the Overview tab.
+    @State var tab: DeckTab = .cards
+
+    enum DeckTab: String, CaseIterable {
+        case cards = "Cards"
+        case overview = "Overview"
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     SectionLabel(scope.courseName)
                     Text(scope.title).font(GRASPFont.display).foregroundColor(GRASPColor.textPrimary)
                     Text(summary).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
                 }
+                Spacer()
+                // A study session owns the page until it ends.
+                if session == nil {
+                    SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
 
+            if tab == .overview && session == nil {
+                OverviewPane(library: library, scope: scope)
+            } else {
+                cardsPage
+            }
+        }
+        // A new deck starts fresh, not mid-way through the last one's session.
+        .onChange(of: scope.id) { session = nil }
+    }
+
+    private var cardsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
                 if let cards = session {
                     StudySessionView(library: library, cards: cards) { session = nil }
                 } else {
@@ -364,8 +395,6 @@ struct DeckView: View {
             }
             .padding(28)
         }
-        // A new deck starts fresh, not mid-way through the last one's session.
-        .onChange(of: scope.id) { session = nil }
     }
 
     private var summary: String {

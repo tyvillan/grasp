@@ -13,7 +13,9 @@ struct RowReductionView: View {
     var body: some View {
         let stepCount = reduction.steps.count
         VStack(alignment: .leading, spacing: 12) {
-            Text("ROW REDUCTION FROM YOUR NOTES").font(.caption).foregroundColor(.gray)
+            Text(reduction.fromNote ? "ROW REDUCTION FROM YOUR NOTES" : "ROW REDUCTION")
+                .font(GRASPFont.eyebrow)
+                .foregroundColor(GRASPColor.textTertiary)
             if stepCount == 0 {
                 MatrixGrid(matrix: reduction.states[0], changedRow: nil)
             } else {

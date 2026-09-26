@@ -185,7 +185,11 @@ function Get-AppLinkFlags {
     $res = Join-Path $Repo '.build-windows\GRASP.res'
     & rc.exe /nologo /fo $res (Join-Path $Repo 'Windows\Resources\GRASP.rc')
     if ($LASTEXITCODE -ne 0) { throw 'Compiling the app icon failed.' }
-    return @('-Xlinker', $res, '-Xlinker', '/SUBSYSTEM:WINDOWS', '-Xlinker', '/ENTRY:mainCRTStartup')
+    # /STACK: Windows gives the main thread 1 MB by default. SwiftCrossUI
+    # lays views out recursively, and a debug build of a long overview
+    # lesson overflowed that (0xc00000fd in swiftCore); macOS gives 8 MB.
+    return @('-Xlinker', $res, '-Xlinker', '/SUBSYSTEM:WINDOWS', '-Xlinker', '/ENTRY:mainCRTStartup',
+             '-Xlinker', '/STACK:16777216')
 }
 
 # --- Swift -----------------------------------------------------------------
