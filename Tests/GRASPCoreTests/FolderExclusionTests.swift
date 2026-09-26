@@ -42,7 +42,7 @@ struct FolderExclusionTests {
         Team dues
         Fifty dollars per semester, due before the first scrimmage of the season.
         """
-        try note.write(to: courseDir.appendingPathComponent("Schedule.md"), atomically: true, encoding: .utf8)
+        try note.write(to: courseDir.appendingPathComponent("Schedule.md"), atomically: false, encoding: .utf8)
 
         // Best effort: listing Windows' Temp folder can fail on some
         // entry another program has locked, and `root` is fine there.

@@ -234,7 +234,7 @@ struct DeckManagementTests {
         // First import creates "Week 1" via the chapter parsed from the
         // filename.
         let fileURL = dir.appendingPathComponent("2026-01-01_Week-01_First.md")
-        try note.write(to: fileURL, atomically: true, encoding: .utf8)
+        try note.write(to: fileURL, atomically: false, encoding: .utf8)
         _ = try await scanner.importPaths([fileURL], intoCourse: courseId)
 
         let originalDeckId = try await db.queue.read { conn in
@@ -250,7 +250,7 @@ struct DeckManagementTests {
         // A second note that parses to the same "Week 1" chapter must
         // create a fresh deck, not resurrect the tombstoned one.
         let secondURL = dir.appendingPathComponent("2026-01-02_Week-01_Second.md")
-        try note.write(to: secondURL, atomically: true, encoding: .utf8)
+        try note.write(to: secondURL, atomically: false, encoding: .utf8)
         _ = try await scanner.importPaths([secondURL], intoCourse: courseId)
 
         try await db.queue.read { conn in

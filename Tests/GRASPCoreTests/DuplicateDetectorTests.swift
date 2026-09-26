@@ -133,8 +133,8 @@ struct DuplicateDetectorTests {
         """
         let firstURL = dir.appendingPathComponent("Lecture.md")
         let secondURL = dir.appendingPathComponent("Canvas-Summary.md")
-        try note.write(to: firstURL, atomically: true, encoding: .utf8)
-        try note.write(to: secondURL, atomically: true, encoding: .utf8)
+        try note.write(to: firstURL, atomically: false, encoding: .utf8)
+        try note.write(to: secondURL, atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         let first = try await scanner.importPaths([firstURL], intoCourse: courseId)

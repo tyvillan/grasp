@@ -144,7 +144,7 @@ struct TimelineTests {
 
         Some content long enough to be worth a card, definitely.
         """
-        try note.write(to: courseDir.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+        try note.write(to: courseDir.appendingPathComponent("Note.md"), atomically: false, encoding: .utf8)
 
         // Best effort: listing Windows' Temp folder can fail on some
         // entry another program has locked, and `root` is fine there.

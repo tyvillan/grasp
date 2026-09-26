@@ -42,7 +42,7 @@ struct ManualImportTests {
         low solute concentration to an area of high solute concentration.
         """
         let fileURL = dir.appendingPathComponent("Extra Credit Notes.md")
-        try note.write(to: fileURL, atomically: true, encoding: .utf8)
+        try note.write(to: fileURL, atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         let summary = try await scanner.importPaths([fileURL], intoCourse: courseId)
@@ -65,9 +65,9 @@ struct ManualImportTests {
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
         try "Mitosis\nCell division producing two genetically identical daughter cells"
-            .write(to: dir.appendingPathComponent("Top Level.md"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("Top Level.md"), atomically: false, encoding: .utf8)
         try "Meiosis\nCell division producing four genetically distinct gametes"
-            .write(to: nested.appendingPathComponent("Nested.md"), atomically: true, encoding: .utf8)
+            .write(to: nested.appendingPathComponent("Nested.md"), atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         let summary = try await scanner.importPaths([dir], intoCourse: courseId)
@@ -85,7 +85,7 @@ struct ManualImportTests {
         let courseId = try await makeCourse(db)
         let dir = try makeTempDir()
         try "Term\nA definition long enough to actually count as one, honestly"
-            .write(to: dir.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("Note.md"), atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         _ = try await scanner.importPaths([dir], intoCourse: courseId)
@@ -108,7 +108,7 @@ struct ManualImportTests {
         let dir = try makeTempDir()
         let fileURL = dir.appendingPathComponent("Note.md")
         try "Term\nA definition long enough to actually count as one, honestly"
-            .write(to: fileURL, atomically: true, encoding: .utf8)
+            .write(to: fileURL, atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         _ = try await scanner.importPaths([fileURL], intoCourse: courseId)
@@ -123,7 +123,7 @@ struct ManualImportTests {
         let db = try GRASPDatabase.inMemory()
         let dir = try makeTempDir()
         try "Term\nA definition long enough to actually count as one, honestly"
-            .write(to: dir.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("Note.md"), atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         let summary = try await scanner.importPaths([dir], intoCourse: "not-a-real-course")
@@ -186,9 +186,9 @@ struct ManualImportTests {
         let db = try GRASPDatabase.inMemory()
         let courseId = try await makeCourse(db)
         let dir = try makeTempDir()
-        try "not a note".write(to: dir.appendingPathComponent("readme.txt"), atomically: true, encoding: .utf8)
+        try "not a note".write(to: dir.appendingPathComponent("readme.txt"), atomically: false, encoding: .utf8)
         try "Term\nA definition long enough to actually count as one, honestly"
-            .write(to: dir.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+            .write(to: dir.appendingPathComponent("Note.md"), atomically: false, encoding: .utf8)
 
         let scanner = VaultScanner(database: db)
         let summary = try await scanner.importPaths([dir], intoCourse: courseId)

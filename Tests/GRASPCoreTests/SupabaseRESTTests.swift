@@ -8,7 +8,7 @@ import FoundationNetworking
 /// Answers requests from a script instead of the network, and records
 /// what was asked -- so the REST client's requests can be checked against
 /// what Supabase expects, and its parsing against what Supabase sends.
-final class StubSupabase: URLProtocol, @unchecked Sendable {
+final class StubSupabase: URLProtocol {
     struct Reply {
         var status: Int
         var body: String

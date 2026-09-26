@@ -35,7 +35,7 @@ struct VaultScannerSizeGuardTests {
         Porosity
         The percentage of open space within a rock or sediment sample
         """
-        try normalNote.write(to: courseDir.appendingPathComponent("Test Course 01.01.25.md"), atomically: true, encoding: .utf8)
+        try normalNote.write(to: courseDir.appendingPathComponent("Test Course 01.01.25.md"), atomically: false, encoding: .utf8)
 
         // A synthetic "textbook": the same real pair repeated past the
         // guard's threshold, padded with filler so total word count
@@ -46,7 +46,7 @@ struct VaultScannerSizeGuardTests {
         while bigBody.split(separator: " ").count < 8500 {
             bigBody += repeatedPair
         }
-        try bigBody.write(to: courseDir.appendingPathComponent("Textbook.md"), atomically: true, encoding: .utf8)
+        try bigBody.write(to: courseDir.appendingPathComponent("Textbook.md"), atomically: false, encoding: .utf8)
 
         return root
     }
