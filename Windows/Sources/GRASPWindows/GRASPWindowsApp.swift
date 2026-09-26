@@ -3,9 +3,15 @@ import Foundation
 import GRASPCore
 import SwiftCrossUI
 
-@main
+/// Started by `Launcher`, which sets up logging first.
 struct GRASPWindowsApp: App {
     @State var opened = Result { try Library() }
+
+    init() {
+        #if os(Windows)
+        WindowIcon.applyWhenWindowAppears()
+        #endif
+    }
 
     var body: some Scene {
         WindowGroup("GRASP") {

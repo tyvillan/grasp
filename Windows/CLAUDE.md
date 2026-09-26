@@ -67,7 +67,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - There's no `setenv` on Windows.
 - **File locks:** atomic writes (`write(to:atomically: true)`) and moving a file that's still open both fail with Win32 error 32 when anything, including Defender or the indexer, has the file open. Write non-atomically, and close databases before moving them.
 - **Ollama:** `URLSession` doesn't fail fast on a refused connection; it waits out the whole timeout. `OllamaGenerator` probes `isAvailable` (2 s) first. Do the same for any new network call to a local server.
-- **Console output:** a GUI exe started without a console can fail-fast in `ucrtbase` when it writes to stdout. Launch test copies with stdout/stderr redirected.
+- **GUI launches (shortcuts, Explorer):** `grasp.ps1` links the exe as a GUI program (`/SUBSYSTEM:WINDOWS`) with the icon from `Windows\Resources\GRASP.rc`, so there's no console. With no console, SwiftCrossUI's `earlySetup()` hands the C runtime an invalid argument, which by default fail-fasts (`0xc0000409` in `ucrtbase`, offset `0x11858`) before any window appears. `Launcher.swift` is the real `@main`: it installs a no-op `_set_invalid_parameter_handler` and redirects stdout/stderr to `GRASPWindows.log` **before** SwiftCrossUI starts (`App.init()` is too late). Keep it that way.
+- Test copies started from a script still work best with stdout/stderr redirected.
 
 **SwiftCrossUI**
 - `ForEach` over ranges needs `id: \.self`.
@@ -75,6 +76,11 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - Buttons in an `HStack` get squeezed to "…" unless you add `.fixedSize()`.
 - `setSizeLimits` is unimplemented on WinUI, so window minimum and maximum sizes are ignored.
 - Some modifiers (`.background`, `.cornerRadius`) exist but behave slightly differently from SwiftUI. Check each change with a screenshot.
+- **Don't use `NavigationSplitView`:** on WinUI it lays the sidebar out using the pane's stale width on first layout, which clips it. The window is a plain `HStack` with a fixed-width sidebar.
+- `Divider()` stretches to whatever width it's offered, so it widens any container without a fixed width.
+- `GeometryReader` can be offered an infinite width while SwiftCrossUI measures. Check `isFinite` before converting a size to `Int`, or the app crashes.
+- There's no grid (`LazyVGrid`); lay tiles out as rows of fixed-width views (see `HomeView.gridLayout`).
+- Tap targets (`onTapGesture`) cover their whole frame, so full-width clickable rows work.
 
 **GRASPCore data**
 - `RowOperation.target`/`source` are **1-based**, as written (R₁); subtract 1 for array indices.
@@ -83,8 +89,13 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 
 | File | Role |
 |---|---|
-| `GRASPWindowsApp.swift` | `@main`, `ContentView` (split view: deck sidebar and detail), `DeckView` |
-| `Library.swift` | `@Observable` model: opens the profile's DB, deck list query, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
+| `Launcher.swift` | The real `@main`: makes GUI launches safe (see gotchas), then runs `GRASPWindowsApp` |
+| `GRASPWindowsApp.swift` | The app; `ContentView` (sidebar of semesters/courses, then Home or a course), `CourseView` + `DeckColumn` (Mac-style deck column with All Cards), `DeckView` |
+| `HomeView.swift` | The dashboard: wordmark, greeting, figures, course tiles |
+| `Theme.swift` | The Mac's `GRASPColor` palette and type scale, `SectionLabel`, `DueBadge` |
+| `Library.swift` | `@Observable` model: opens the profile's DB, semesters/courses/decks with the Mac's ordering, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
+| `ConsoleOutput.swift`, `WindowIcon.swift` | Windows plumbing: log file and CRT handler for GUI launches; puts the embedded icon on the window |
+| `Resources/GRASP.ico`, `GRASP.rc` | The app icon (from the iPhone AppIcon, via `scripts\windows\make-icon.ps1`), embedded by `grasp.ps1` |
 | `StudySessionView.swift` | Flashcards with the four FSRS grades |
 | `RowReductionView.swift` | Steps through a row reduction from the notes: `MatrixGrid`, `Bracket` shape |
 | `Account.swift` | Sign-in/sign-up (email + password), linking the profile, sync every 120 s and 8 s after a change, reloading on pulled changes |
@@ -106,15 +117,10 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 
 ## Open issues, in order
 
-1. **Sidebar layout bug** (check #10). Since `AccountPanel` was added at the bottom of the sidebar `VStack`, the whole sidebar column sits about 120 px left and is clipped: "Import notes folder…" shows as "…der…", and the detail pane is centred about 120 px right.
-   - Suspect: the panel's `Divider()` asking for an unbounded width.
-   - Try giving the panel or the divider an explicit width, or swap the divider for a 1 px `Rectangle` with a fixed width, and confirm with screenshots.
-   - It doesn't happen on the Mac (AppKit backend).
-2. **Sign-in, first real test.**
-   - Tyler's Mac account uses Google. He first sets a password on the Mac (Settings → Account & Sync → Password for other devices), then signs in here with the same email.
-   - Expected: the account already has a library, so this PC downloads it and his Mac decks appear.
-   - Sync errors show under the account panel. Fix what breaks.
-   - Downloaded decks may be large, so check that the deck list and study screens cope with real data.
+1. ~~Sidebar layout bug~~ **Done.** Cause: `NavigationSplitView` on WinUI (see gotchas); the window is now an `HStack`.
+2. ~~Sign-in, first real test~~ **Done.** Tyler signed in with email + password and his whole library downloaded (16 courses, ~1,860 cards). The real data exposed the flat deck list, so the window now follows the Mac's layout: Home dashboard, semesters/courses sidebar, deck column. There's also an app icon and a desktop shortcut (`%USERPROFILE%\Desktop\GRASP.lnk` → the debug exe).
+   - Still to check with real data: studying a big deck, and approving drafts in bulk.
+   - Home still lacks the Mac's upcoming exams, "pick up where you left off" card, recent decks and streak.
 3. **Overviews.**
    - The Mac generates overviews and they sync as `noteOverview` rows, so after sign-in they're already in the Windows DB.
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.

@@ -172,6 +172,21 @@ function Invoke-UiaProbe([string]$Bin) {
     Write-Host "Logs and results: $logs"
 }
 
+# --- App linking -----------------------------------------------------------
+
+# Linker flags for GRASPWindows.exe: embed the app icon
+# (Windows\Resources\GRASP.rc) and link as a GUI program, so starting it
+# from a shortcut shows GRASP's icon and no console window. The Windows
+# package builds no DLLs of its own, so these only reach the exe. Every
+# command that builds the app uses them, so none quietly relinks it as a
+# console program without its icon.
+function Get-AppLinkFlags {
+    $res = Join-Path $Repo '.build-windows\GRASP.res'
+    & rc.exe /nologo /fo $res (Join-Path $Repo 'Windows\Resources\GRASP.rc')
+    if ($LASTEXITCODE -ne 0) { throw 'Compiling the app icon failed.' }
+    return @('-Xlinker', $res, '-Xlinker', '/SUBSYSTEM:WINDOWS', '-Xlinker', '/ENTRY:mainCRTStartup')
+}
+
 # --- Swift -----------------------------------------------------------------
 
 Push-Location $Repo
@@ -188,8 +203,9 @@ try {
             # platform conditions, Swift 6.4's build system still compiles
             # the Linux-only Gtk targets and fails on a missing gtk/gtk.h.
             $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
+            $appFlags = Get-AppLinkFlags
             Step 'swift run GRASPWindows'
-            & swift run @flags @SwiftArgs GRASPWindows
+            & swift run @flags @appFlags @SwiftArgs GRASPWindows
         }
         'uia-probe' {
             Set-Location (Join-Path $Repo 'Windows')
@@ -197,7 +213,8 @@ try {
             Step 'Building the probe and the app'
             & swift build @flags --product UIAProbe
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            & swift build @flags --product GRASPWindows
+            $appFlags = Get-AppLinkFlags
+            & swift build @flags @appFlags --product GRASPWindows
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $bin = Get-ChildItem -Path .build -Recurse -Filter UIAProbe.exe |
                 Sort-Object LastWriteTime -Descending | Select-Object -First 1 |

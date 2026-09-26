@@ -1,0 +1,4 @@
+// The app icon, embedded in GRASPWindows.exe so Explorer, the taskbar and
+// shortcuts show it. grasp.ps1 compiles this with rc.exe and links it in.
+// GRASP.ico comes from scripts\windows\make-icon.ps1.
+1 ICON "GRASP.ico"
