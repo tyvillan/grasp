@@ -103,6 +103,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 | `HomeView.swift` | The dashboard: wordmark, greeting, figures with streak and daily-goal bar, upcoming exams, course tiles |
 | `CalendarScreen.swift`, `EventEditor.swift` | The calendar (month / week / agenda, workload dots) and the event sheet (study plans, delete), over GRASPCore's `CalendarActions` |
 | `SettingsScreen.swift`, `AppSettings.swift` | Settings, and this profile's preferences in `Profiles\<id>\settings.json` (daily goal, week start, calendar view, notes folder) |
+| `CardList.swift`, `SearchScreen.swift` | The Cards tab's list and card editor; Search over cards and notes, and the note reader |
+| `OverviewReader.swift`, `LessonFigureViews.swift` | The Overview tab: lessons, callouts, figures, concept map |
 | `Theme.swift` | The Mac's `GRASPColor` palette and type scale, `SectionLabel`, `DueBadge` |
 | `Library.swift` | `@Observable` model: opens the profile's DB, semesters/courses/decks with the Mac's ordering, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
 | `ConsoleOutput.swift`, `WindowIcon.swift` | Windows plumbing: log file and CRT handler for GUI launches; puts the embedded icon on the window |
@@ -139,7 +141,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.
    - Generating overviews on Windows (via Ollama) comes later.
 4. **The rest of the Mac feature set**, roughly in order of use:
-   - card editing and draft review, search
+   - ~~card editing and draft review, search~~ **Done:** the Cards tab lists cards (status filter, text filter, 50 at a time) with a menu to edit, approve, suspend, move, revert an AI refinement or delete, plus New Card; Search (sidebar) finds cards and notes and opens a note to read. Logic is GRASPCore's `CardActions` (`[needs Mac check]`). Not yet: multi-select bulk actions, duplicate review, AI refine.
+   - writing overviews via Ollama: blocked until Ollama is installed on this PC (it isn't yet)
    - Learn mode (`LearnEngine`), custom tests (`TestBuilder`)
    - calendar and exams
    - profile picker and PIN lock, settings screen

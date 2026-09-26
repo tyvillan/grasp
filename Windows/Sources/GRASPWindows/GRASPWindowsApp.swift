@@ -35,6 +35,7 @@ enum Route: Hashable {
     case home
     case calendar
     case settings
+    case search
     case course(String)
 }
 
@@ -74,6 +75,8 @@ struct ContentView: View {
             CalendarScreen(library: library, onStudy: study)
         case .settings:
             SettingsScreen(library: library)
+        case .search:
+            SearchScreen(library: library, onOpenDeck: study)
         case .course(let courseId):
             if let course = library.course(courseId) {
                 CourseView(
@@ -125,6 +128,9 @@ struct Sidebar: View {
                     }
                     SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) {
                         route = .calendar
+                    }
+                    SidebarRow(title: "Search", dot: nil, isSelected: route == .search) {
+                        route = .search
                     }
                     ForEach(library.courseSections, id: \.title) { section in
                         SectionLabel(section.title)
@@ -387,10 +393,7 @@ struct DeckView: View {
                         Text("New cards start as drafts. Approve them to study them.")
                             .foregroundColor(GRASPColor.textSecondary)
                     }
-                }
-
-                if let reduction = library.rowReduction(inDecks: scope.deckIds) {
-                    RowReductionView(reduction: reduction)
+                    CardList(library: library, scope: scope)
                 }
             }
             .padding(28)

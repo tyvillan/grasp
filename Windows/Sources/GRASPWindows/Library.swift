@@ -231,6 +231,56 @@ final class Library {
         account.noteLocalChange()
     }
 
+    // MARK: - Cards
+
+    func cards(inDecks deckIds: [String]) -> [Card] {
+        _ = revision
+        return (try? database.queue.read { try CardActions.cards(inDecks: deckIds, db: $0) }) ?? []
+    }
+
+    func editCard(_ cardId: String, front: String, back: String) {
+        change { _ = try CardActions.updateText(cardId: cardId, front: front, back: back, db: $0) }
+    }
+
+    func setStatus(_ cardIds: [String], to status: CardStatus) {
+        change { try CardActions.setStatus(cardIds, to: status, db: $0) }
+    }
+
+    func deleteCards(_ cardIds: [String]) {
+        change { try CardActions.delete(cardIds, db: $0) }
+    }
+
+    func moveCards(_ cardIds: [String], toDeck deckId: String) {
+        change { try CardActions.move(cardIds, toDeck: deckId, db: $0) }
+    }
+
+    func revertContextRefinement(_ cardId: String) {
+        change { try CardActions.revertContextRefinement(cardId, db: $0) }
+    }
+
+    func createCard(front: String, back: String, deckId: String) {
+        change { _ = try CardActions.createManual(front: front, back: back, deckId: deckId, db: $0) }
+    }
+
+    // MARK: - Search
+
+    func searchNotes(_ query: String) -> [CardActions.NoteMatch] {
+        (try? database.queue.read { try CardActions.searchNotes(query, db: $0) }) ?? []
+    }
+
+    func searchCards(_ query: String) -> [CardActions.CardMatch] {
+        (try? database.queue.read { try CardActions.searchCards(query, db: $0) }) ?? []
+    }
+
+    /// A note's text, for reading a search hit in full.
+    func note(_ materialId: String) -> (title: String, text: String)? {
+        try? database.queue.read { db in
+            guard let material = try Material.fetchOne(db, key: materialId),
+                  let note = try NoteText.fetchOne(db, key: materialId) else { return nil }
+            return (DeckOverviewReader.lessonHeading(for: material).title, note.raw)
+        }
+    }
+
     // MARK: - Calendar
 
     func calendarEvents(from start: Date, to end: Date) -> [CalendarEvent] {
@@ -320,25 +370,6 @@ final class Library {
         metrics.lineHeight = 16
         return metrics
     }()
-
-    // MARK: - Figures
-
-    /// The first row reduction in these decks' notes, walked step by step.
-    func rowReduction(inDecks deckIds: [String]) -> RowReductionSteps? {
-        try? database.queue.read { db in
-            for material in try OverviewQueries.materials(forDecks: deckIds, db: db) {
-                guard let note = try NoteText.fetchOne(db, key: material.id) else { continue }
-                for text in [note.raw, note.reflowed] {
-                    if let walk = NoteMatrices.walkthroughs(in: text).first {
-                        let walked = walk.start.walk(walk.steps)
-                        return RowReductionSteps(states: walked.states, steps: walked.steps,
-                                                 fromNote: walk.stepsFromNote)
-                    }
-                }
-            }
-            return nil
-        }
-    }
 }
 
 /// A row reduction ready to draw: `states[0]` is the starting matrix and
