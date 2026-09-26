@@ -29,59 +29,76 @@ struct ContentView: View {
     @State var selectedDeckId: String?
     @Environment(\.chooseFile) var chooseFile
 
+    // A plain HStack rather than NavigationSplitView. WinUI's SplitView
+    // can't be dragged to resize anyway, and on first layout SwiftCrossUI
+    // positions the sidebar using the pane's stale width (10 px), which
+    // left the whole column shifted ~115 px left and clipped until the
+    // window was next resized.
     var body: some View {
-        NavigationSplitView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Decks").font(.headline)
-                if library.decks.isEmpty {
-                    Text("No decks yet. Import a notes folder, or try the sample notes.")
-                        .foregroundColor(.gray)
-                } else {
-                    List(library.decks, selection: $selectedDeckId) { deck in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(deck.name)
-                            Text(deckSubtitle(deck)).font(.caption).foregroundColor(.gray)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                Spacer()
-                Button("Import notes folder…") {
-                    Task {
-                        guard let folder = await chooseFile(
-                            title: "Choose your notes folder",
-                            defaultButtonLabel: "Import",
-                            allowSelectingFiles: false,
-                            allowSelectingDirectories: true
-                        ) else { return }
-                        await library.importVault(at: folder)
-                    }
-                }
-                .disabled(library.isImporting)
-                Button("Try sample notes") {
-                    Task { await library.importSample() }
-                }
-                .disabled(library.isImporting)
-                if library.isImporting {
-                    ProgressView("Importing…")
-                } else if let status = library.status {
-                    Text(status).font(.caption)
-                }
-                AccountPanel(account: library.account)
-            }
-            .padding(12)
-            .frame(minWidth: 240)
-        } detail: {
-            // Nothing picked yet: show the first deck rather than a blank pane.
-            if let deck = library.decks.first(where: { $0.id == selectedDeckId }) ?? library.decks.first {
-                DeckView(library: library, deck: deck)
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: 240.0)
+                .frame(maxHeight: .infinity)
+                .background(Color.gray.opacity(0.08))
+            Divider()
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Decks").font(.headline)
+            if library.decks.isEmpty {
+                Text("No decks yet. Import a notes folder, or try the sample notes.")
+                    .foregroundColor(.gray)
             } else {
-                VStack(spacing: 8) {
-                    Text("GRASP").font(.largeTitle)
-                    Text("Pick a deck to study it.").foregroundColor(.gray)
+                List(library.decks, selection: $selectedDeckId) { deck in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(deck.name)
+                        Text(deckSubtitle(deck)).font(.caption).foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(24)
             }
+            Spacer()
+            Button("Import notes folder…") {
+                Task {
+                    guard let folder = await chooseFile(
+                        title: "Choose your notes folder",
+                        defaultButtonLabel: "Import",
+                        allowSelectingFiles: false,
+                        allowSelectingDirectories: true
+                    ) else { return }
+                    await library.importVault(at: folder)
+                }
+            }
+            .disabled(library.isImporting)
+            Button("Try sample notes") {
+                Task { await library.importSample() }
+            }
+            .disabled(library.isImporting)
+            if library.isImporting {
+                ProgressView("Importing…")
+            } else if let status = library.status {
+                Text(status).font(.caption)
+            }
+            AccountPanel(account: library.account)
+        }
+        .padding(12)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        // Nothing picked yet: show the first deck rather than a blank pane.
+        if let deck = library.decks.first(where: { $0.id == selectedDeckId }) ?? library.decks.first {
+            DeckView(library: library, deck: deck)
+        } else {
+            VStack(spacing: 8) {
+                Text("GRASP").font(.largeTitle)
+                Text("Pick a deck to study it.").foregroundColor(.gray)
+            }
+            .padding(24)
         }
     }
 

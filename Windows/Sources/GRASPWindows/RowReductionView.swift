@@ -25,8 +25,9 @@ struct RowReductionView: View {
                     MatrixGrid(matrix: reduction.states[step + 1], changedRow: changedRow(reduction.steps[step]))
                 }
                 HStack(spacing: 8) {
-                    Button("Previous") { step -= 1 }.disabled(step == 0)
-                    Button("Next") { step += 1 }.disabled(step >= stepCount - 1)
+                    // .fixedSize(): a row of buttons otherwise squeezes one to "N…".
+                    Button("Previous") { step -= 1 }.disabled(step == 0).fixedSize()
+                    Button("Next") { step += 1 }.disabled(step >= stepCount - 1).fixedSize()
                 }
                 if step == stepCount - 1, reduction.states[stepCount].isReducedEchelon {
                     Text("Reduced echelon form: every pivot is 1, alone in its column.")
