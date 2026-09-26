@@ -20,136 +20,331 @@ struct GRASPWindowsApp: App {
                 .padding(24)
             }
         }
-        .defaultSize(width: 1040, height: 700)
+        .defaultSize(width: 1100, height: 720)
     }
 }
 
+/// Where the main pane is: the dashboard, or one course.
+enum Route: Hashable {
+    case home
+    case course(String)
+}
+
+/// The window, laid out like the Mac's `ContentView`: a sidebar of
+/// semesters and courses, then a detail pane. A course's detail splits into
+/// a deck column and the selected deck's page.
+///
+/// A plain HStack rather than NavigationSplitView: WinUI's SplitView can't
+/// be dragged to resize anyway, and on first layout SwiftCrossUI positions
+/// its sidebar using the pane's stale width, which clipped the column.
 struct ContentView: View {
     let library: Library
-    @State var selectedDeckId: String?
-    @Environment(\.chooseFile) var chooseFile
+    @State var route: Route = .home
+    /// The deck picked in each course's deck column, so switching courses
+    /// and back keeps your place. A missing entry means "All Cards".
+    @State var selectedDecks: [String: String] = [:]
 
-    // A plain HStack rather than NavigationSplitView. WinUI's SplitView
-    // can't be dragged to resize anyway, and on first layout SwiftCrossUI
-    // positions the sidebar using the pane's stale width (10 px), which
-    // left the whole column shifted ~115 px left and clipped until the
-    // window was next resized.
     var body: some View {
         HStack(spacing: 0) {
-            sidebar
+            Sidebar(library: library, route: $route)
                 .frame(width: 240.0)
                 .frame(maxHeight: .infinity)
-                .background(Color.gray.opacity(0.08))
-            Divider()
+                .background(GRASPColor.sidebar)
+            Rectangle().fill(GRASPColor.hairline).frame(width: 1.0)
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(GRASPColor.canvas)
         }
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Decks").font(.headline)
-            if library.decks.isEmpty {
-                Text("No decks yet. Import a notes folder, or try the sample notes.")
-                    .foregroundColor(.gray)
-            } else {
-                List(library.decks, selection: $selectedDeckId) { deck in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(deck.name)
-                        Text(deckSubtitle(deck)).font(.caption).foregroundColor(.gray)
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-            Spacer()
-            Button("Import notes folder…") {
-                Task {
-                    guard let folder = await chooseFile(
-                        title: "Choose your notes folder",
-                        defaultButtonLabel: "Import",
-                        allowSelectingFiles: false,
-                        allowSelectingDirectories: true
-                    ) else { return }
-                    await library.importVault(at: folder)
-                }
-            }
-            .disabled(library.isImporting)
-            Button("Try sample notes") {
-                Task { await library.importSample() }
-            }
-            .disabled(library.isImporting)
-            if library.isImporting {
-                ProgressView("Importing…")
-            } else if let status = library.status {
-                Text(status).font(.caption)
-            }
-            AccountPanel(account: library.account)
-        }
-        .padding(12)
     }
 
     @ViewBuilder
     private var detail: some View {
-        // Nothing picked yet: show the first deck rather than a blank pane.
-        if let deck = library.decks.first(where: { $0.id == selectedDeckId }) ?? library.decks.first {
-            DeckView(library: library, deck: deck)
-        } else {
-            VStack(spacing: 8) {
-                Text("GRASP").font(.largeTitle)
-                Text("Pick a deck to study it.").foregroundColor(.gray)
+        switch route {
+        case .home:
+            HomeView(library: library, route: $route)
+        case .course(let courseId):
+            if let course = library.course(courseId) {
+                CourseView(
+                    library: library,
+                    course: course,
+                    selectedDeckId: Binding(
+                        get: { selectedDecks[courseId] },
+                        set: { selectedDecks[courseId] = $0 }
+                    )
+                )
+            } else {
+                // The course went away (archived or deleted on another device).
+                HomeView(library: library, route: $route)
             }
-            .padding(24)
         }
-    }
-
-    private func deckSubtitle(_ deck: DeckRow) -> String {
-        var parts = [deck.courseName, "\(deck.total) cards"]
-        if deck.due > 0 { parts.append("\(deck.due) due") }
-        if deck.drafts > 0 { parts.append("\(deck.drafts) drafts") }
-        return parts.joined(separator: " · ")
     }
 }
 
-/// A deck: approve its drafts, study what's due, and see the row
-/// reduction from its notes.
+// MARK: - Sidebar
+
+/// "Home", then courses under their semesters, newest first, as on the Mac.
+/// The list scrolls, so a big library can't push the window off the
+/// screen; import and the account panel stay pinned at the bottom.
+struct Sidebar: View {
+    let library: Library
+    @Binding var route: Route
+    @Environment(\.chooseFile) var chooseFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("GRASP")
+                .font(GRASPFont.title)
+                .foregroundColor(GRASPColor.textPrimary)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    SidebarRow(title: "Home", dot: nil, isSelected: route == .home) {
+                        route = .home
+                    }
+                    ForEach(library.courseSections, id: \.title) { section in
+                        SectionLabel(section.title)
+                            .padding(.horizontal, 10)
+                            .padding(.top, 14)
+                            .padding(.bottom, 4)
+                        ForEach(section.courses, id: \.id) { course in
+                            SidebarRow(
+                                title: course.name,
+                                dot: course.colorHex.map { Color(hex: $0) } ?? GRASPColor.hairlineStrong,
+                                isSelected: route == .course(course.id)
+                            ) {
+                                route = .course(course.id)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+            }
+            .frame(maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                Button("Import notes folder…") {
+                    Task {
+                        guard let folder = await chooseFile(
+                            title: "Choose your notes folder",
+                            defaultButtonLabel: "Import",
+                            allowSelectingFiles: false,
+                            allowSelectingDirectories: true
+                        ) else { return }
+                        await library.importVault(at: folder)
+                    }
+                }
+                .disabled(library.isImporting)
+                if library.decks.isEmpty {
+                    Button("Try sample notes") {
+                        Task { await library.importSample() }
+                    }
+                    .disabled(library.isImporting)
+                }
+                if library.isImporting {
+                    ProgressView("Importing…")
+                } else if let status = library.status {
+                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
+                }
+                AccountPanel(account: library.account)
+            }
+            .padding(12)
+        }
+    }
+}
+
+/// One sidebar row: an optional colour dot in a fixed slot (so every name
+/// starts on the same x), then the name. Selected rows use GRASP's amber.
+struct SidebarRow: View {
+    let title: String
+    let dot: Color?
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if let dot {
+                Circle().fill(dot).frame(width: 7.0, height: 7.0).frame(width: 16.0)
+            }
+            Text(title)
+                .font(GRASPFont.rowTitle)
+                .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isSelected ? GRASPColor.accentSoft : Color.clear)
+        .cornerRadius(6)
+        .onTapGesture(perform: action)
+    }
+}
+
+// MARK: - Course
+
+/// A course: its deck column, then the selected deck's page. "All Cards"
+/// sits above the real decks and covers every deck in the course.
+struct CourseView: View {
+    let library: Library
+    let course: Course
+    @Binding var selectedDeckId: String?
+
+    var body: some View {
+        let decks = library.decks(inCourse: course.id)
+        let allCards = DeckScope(allCardsIn: decks, courseId: course.id, courseName: course.name)
+        let selected = decks.first { $0.id == selectedDeckId }.map(DeckScope.init(deck:)) ?? allCards
+
+        HStack(spacing: 0) {
+            DeckColumn(
+                decks: decks,
+                allCards: allCards,
+                selectedId: selected.id,
+                select: { selectedDeckId = $0 }
+            )
+            .frame(width: 260.0)
+            .frame(maxHeight: .infinity)
+            .background(GRASPColor.surface)
+            Rectangle().fill(GRASPColor.hairlineStrong).frame(width: 1.0)
+            if decks.isEmpty {
+                VStack(spacing: 8) {
+                    Text(course.name).font(GRASPFont.title).foregroundColor(GRASPColor.textPrimary)
+                    Text("No decks yet. Import this course's notes to make some.")
+                        .foregroundColor(GRASPColor.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                DeckView(library: library, scope: selected)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// The course's decks, laid out like the Mac's `DeckListView`: name on the
+/// left, then the due badge and the card count in a right-aligned column.
+struct DeckColumn: View {
+    let decks: [DeckRow]
+    let allCards: DeckScope
+    let selectedId: String
+    /// Called with a deck id, or nil for "All Cards".
+    let select: (String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel("Decks")
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    DeckColumnRow(
+                        name: "All Cards", isAllCards: true, cards: allCards.total, due: allCards.due,
+                        isSelected: selectedId == allCards.id
+                    ) { select(nil) }
+                    ForEach(decks, id: \.id) { deck in
+                        DeckColumnRow(
+                            name: deck.name, isAllCards: false, cards: deck.total, due: deck.due,
+                            isSelected: selectedId == deck.id
+                        ) { select(deck.id) }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+}
+
+struct DeckColumnRow: View {
+    let name: String
+    let isAllCards: Bool
+    let cards: Int
+    let due: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(isAllCards ? GRASPFont.rowTitle.weight(.semibold) : GRASPFont.rowTitle)
+                .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
+                .lineLimit(1)
+            Spacer()
+            if due > 0 {
+                DueBadge(count: due)
+            }
+            Text("\(cards)")
+                .font(GRASPFont.meta)
+                .foregroundColor(GRASPColor.textTertiary)
+                .frame(width: 30.0, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isSelected ? GRASPColor.accentSoft : Color.clear)
+        .cornerRadius(6)
+        .onTapGesture(perform: action)
+    }
+}
+
+// MARK: - Deck page
+
+/// A deck (or a course's All Cards): study what's due, approve drafts, and
+/// see the row reduction from its notes.
 struct DeckView: View {
     let library: Library
-    let deck: DeckRow
+    let scope: DeckScope
     @State var session: [Card]? = nil
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(deck.courseName.uppercased()).font(.caption).foregroundColor(.gray)
-                    Text(deck.name).font(.title)
+                    SectionLabel(scope.courseName)
+                    Text(scope.title).font(GRASPFont.display).foregroundColor(GRASPColor.textPrimary)
+                    Text(summary).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
                 }
 
                 if let cards = session {
                     StudySessionView(library: library, cards: cards) { session = nil }
                 } else {
                     HStack(spacing: 10) {
-                        Button(deck.due == 0 ? "Nothing due" : "Study \(deck.due) due") {
-                            session = library.dueCards(inDeck: deck.id)
+                        Button(scope.due == 0 ? "Nothing due" : "Study \(scope.due) due") {
+                            session = library.dueCards(inDecks: scope.deckIds)
                         }
-                        .disabled(deck.due == 0)
-                        if deck.drafts > 0 {
-                            Button("Approve \(deck.drafts) drafts") {
-                                library.approveDrafts(inDeck: deck.id)
+                        .disabled(scope.due == 0)
+                        .fixedSize()
+                        if scope.drafts > 0 {
+                            Button("Approve \(scope.drafts) drafts") {
+                                library.approveDrafts(inDecks: scope.deckIds)
                             }
+                            .fixedSize()
                         }
                     }
-                    if deck.drafts > 0 && deck.due == 0 {
+                    if scope.drafts > 0 && scope.due == 0 {
                         Text("New cards start as drafts. Approve them to study them.")
-                            .foregroundColor(.gray)
+                            .foregroundColor(GRASPColor.textSecondary)
                     }
                 }
 
-                if let reduction = library.rowReduction(inDeck: deck.id) {
+                if let reduction = library.rowReduction(inDecks: scope.deckIds) {
                     RowReductionView(reduction: reduction)
                 }
             }
-            .padding(24)
+            .padding(28)
         }
+        // A new deck starts fresh, not mid-way through the last one's session.
+        .onChange(of: scope.id) { session = nil }
+    }
+
+    private var summary: String {
+        var parts = ["\(scope.total) cards"]
+        if scope.due > 0 { parts.append("\(scope.due) due") }
+        if scope.drafts > 0 { parts.append("\(scope.drafts) drafts") }
+        return parts.joined(separator: " · ")
     }
 }
