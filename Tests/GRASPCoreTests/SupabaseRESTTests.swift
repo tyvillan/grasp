@@ -63,7 +63,7 @@ final class StubSupabase: URLProtocol {
 struct SupabaseRESTTests {
     let project = SupabaseProject(url: URL(string: "https://example.supabase.co")!, anonKey: "anon-key")
 
-    private func tokenJSON(access: String = "access-1", refresh: String = "refresh-1", expiresIn: Int = 3600) -> String {
+    func tokenJSON(access: String = "access-1", refresh: String = "refresh-1", expiresIn: Int = 3600) -> String {
         """
         {"access_token":"\(access)","token_type":"bearer","expires_in":\(expiresIn),
          "refresh_token":"\(refresh)","user":{"id":"AB12CD34-0000-4000-8000-000000000001","email":"t@example.com"}}

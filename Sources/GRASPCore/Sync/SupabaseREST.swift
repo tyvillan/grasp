@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -96,6 +101,48 @@ public actor SupabaseAuth {
             throw SupabaseError.confirmEmail
         }
         return adopt(token)
+    }
+
+    // MARK: - Google (OAuth with PKCE)
+
+    /// Where to send the browser to sign in with a provider, and the secret
+    /// that later proves this app started the sign-in. The same flow
+    /// supabase-swift runs for the Mac's "Continue with Google": the browser
+    /// comes back to `redirectTo` with a one-time code, which only the holder
+    /// of `verifier` can trade for a session.
+    public struct OAuthStart: Sendable, Equatable {
+        public let url: URL
+        public let verifier: String
+    }
+
+    /// `prompt=select_account` so Google asks which account every time,
+    /// instead of silently reusing whichever one the browser last used --
+    /// the Mac gets the same effect from a private browser window.
+    public nonisolated func oauthStart(provider: String, redirectTo: URL,
+                                       verifier: String = PKCE.makeVerifier()) -> OAuthStart {
+        var components = URLComponents(url: project.url.appendingPathComponent("auth/v1/authorize"),
+                                       resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "provider", value: provider),
+            URLQueryItem(name: "redirect_to", value: redirectTo.absoluteString),
+            URLQueryItem(name: "code_challenge", value: PKCE.challenge(for: verifier)),
+            URLQueryItem(name: "code_challenge_method", value: "s256"),
+            URLQueryItem(name: "prompt", value: "select_account"),
+        ]
+        return OAuthStart(url: components.url!, verifier: verifier)
+    }
+
+    /// Finishes a provider sign-in from the link the browser came back with.
+    /// Supabase puts either `code` or an error description in the query.
+    public func completeOAuth(callback: URL, verifier: String) async throws -> SupabaseSession {
+        let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        guard let code = value("code") else {
+            let message = value("error_description") ?? value("error") ?? "The sign-in didn't finish."
+            throw SupabaseError.server(status: 400, message: message.replacingOccurrences(of: "+", with: " "))
+        }
+        let body = try JSONEncoder().encode(["auth_code": code, "code_verifier": verifier])
+        return adopt(try await tokenRequest(grantType: "pkce", body: body))
     }
 
     /// An access token good for at least another minute, refreshing first
@@ -307,5 +354,26 @@ public struct SupabaseRESTTransport: SyncTransport {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return request
+    }
+}
+
+/// Proof Key for Code Exchange (RFC 7636): a random secret kept on this
+/// device, and its SHA-256 sent with the sign-in. The code the browser
+/// brings back is worthless without the secret, so another app catching
+/// the `grasp://` link can't use it.
+public enum PKCE {
+    /// 64 characters from the URL-safe alphabet RFC 7636 allows.
+    public static func makeVerifier() -> String {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        var generator = SystemRandomNumberGenerator()
+        return String((0..<64).map { _ in alphabet[Int(generator.next(upperBound: UInt(alphabet.count)))] })
+    }
+
+    /// base64url(SHA-256(verifier)), unpadded.
+    public static func challenge(for verifier: String) -> String {
+        Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
