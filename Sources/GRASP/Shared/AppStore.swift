@@ -43,10 +43,10 @@ final class AppStore {
 
 
     /// Parsed and laid-out diagrams, keyed on material id plus the
-    /// overview's `generatedAt` -- see `laidOutDiagram(for:source:)`.
-    /// Not observed: it's a memo, and mutating it must never invalidate a
-    /// view that is in the middle of reading from it.
-    @ObservationIgnored var diagramCache: [String: DiagramCacheEntry] = [:]
+    /// overview's `generatedAt` (see `DeckOverviewReader`). Not observed:
+    /// it's a memo, and filling it must never invalidate a view that is in
+    /// the middle of reading from it.
+    @ObservationIgnored let diagramCache = DiagramLayoutCache()
 
     var vaultPath: String {
         didSet { UserDefaults.standard.set(vaultPath, forKey: Self.vaultPathKey(for: profile)) }
@@ -938,75 +938,17 @@ final class AppStore {
     }
 
     /// The plural of the above -- the "All Cards" master category's entire
-    /// data need is this fetch across every deck in a course instead of
-    /// one, ordered deck-by-deck (each deck's own `sortIndex` order kept
-    /// intact) rather than interleaved by raw index value.
+    /// data need is this fetch across every deck in a course, deck by deck.
     func cards(inDecks deckIds: [String]) throws -> [Card] {
-        try database.queue.read { db in
-            let cardIds = try DeckCard
-                .filter(deckIds.contains(Column("deckId")))
-                .order(Column("deckId"), Column("sortIndex"))
-                .fetchAll(db)
-                .map(\.cardId)
-            guard !cardIds.isEmpty else { return [] }
-            var cards = try Card
-                .filter(cardIds.contains(Column("id")))
-                .filter(Column("deletedAt") == nil)
-                .fetchAll(db)
-            // `cardIds` is built from `DeckCard` rows, one per membership --
-            // normally a card belongs to exactly one deck within a course,
-            // but that's a convention this table doesn't itself enforce,
-            // so a card that ends up in two of the requested decks would
-            // appear twice here. `uniquingKeysWith` (keep the first,
-            // i.e. earliest by deck/sortIndex order) keeps this from
-            // crashing on a duplicate key if that ever happens, rather
-            // than assuming it never will.
-            let order = Dictionary(
-                cardIds.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first }
-            )
-            cards.sort { (order[$0.id] ?? 0) < (order[$1.id] ?? 0) }
-            return cards
-        }
+        try database.queue.read { db in try CardActions.cards(inDecks: deckIds, db: db) }
     }
 
-    struct SearchResult: Identifiable, Sendable {
-        var id: String { materialId }
-        let materialId: String
-        let title: String
-        let snippet: String
-    }
+    /// The core's note-search hit; the name the views already use.
+    typealias SearchResult = CardActions.NoteMatch
 
-    /// Full-text search over every imported note's reflowed body via the
-    /// `noteFTS` table (FTS5, synchronized with `noteText`). The FTS
-    /// table's rowid mirrors `noteText`'s implicit integer rowid, not its
-    /// `materialId` text primary key, so the join goes through that rowid
-    /// rather than directly to `material`.
+    /// Full-text search over every imported note (see `CardActions.searchNotes`).
     func searchNotes(query: String) throws -> [SearchResult] {
-        let sanitized = query
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            // Quoted: bare, an uppercase AND, OR or NOT is FTS5 syntax, and
-            // "TCP OR UDP" or "AND gate" was a syntax error that showed up
-            // as "No matches". A quoted prefix still matches the same words.
-            .map { "\"\($0)\"*" }
-            .joined(separator: " ")
-        guard !sanitized.isEmpty else { return [] }
-
-        return try database.queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT material.id AS materialId, material.title AS title,
-                       snippet(noteFTS, 0, char(2), char(3), '…', 12) AS snippet
-                FROM noteFTS
-                JOIN noteText ON noteText.rowid = noteFTS.rowid
-                JOIN material ON material.id = noteText.materialId
-                WHERE noteFTS MATCH ? AND material.deletedAt IS NULL
-                ORDER BY rank
-                LIMIT 40
-                """, arguments: [sanitized])
-                .map { row in
-                    SearchResult(materialId: row["materialId"], title: row["title"], snippet: row["snippet"])
-                }
-        }
+        try database.queue.read { db in try CardActions.searchNotes(query, db: db) }
     }
 
     func material(_ id: String) throws -> Material? {
@@ -1021,107 +963,43 @@ final class AppStore {
         try database.queue.read { db in try Card.fetchOne(db, key: id) }
     }
 
-    /// Saves an edit to a card's text -- and only its text.
-    ///
-    /// Edit sheets hold a copy of the card from when they opened. Saving
-    /// that whole copy wrote back every column as it was then: a review
-    /// graded meanwhile lost its new due date, and a card an AI pass had
-    /// removed or rewritten while the sheet was open came back as it was.
-    /// So the row is re-read and only front and back change, and only when
-    /// they actually did.
+    /// Saves an edit to a card's text -- and only its text. The row is
+    /// re-read, so a review graded while the edit sheet was open survives
+    /// (see `CardActions.updateText`).
     func updateCard(_ card: Card) throws {
-        let front = card.front.trimmingCharacters(in: .whitespacesAndNewlines)
-        let back = card.back.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !front.isEmpty, !back.isEmpty else { return }
         try database.queue.write { db in
-            guard var current = try Card.fetchOne(db, key: card.id), current.deletedAt == nil,
-                  current.front != front || current.back != back
-            else { return }
-            current.front = front
-            current.back = back
-            // Hand-edited parser cards stop being the scanner's to replace
-            // on re-import. AI-generated ones keep their origin, so their
-            // "worth double-checking" badge survives a typo fix.
-            if current.origin == .parser { current.origin = .manual }
-            current.updatedAt = Date()
-            try current.save(db)
+            try CardActions.updateText(cardId: card.id, front: card.front, back: card.back, db: db)
         }
         reload()
     }
 
-    /// Soft delete: sets `deletedAt` rather than removing the row, so a
-    /// card's review history stays intact for stats even after removal
-    /// from every deck view.
+    /// Soft delete: the row stays, so review history survives for stats.
     func deleteCard(_ cardId: String) throws {
-        try database.queue.write { db in
-            guard var card = try Card.fetchOne(db, key: cardId) else { return }
-            card.deletedAt = Date()
-            card.updatedAt = Date()
-            try card.save(db)
-        }
-        reload()
+        try bulkDeleteCards([cardId])
     }
 
-    /// Undoes one AI context-refinement: restores `back` from
-    /// `originalBack` and clears both refinement fields. A no-op if the
-    /// card was never refined (`originalBack == nil`), so this is always
-    /// safe to call from a "Revert" button without checking first.
+    /// Undoes one AI context-refinement; a no-op for a card never refined.
     func revertContextRefinement(_ cardId: String) throws {
-        try database.queue.write { db in
-            guard var card = try Card.fetchOne(db, key: cardId), let original = card.originalBack else { return }
-            card.back = original
-            card.originalBack = nil
-            card.isContextRefined = false
-            card.updatedAt = Date()
-            try card.save(db)
-        }
+        try database.queue.write { db in try CardActions.revertContextRefinement(cardId, db: db) }
         reload()
     }
 
     func setCardStatus(_ cardId: String, status: CardStatus) throws {
-        try database.queue.write { db in
-            guard var card = try Card.fetchOne(db, key: cardId) else { return }
-            card.status = status
-            card.updatedAt = Date()
-            try card.save(db)
-        }
-        reload()
+        try bulkSetStatus([cardId], status: status)
     }
 
-    /// SQLite's `IN (...)` caps at a few hundred bound parameters on some
-    /// builds -- unreachable at today's deck sizes, but a "select all in a
-    /// huge deck" is a real enough path to guard cheaply rather than trust.
-    private static let sqlVariableChunkSize = 500
-
     /// The plural of `setCardStatus`/`deleteCard`, for a multi-selected
-    /// batch: one transaction and one `reload()` for the whole selection,
-    /// not N of each.
+    /// batch: one transaction and one `reload()` for the whole selection.
     func bulkSetStatus(_ cardIds: [String], status: CardStatus) throws {
         guard !cardIds.isEmpty else { return }
-        try database.queue.write { db in
-            let now = Date()
-            for chunk in cardIds.chunked(into: Self.sqlVariableChunkSize) {
-                try Card
-                    .filter(chunk.contains(Column("id")))
-                    .filter(Column("deletedAt") == nil)
-                    .updateAll(db, Column("status").set(to: status.rawValue), Column("updatedAt").set(to: now))
-            }
-        }
+        try database.queue.write { db in try CardActions.setStatus(cardIds, to: status, db: db) }
         reload()
     }
 
     /// The plural of `deleteCard` -- same soft-delete semantics, batched.
     func bulkDeleteCards(_ cardIds: [String]) throws {
         guard !cardIds.isEmpty else { return }
-        try database.queue.write { db in
-            let now = Date()
-            for chunk in cardIds.chunked(into: Self.sqlVariableChunkSize) {
-                try Card
-                    .filter(chunk.contains(Column("id")))
-                    .filter(Column("deletedAt") == nil)
-                    .updateAll(db, Column("deletedAt").set(to: now), Column("updatedAt").set(to: now))
-            }
-        }
+        try database.queue.write { db in try CardActions.delete(cardIds, db: db) }
         reload()
     }
 
@@ -1154,27 +1032,7 @@ final class AppStore {
     /// scramble the destination deck's `sortIndex`.
     func bulkMoveCards(_ cardIds: [String], toDeck targetDeckId: String) throws {
         guard !cardIds.isEmpty else { return }
-        try database.queue.write { db in
-            guard let target = try Deck.fetchOne(db, key: targetDeckId), target.deletedAt == nil else { return }
-            // Cards already in the target stay where they are. Moving them
-            // "into" their own deck pushed them to the end of it -- easy to
-            // do from All Cards, whose targets include every deck.
-            let alreadyThere = Set(try String.fetchAll(db, sql:
-                "SELECT cardId FROM deckCard WHERE deckId = ?", arguments: [targetDeckId]))
-            let cardIds = cardIds.filter { !alreadyThere.contains($0) }
-            guard !cardIds.isEmpty else { return }
-            for chunk in cardIds.chunked(into: Self.sqlVariableChunkSize) {
-                try DeckCard.filter(chunk.contains(Column("cardId"))).deleteAll(db)
-            }
-            var next = try Int.fetchOne(db, sql:
-                "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                arguments: [targetDeckId]
-            ) ?? 0
-            for cardId in cardIds {
-                try DeckCard(deckId: targetDeckId, cardId: cardId, sortIndex: next).insert(db)
-                next += 1
-            }
-        }
+        try database.queue.write { db in try CardActions.move(cardIds, toDeck: targetDeckId, db: db) }
         reload()
     }
 
@@ -1666,15 +1524,9 @@ final class AppStore {
     }
 
     /// Every event overlapping a date range -- what the month grid, the
-    /// week columns and the agenda all read, each just asking for a
-    /// different span.
+    /// week columns and the agenda all read.
     func calendarEvents(from start: Date, to end: Date) throws -> [CalendarEvent] {
-        try database.queue.read { db in
-            try CalendarEvent
-                .filter(Column("startsAt") >= start && Column("startsAt") < end)
-                .order(Column("startsAt"))
-                .fetchAll(db)
-        }
+        try database.queue.read { db in try CalendarActions.events(from: start, to: end, db: db) }
     }
 
     /// One upcoming event with the course name already resolved, so a
@@ -1690,21 +1542,10 @@ final class AppStore {
     }
 
     /// Exams and quizzes coming up across every course, soonest first --
-    /// the Home dashboard's alert strip. Events earlier today still count
-    /// as upcoming (an exam at 2pm shouldn't vanish from the alert at
-    /// 2:01pm on the day it matters most), so the window starts at the
-    /// beginning of today rather than at `now`.
+    /// the Home dashboard's alert strip (see `CalendarActions.upcomingExams`).
     func upcomingExams(within days: Int = 30, limit: Int = 5, now: Date = Date()) throws -> [UpcomingEvent] {
-        let calendar = Calendar.current
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.date(byAdding: .day, value: days, to: start) ?? start
-        return try database.queue.read { db in
-            let events = try CalendarEvent
-                .filter(CalendarEventKind.examLike.map(\.rawValue).contains(Column("kind")))
-                .filter(Column("startsAt") >= start && Column("startsAt") < end)
-                .order(Column("startsAt"))
-                .limit(limit)
-                .fetchAll(db)
+        try database.queue.read { db in
+            let events = try CalendarActions.upcomingExams(within: days, limit: limit, now: now, db: db)
             let courseNames = try Self.courseNames(for: events, db: db)
             return events.map {
                 UpcomingEvent(event: $0, courseName: $0.courseId.flatMap { courseNames[$0] })
@@ -1721,25 +1562,18 @@ final class AppStore {
     }
 
     func addCalendarEvent(_ event: CalendarEvent) throws {
-        try database.queue.write { db in try event.insert(db) }
+        try database.queue.write { db in try CalendarActions.add(event, db: db) }
         reload()
     }
 
     func updateCalendarEvent(_ event: CalendarEvent) throws {
-        var updated = event
-        updated.updatedAt = Date()
-        try database.queue.write { db in try updated.update(db) }
+        try database.queue.write { db in try CalendarActions.update(event, db: db) }
         reload()
     }
 
+    /// Takes any study plan generated for this exam with it.
     func deleteCalendarEvent(_ eventId: String) throws {
-        try database.queue.write { db in
-            // Take any study plan generated for this exam with it -- blocks
-            // for an exam that no longer exists are just clutter nobody
-            // would think to go and clean up.
-            try CalendarEvent.filter(Column("parentEventId") == eventId).deleteAll(db)
-            _ = try CalendarEvent.deleteOne(db, key: eventId)
-        }
+        try database.queue.write { db in try CalendarActions.delete(eventId, db: db) }
         reload()
     }
 
@@ -1825,27 +1659,13 @@ final class AppStore {
 
     // MARK: - Study plans
 
-    struct StudyPlanSummary: Sendable {
-        let blocksCreated: Int
-        let cardsCovered: Int
-        let replacedExisting: Bool
-        let firstDay: Date?
-    }
+    typealias StudyPlanSummary = CalendarActions.PlanSummary
 
     /// How many cards a plan for this event would have to cover -- the
     /// linked deck's active cards, or the whole course's when no specific
     /// deck is set.
     func plannableCardCount(for event: CalendarEvent) -> Int {
-        let deckIds: [String]
-        if let deckId = event.deckId {
-            deckIds = [deckId]
-        } else if let courseId = event.courseId {
-            deckIds = (try? decks(inCourse: courseId))?.map(\.id) ?? []
-        } else {
-            deckIds = []
-        }
-        guard !deckIds.isEmpty else { return 0 }
-        return ((try? cards(inDecks: deckIds)) ?? []).filter { $0.status == .active }.count
+        (try? database.queue.read { db in try CalendarActions.plannableCardCount(for: event, db: db) }) ?? 0
     }
 
     /// Lays a `StudyPlanner` plan onto the calendar as study blocks, each
@@ -1853,99 +1673,33 @@ final class AppStore {
     /// this made before and nothing else.
     @discardableResult
     func generateStudyPlan(for event: CalendarEvent, now: Date = Date()) throws -> StudyPlanSummary {
-        let cardCount = plannableCardCount(for: event)
-        let blocks = StudyPlanner.plan(cardCount: cardCount, from: now, examDate: event.startsAt)
         let courseName = event.courseId.flatMap { courseName($0) }
-
-        var replaced = false
-        try database.queue.write { db in
-            let existing = try CalendarEvent.filter(Column("parentEventId") == event.id).deleteAll(db)
-            replaced = existing > 0
-            for block in blocks {
-                try CalendarEvent(
-                    courseId: event.courseId, deckId: event.deckId, kind: .study,
-                    title: StudyPlanner.blockTitle(courseName: courseName, block: block),
-                    startsAt: block.day, isAllDay: true, parentEventId: event.id
-                ).insert(db)
-            }
+        let summary = try database.queue.write { db in
+            try CalendarActions.generateStudyPlan(for: event, courseName: courseName, now: now, db: db)
         }
         reload()
-        return StudyPlanSummary(
-            blocksCreated: blocks.count, cardsCovered: cardCount,
-            replacedExisting: replaced, firstDay: blocks.first?.day
-        )
+        return summary
     }
 
     func hasStudyPlan(for eventId: String) -> Bool {
-        ((try? database.queue.read { db in
-            try CalendarEvent.filter(Column("parentEventId") == eventId).fetchCount(db)
-        }) ?? 0) > 0
+        (try? database.queue.read { db in try CalendarActions.hasStudyPlan(for: eventId, db: db) }) ?? false
     }
 
     // MARK: - Streak and daily load
 
-    /// Distinct days with at least one review, most recent first -- the
-    /// raw material for both the streak and the "did I study today" dot.
-    private func reviewDays(since: Date) throws -> Set<Date> {
-        let calendar = Calendar.current
-        return try database.queue.read { db in
-            let dates = try Date.fetchAll(
-                db, sql: "SELECT DISTINCT reviewedAt FROM review WHERE reviewedAt >= ?", arguments: [since]
-            )
-            return Set(dates.map { calendar.startOfDay(for: $0) })
-        }
-    }
+    typealias StudyStreak = StudyProgress.Streak
 
-    struct StudyStreak: Sendable {
-        let days: Int
-        let studiedToday: Bool
-        let reviewsToday: Int
-    }
-
-    /// Consecutive days studied, counting back from today. Studying
-    /// yesterday but not yet today keeps the streak alive -- it only
-    /// breaks once a whole day passes with nothing, which is what makes
-    /// the number safe to show in the morning.
+    /// Consecutive days studied, counting back from today; studying
+    /// yesterday but not yet today keeps it alive (see `StudyProgress`).
     func studyStreak(now: Date = Date()) -> StudyStreak {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: now)
-        let horizon = calendar.date(byAdding: .day, value: -365, to: today) ?? today
-        let days = (try? reviewDays(since: horizon)) ?? []
-        let studiedToday = days.contains(today)
-
-        var streak = 0
-        var cursor = studiedToday ? today : (calendar.date(byAdding: .day, value: -1, to: today) ?? today)
-        while days.contains(cursor) {
-            streak += 1
-            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
-            cursor = previous
-        }
-
-        let reviewsToday = (try? database.queue.read { db in
-            try Int.fetchOne(
-                db, sql: "SELECT COUNT(*) FROM review WHERE reviewedAt >= ?", arguments: [today]
-            ) ?? 0
-        }) ?? 0
-        return StudyStreak(days: streak, studiedToday: studiedToday, reviewsToday: reviewsToday)
+        (try? database.queue.read { db in try StudyProgress.streak(now: now, db: db) })
+            ?? StudyStreak(days: 0, studiedToday: false, reviewsToday: 0)
     }
 
     /// Cards falling due on each day in a range, for the calendar's
-    /// workload colouring. Everything already overdue lands on the first
-    /// day of the range, which is where it will actually be waiting.
+    /// workload colouring; anything overdue lands on the first day.
     func dailyCardLoad(from start: Date, to end: Date) -> [Date: Int] {
-        let calendar = Calendar.current
-        let firstDay = calendar.startOfDay(for: start)
-        let rows = (try? database.queue.read { db in
-            try Date.fetchAll(
-                db,
-                sql: "SELECT due FROM card WHERE deletedAt IS NULL AND status = 'active' AND due < ?",
-                arguments: [end]
-            )
-        }) ?? []
-        return rows.reduce(into: [:]) { counts, due in
-            let day = max(calendar.startOfDay(for: due), firstDay)
-            counts[day, default: 0] += 1
-        }
+        (try? database.queue.read { db in try CalendarActions.dailyCardLoad(from: start, to: end, db: db) }) ?? [:]
     }
 
     func materialCount(inCourse courseId: String) throws -> Int {
@@ -2226,47 +1980,17 @@ final class AppStore {
         reload()
     }
 
-    /// Moves a card's deck membership. `moveCard` rather than
-    /// `moveCard(from:to:)` -- a card belongs to exactly one deck by
-    /// convention, so there's no source to look up, and nothing can go
-    /// stale between a drag starting and finishing. Origin is untouched:
-    /// which deck a card sits in says nothing about where its text came
-    /// from.
+    /// Moves a card to the end of another deck. A card belongs to one deck
+    /// by convention, so there's no source to look up; origin is untouched.
     func moveCard(_ cardId: String, toDeck targetDeckId: String) throws {
-        try database.queue.write { db in
-            guard let target = try Deck.fetchOne(db, key: targetDeckId), target.deletedAt == nil else { return }
-            let existing = try DeckCard.filter(Column("cardId") == cardId).fetchAll(db)
-            if existing.count == 1, existing[0].deckId == targetDeckId { return }
-            try DeckCard.filter(Column("cardId") == cardId).deleteAll(db)
-            let next = try Int.fetchOne(db, sql:
-                "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                arguments: [targetDeckId]
-            ) ?? 0
-            try DeckCard(deckId: targetDeckId, cardId: cardId, sortIndex: next).insert(db)
-        }
-        reload()
+        try bulkMoveCards([cardId], toDeck: targetDeckId)
     }
 
-    /// A card typed by hand rather than parsed. Status is `.active`, not
-    /// `.draft`: the draft/review gate exists to catch parser noise, and a
-    /// card someone just wrote by hand has already had the human glance
-    /// that gate is there to force -- making them re-approve their own
-    /// just-typed card is pure friction.
+    /// A card typed by hand: active, not a draft (see `CardActions.createManual`).
     @discardableResult
     func createManualCard(front: String, back: String, deckId: String) throws -> String {
-        let id = try database.queue.write { db -> String in
-            let card = Card(
-                materialId: nil, front: front, back: back,
-                hasMath: back.contains("\\(") || back.contains("\\["),
-                origin: .manual, status: .active
-            )
-            try card.insert(db)
-            let next = try Int.fetchOne(db, sql:
-                "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                arguments: [deckId]
-            ) ?? 0
-            try DeckCard(deckId: deckId, cardId: card.id, sortIndex: next).insert(db)
-            return card.id
+        let id = try database.queue.write { db in
+            try CardActions.createManual(front: front, back: back, deckId: deckId, db: db)
         }
         reload()
         return id
@@ -2321,12 +2045,5 @@ final class AppStore {
         }
         reload()
         return summary
-    }
-}
-
-private extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        guard count > size else { return [self] }
-        return stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) }
     }
 }
