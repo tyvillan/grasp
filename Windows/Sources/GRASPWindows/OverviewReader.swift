@@ -291,18 +291,20 @@ private struct JobStrip: View {
 
 /// A thin amber bar. GeometryReader rather than WinUI's ProgressBar, which
 /// draws in Windows' accent colour.
-private struct ProgressBar: View {
+struct ProgressBar: View {
     let fraction: Double
+    var tint: Color = GRASPColor.accent
+    var height = 4.0
 
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width.isFinite ? Double(proxy.size.width) : 0
             ZStack(alignment: .leading) {
-                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: width, height: 4.0)
-                Rectangle().fill(GRASPColor.accent).frame(width: max(0, min(1, fraction)) * width, height: 4.0)
+                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: width, height: height)
+                Rectangle().fill(tint).frame(width: max(0, min(1, fraction)) * width, height: height)
             }
         }
-        .frame(height: 4.0)
+        .frame(height: height)
     }
 }
 

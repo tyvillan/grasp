@@ -225,10 +225,68 @@ final class Library {
         account.noteLocalChange()
     }
 
-    func grade(_ card: Card, _ grade: FSRS.Grade) {
-        try? database.queue.write { try Study.grade(card.id, grade: grade, source: "flashcards", db: $0) }
-        reload()
+    // Answers during a session are saved at once but the library isn't
+    // reloaded until the session ends (`finishSession`): a reload redraws the
+    // deck page behind the session, which made every answer lag.
+
+    /// Saves one answer and schedules a sync, without a reload.
+    private func record(_ body: (Database) throws -> Void) {
+        try? database.queue.write { try body($0) }
         account.noteLocalChange()
+    }
+
+    /// A study session ended: bring due counts, streak and mastery up to date.
+    func finishSession() {
+        reload()
+    }
+
+    /// "I Know This" / "Needs Review".
+    func mark(_ cardId: String, understood: Bool) {
+        record { try Study.mark(cardId, understood: understood, db: $0) }
+    }
+
+    func learnRound(inDecks deckIds: [String]) -> [LearnEngine.RoundQuestion] {
+        var rng = SystemRandomNumberGenerator()
+        return (try? database.queue.read { try Study.learnRound(forDecks: deckIds, using: &rng, db: $0) }) ?? []
+    }
+
+    func recordLearnAnswer(cardId: String, wasCorrect: Bool) {
+        record { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, db: $0) }
+    }
+
+    func mastery(inDecks deckIds: [String]) -> (mastered: Int, total: Int) {
+        (try? database.queue.read { try Study.mastery(forDecks: deckIds, db: $0) }) ?? (0, 0)
+    }
+
+    func learnLevels(inDecks deckIds: [String]) -> [String: LearnEngine.Level] {
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = levelsCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try Study.learnLevels(forDecks: deckIds, db: $0) }) ?? [:]
+        levelsCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var levelsCache: (key: String, value: [String: LearnEngine.Level])?
+
+    /// Writes the attempt; nil when every card was filtered out.
+    func startTest(inDecks deckIds: [String], config: TestBuilder.Config)
+        -> (attemptId: String, questions: [LearnEngine.RoundQuestion])? {
+        var rng = SystemRandomNumberGenerator()
+        let result = try? database.queue.write { try Study.startTest(deckIds: deckIds, config: config, using: &rng, db: $0) }
+        guard let result, !result.questions.isEmpty else { return nil }
+        return result
+    }
+
+    func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) {
+        record { try Study.submitTestAnswer(attemptId: attemptId, ordinal: ordinal, given: given, isCorrect: isCorrect, db: $0) }
+    }
+
+    func finishTest(attemptId: String) {
+        record { _ = try Study.finishTest(attemptId: attemptId, db: $0) }
+    }
+
+    func overrideTestAnswer(attemptId: String, ordinal: Int, cardId: String?) {
+        record { try Study.overrideTestItemCorrect(attemptId: attemptId, ordinal: ordinal, cardId: cardId, db: $0) }
     }
 
     // MARK: - Cards
@@ -243,6 +301,10 @@ final class Library {
 
     /// The last card list read, for the same reason as `overviewCache`.
     @ObservationIgnored private var cardsCache: (key: String, value: [Card])?
+
+    func card(_ id: String) -> Card? {
+        try? database.queue.read { try Card.fetchOne($0, key: id) }
+    }
 
     func editCard(_ cardId: String, front: String, back: String) {
         change { _ = try CardActions.updateText(cardId: cardId, front: front, back: back, db: $0) }

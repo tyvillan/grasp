@@ -117,7 +117,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 | `Library.swift` | `@Observable` model: opens the profile's DB, semesters/courses/decks with the Mac's ordering, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
 | `ConsoleOutput.swift`, `WindowIcon.swift` | Windows plumbing: log file and CRT handler for GUI launches; puts the embedded icon on the window |
 | `Resources/GRASP.ico`, `GRASP.rc` | The app icon (from the iPhone AppIcon, via `scripts\windows\make-icon.ps1`), embedded by `grasp.ps1` |
-| `StudySessionView.swift` | Flashcards with the four FSRS grades |
+| `StudySessionView.swift`, `TestSession.swift` | Study modes: flashcards, Learn rounds, tests (setup, run, results), and the shared question view |
 | `RowReductionView.swift` | Steps through a row reduction from the notes: `MatrixGrid`, `Bracket` shape |
 | `Account.swift` | Sign-in/sign-up (Google via the browser, or email + password), linking the profile, sync every 120 s and 8 s after a change, reloading on pulled changes |
 | `AccountViews.swift` | Sidebar account panel and the sign-in sheet |
@@ -149,7 +149,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - Render them read-only first: sections, key terms, worked examples, figures. The Mac's `Sources/GRASP/Shared/OverviewStore.swift` and `Shared/Overview/*` show how.
 4. **The rest of the Mac feature set**, roughly in order of use:
    - ~~card editing and draft review, search~~ **Done:** the Cards tab lists cards (status filter, text filter, 50 at a time) with a menu to edit, approve, suspend, move, revert an AI refinement or delete, plus New Card; Search (sidebar) finds cards and notes and opens a note to read. Logic is GRASPCore's `CardActions` (`[needs Mac check]`). Not yet: multi-select bulk actions, duplicate review, AI refine.
-   - Learn mode (`LearnEngine`), custom tests (`TestBuilder`)
+   - ~~Learn mode, custom tests~~ **Done:** the deck header has Study / Learn / Test, each taking over the deck page (`StudySessionView.swift`, `TestSession.swift`). Flashcards use the Mac's two verdicts (Needs Review / I Know This), not four grades. Logic is GRASPCore's `Study.mark`, `learnRound`, `recordLearnAnswer`, `startTest`, `finishTest`… in `StudyModes.swift` (`[needs Mac check]`). Answers save without reloading the library; `Library.finishSession()` reloads when a session ends. Not yet: AI-written test questions, the focus timer, keyboard shortcuts (SwiftCrossUI has no key-press handler).
    - calendar and exams
    - profile picker and PIN lock, settings screen
    - AI actions via Ollama (the core client already works on Windows)

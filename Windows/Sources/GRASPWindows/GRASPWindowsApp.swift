@@ -326,12 +326,13 @@ struct DeckColumnRow: View {
 
 // MARK: - Deck page
 
-/// A deck (or a course's All Cards): study what's due, approve drafts, and
-/// see the row reduction from its notes.
+/// A deck (or a course's All Cards), after the Mac's `DeckDetailView`: its
+/// name and make-up, Study / Learn / Test, and the Cards and Overview tabs.
+/// A study session takes over the whole page until it ends.
 struct DeckView: View {
     let library: Library
     let scope: DeckScope
-    @State var session: [Card]? = nil
+    @State var mode: StudyMode?
     /// Cards or Overview, as on the Mac. Kept when you switch decks, so
     /// reading through a course's lessons stays on the Overview tab.
     @State var tab: DeckTab = .cards
@@ -343,6 +344,40 @@ struct DeckView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let mode {
+                session(mode)
+            } else {
+                header
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                if tab == .overview {
+                    OverviewPane(library: library, scope: scope)
+                } else {
+                    cardsPage
+                }
+            }
+        }
+        // A new deck starts fresh, not mid-way through the last one's session.
+        .onChange(of: scope.id) { if mode != nil { end() } }    }
+
+    @ViewBuilder
+    private func session(_ mode: StudyMode) -> some View {
+        switch mode {
+        case .flashcards(let cards):
+            FlashcardSession(library: library, deckName: scope.title, cards: cards, finish: end)
+        case .learn:
+            LearnSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
+        case .test:
+            TestSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
+        }
+    }
+
+    private func end() {
+        mode = nil
+        library.finishSession()
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     SectionLabel(scope.courseName)
@@ -350,60 +385,49 @@ struct DeckView: View {
                     Text(summary).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
                 }
                 Spacer()
-                // A study session owns the page until it ends.
-                if session == nil {
-                    SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
-                }
+                SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 16)
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
-
-            if tab == .overview && session == nil {
-                OverviewPane(library: library, scope: scope)
-            } else {
-                cardsPage
+            // Study, Learn and Test in a fixed order, as on the Mac.
+            HStack(spacing: 8) {
+                Button(scope.due == 0 ? "Study (nothing due)" : "Study \(scope.due) Due") {
+                    mode = .flashcards(library.dueCards(inDecks: scope.deckIds))
+                }
+                .disabled(scope.due == 0)
+                .fixedSize()
+                Button("Learn") { mode = .learn }.disabled(scope.total == scope.drafts).fixedSize()
+                Button("Test") { mode = .test }.disabled(scope.total == scope.drafts).fixedSize()
+                if scope.drafts > 0 {
+                    Button("Approve \(scope.drafts) Drafts") { library.approveDrafts(inDecks: scope.deckIds) }
+                        .fixedSize()
+                }
+                Spacer()
             }
         }
-        // A new deck starts fresh, not mid-way through the last one's session.
-        .onChange(of: scope.id) { session = nil }
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 16)
     }
 
     private var cardsPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let cards = session {
-                    StudySessionView(library: library, cards: cards) { session = nil }
-                } else {
-                    HStack(spacing: 10) {
-                        Button(scope.due == 0 ? "Nothing due" : "Study \(scope.due) due") {
-                            session = library.dueCards(inDecks: scope.deckIds)
-                        }
-                        .disabled(scope.due == 0)
-                        .fixedSize()
-                        if scope.drafts > 0 {
-                            Button("Approve \(scope.drafts) drafts") {
-                                library.approveDrafts(inDecks: scope.deckIds)
-                            }
-                            .fixedSize()
-                        }
-                    }
-                    if scope.drafts > 0 && scope.due == 0 {
-                        Text("New cards start as drafts. Approve them to study them.")
-                            .foregroundColor(GRASPColor.textSecondary)
-                    }
-                    CardList(library: library, scope: scope)
+                if scope.drafts > 0 && scope.due == 0 {
+                    Text("New cards start as drafts. Approve them to study them.")
+                        .foregroundColor(GRASPColor.textSecondary)
                 }
+                CardList(library: library, scope: scope)
             }
             .padding(28)
         }
     }
 
+    /// "268 cards · 127 due · 141 drafts · 40 understood".
     private var summary: String {
         var parts = ["\(scope.total) cards"]
         if scope.due > 0 { parts.append("\(scope.due) due") }
         if scope.drafts > 0 { parts.append("\(scope.drafts) drafts") }
+        let understood = library.learnLevels(inDecks: scope.deckIds).values.filter { $0 == .mastered }.count
+        if understood > 0 { parts.append("\(understood) understood") }
         return parts.joined(separator: " · ")
     }
 }
