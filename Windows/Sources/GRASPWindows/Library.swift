@@ -235,6 +235,29 @@ final class Library {
         account.noteLocalChange()
     }
 
+    /// Home's per-deck figures, with when each was last studied.
+    func dashboardDecks() -> [Dashboard.DeckSummary] {
+        let key = "\(revision)"
+        if let cached = dashboardCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try Dashboard.decks(db: $0) }) ?? []
+        dashboardCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var dashboardCache: (key: String, value: [Dashboard.DeckSummary])?
+
+    /// Home's "Continue" opens a deck straight into flashcards: the deck
+    /// page takes this on arrival.
+    @ObservationIgnored private var pendingStudyDeck: String?
+
+    func requestStudy(deckId: String) { pendingStudyDeck = deckId }
+
+    func takeStudyRequest(for scopeId: String) -> Bool {
+        guard pendingStudyDeck == scopeId else { return false }
+        pendingStudyDeck = nil
+        return true
+    }
+
     /// A study session ended: bring due counts, streak and mastery up to date.
     func finishSession() {
         reload()

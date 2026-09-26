@@ -357,7 +357,11 @@ struct DeckView: View {
             }
         }
         // A new deck starts fresh, not mid-way through the last one's session.
-        .onChange(of: scope.id) { if mode != nil { end() } }    }
+        .onChange(of: scope.id) {
+            if mode != nil { end() }
+            takeStudyRequest()
+        }
+        .onAppear { takeStudyRequest() }    }
 
     @ViewBuilder
     private func session(_ mode: StudyMode) -> some View {
@@ -374,6 +378,13 @@ struct DeckView: View {
     private func end() {
         mode = nil
         library.finishSession()
+    }
+
+    /// Arrived from Home's "Continue": start the flashcards right away.
+    private func takeStudyRequest() {
+        guard library.takeStudyRequest(for: scope.id) else { return }
+        let due = library.dueCards(inDecks: scope.deckIds)
+        if !due.isEmpty { mode = .flashcards(due) }
     }
 
     private var header: some View {
