@@ -48,8 +48,7 @@ final class Account {
 
         if restored != nil, (try? engine.status().enabled) == true {
             start()
-        }
-    }
+        }    }
 
     // MARK: - Signing in
 
@@ -60,15 +59,94 @@ final class Account {
         let session = createAccount
             ? try await auth.signUp(email: email, password: password)
             : try await auth.signIn(email: email, password: password)
+        try await link(session, provider: "email")
+    }
 
+    // MARK: - Google
+
+    /// Where a Google sign-in stands, for the sign-in sheet.
+    enum GoogleState: Equatable {
+        case idle
+        /// The browser is open; waiting for it to come back to `grasp://`.
+        case waiting
+        case failed(String)
+    }
+    private(set) var google: GoogleState = .idle
+    /// The PKCE secret for the sign-in in progress. Only in memory: a
+    /// sign-in the app was restarted in the middle of just starts again.
+    private var googleVerifier: String?
+
+    /// Where the Mac's Google sign-in comes back to, too -- already on the
+    /// Supabase project's allowed list.
+    static let callbackURL = URL(string: "grasp://auth-callback")!
+
+    /// The Google sign-in page to open in the browser.
+    func startGoogleSignIn() -> URL {
+        let start = auth.oauthStart(provider: "google", redirectTo: Self.callbackURL)
+        googleVerifier = start.verifier
+        google = .waiting
+        watchForLink()
+        return start.url
+    }
+
+    func cancelGoogleSignIn() {
+        linkWatch?.cancel()
+        googleVerifier = nil
+        if google != .idle { google = .idle }
+    }
+
+    private var linkWatch: Task<Void, Never>?
+
+    /// Checks twice a second for the link the browser hands back (see
+    /// `SignInLink`), for as long as a sign-in waits -- up to ten minutes,
+    /// after which the verifier is dropped and Google has to start again.
+    private func watchForLink() {
+        linkWatch?.cancel()
+        #if os(Windows)
+        SignInLink.discard()
+        linkWatch = Task { [weak self] in
+            for _ in 0..<1200 {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, let self, self.google == .waiting else { return }
+                if let url = SignInLink.take() {
+                    await self.handle(url: url)
+                    return
+                }
+            }
+            self?.cancelGoogleSignIn()
+        }
+        #endif
+    }
+
+    /// The browser came back with a `grasp://auth-callback` link.
+    func handle(url: URL) async {
+        guard url.scheme == "grasp", url.host == "auth-callback" else { return }
+        guard let verifier = googleVerifier else {
+            google = .failed("That sign-in was started before GRASP restarted. Try Continue with Google again.")
+            return
+        }
+        googleVerifier = nil
+        do {
+            let session = try await auth.completeOAuth(callback: url, verifier: verifier)
+            try await link(session, provider: "google")
+            google = .idle
+        } catch {
+            google = .failed(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Linking
+
+    /// Links this profile to the signed-in account and starts syncing.
+    private func link(_ session: SupabaseSession, provider: String) async throws {
         let current = try engine.status()
         if !current.enabled || current.accountUserId != session.userId {
             let accountHasLibrary = try await transport.accountHasData()
             try engine.enable(accountUserId: session.userId, uploadExisting: !accountHasLibrary)
         }
-        profile.account = LinkedAccount(userId: session.userId, email: session.email, provider: "email")
+        profile.account = LinkedAccount(userId: session.userId, email: session.email, provider: provider)
         try ProfileStore.update(profile, supportDirectory: supportDirectory)
-        self.email = session.email ?? email
+        self.email = session.email ?? "Signed in"
         status = nil
         start()
     }

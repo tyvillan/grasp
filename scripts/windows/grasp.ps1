@@ -4,6 +4,7 @@
 #   scripts\windows\grasp.cmd test     swift test
 #   scripts\windows\grasp.cmd build    swift build
 #   scripts\windows\grasp.cmd app      builds and opens the GRASP app (Windows\)
+#   scripts\windows\grasp.cmd app-build  builds the app without opening it
 #   scripts\windows\grasp.cmd uia-probe  finds which control crashes UI Automation
 #
 # Anything after the command is passed on to swift.
@@ -18,7 +19,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('check', 'test', 'build', 'app', 'uia-probe')]
+    [ValidateSet('check', 'test', 'build', 'app', 'app-build', 'uia-probe')]
     [string]$Command = 'check',
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
     [string[]]$SwiftArgs = @()
@@ -206,6 +207,15 @@ try {
             $appFlags = Get-AppLinkFlags
             Step 'swift run GRASPWindows'
             & swift run @flags @appFlags @SwiftArgs GRASPWindows
+        }
+        'app-build' {
+            # The same build as 'app', without opening the window: for
+            # checking warnings, or rebuilding while GRASP is closed.
+            Set-Location (Join-Path $Repo 'Windows')
+            $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
+            $appFlags = Get-AppLinkFlags
+            Step 'swift build --product GRASPWindows'
+            & swift build @flags @appFlags @SwiftArgs --product GRASPWindows
         }
         'uia-probe' {
             Set-Location (Join-Path $Repo 'Windows')

@@ -25,7 +25,8 @@ The UI framework is [SwiftCrossUI](https://github.com/moreSwift/swift-cross-ui),
 ```powershell
 scripts\windows\grasp.cmd check       # core smoke test
 scripts\windows\grasp.cmd test        # full core test suite (vault tests skip off the Mac)
-scripts\windows\grasp.cmd app         # build and open the Windows app
+scripts\windows\grasp.cmd app         # build and open the Windows app (blocks while it runs)
+scripts\windows\grasp.cmd app-build   # build the app without opening it
 scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Automation
 ```
 
@@ -85,6 +86,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - `Picker(of:selection:)` is a drop-down that labels options with `"\(option)"`, so give option types a `description` (see `Choice` in `EventEditor.swift`).
 - WinUI's `Toggle` draws in Windows' accent colour (pink here), not GRASP's amber. Use `SegmentedChoice` pills instead. Labels inside a row of pills need `.fixedSize()`.
 - `DatePicker` maps to WinUI's native date and time pickers and works well.
+- **Don't use SwiftCrossUI's URL schemes (`urlSchemes` / `onOpenURL`).** WinUIBackend delivers a redirected link on a background thread, and the open window crashes in `dispatch.dll` (0xc000001d) about 15 s later while the second copy hangs. `SignInLink.swift` does it instead: it registers `grasp://` in HKCU itself, and a link launch hands the URL to the open window through `sign-in-link.txt` and quits before SwiftCrossUI starts.
+- `print` output doesn't reach `GRASPWindows.log` promptly (stdout is fully buffered there); write to stderr for debugging.
 
 **GRASPCore data**
 - `RowOperation.target`/`source` are **1-based**, as written (R₁); subtract 1 for array indices.
@@ -104,8 +107,9 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 | `Resources/GRASP.ico`, `GRASP.rc` | The app icon (from the iPhone AppIcon, via `scripts\windows\make-icon.ps1`), embedded by `grasp.ps1` |
 | `StudySessionView.swift` | Flashcards with the four FSRS grades |
 | `RowReductionView.swift` | Steps through a row reduction from the notes: `MatrixGrid`, `Bracket` shape |
-| `Account.swift` | Sign-in/sign-up (email + password), linking the profile, sync every 120 s and 8 s after a change, reloading on pulled changes |
+| `Account.swift` | Sign-in/sign-up (Google via the browser, or email + password), linking the profile, sync every 120 s and 8 s after a change, reloading on pulled changes |
 | `AccountViews.swift` | Sidebar account panel and the sign-in sheet |
+| `SignInLink.swift`, `ExternalLink.swift` | The `grasp://auth-callback` link Google sign-in returns with (registration, hand-off to the open window); opening the browser |
 | `SessionVault.swift` | The session file, DPAPI-encrypted, at `Profiles\<id>\session.bin` |
 | `SupabaseSettings.swift` | The Supabase project URL and anon key (same as the Mac's Info.plist) |
 
@@ -140,7 +144,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - AI actions via Ollama (the core client already works on Windows)
 5. **Platform work:**
    - PDF text via Windows.Data.Pdf and OCR via Windows.Media.Ocr (`PDFExtractor`/`ImageExtractor` currently return nil on Windows)
-   - Google sign-in: PKCE via `/auth/v1/authorize`, with either a `grasp://` protocol activation (SwiftCrossUI supports URL schemes) or a loopback redirect, which needs the redirect URL added in Supabase
+   - ~~Google sign-in~~ **Done:** PKCE through `SupabaseAuth.oauthStart` / `completeOAuth`, back via `grasp://auth-callback` (already allowed in Supabase for the Mac). Tyler still has to try it for real.
    - an installer or packaging, and an app icon
 
 ## When you finish a chunk

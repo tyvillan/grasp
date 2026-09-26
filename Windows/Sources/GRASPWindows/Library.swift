@@ -101,7 +101,7 @@ final class Library {
     /// Where the library lives. `GRASP_SUPPORT_DIR` overrides it -- on a
     /// Mac, trying this app would otherwise open the real Mac app's
     /// library, which uses the same folder.
-    static func supportDirectory() throws -> URL {
+    nonisolated static func supportDirectory() throws -> URL {
         if let override = ProcessInfo.processInfo.environment["GRASP_SUPPORT_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }

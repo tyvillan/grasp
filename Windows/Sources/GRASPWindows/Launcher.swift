@@ -14,7 +14,10 @@ enum Launcher {
     static func main() {
         #if os(Windows)
         ConsoleOutput.tolerateInvalidParameters()
+        // Before the log redirect, which would truncate the open window's log.
+        if SignInLink.handOffIfLink() { return }
         ConsoleOutput.redirectIfDetached()
+        SignInLink.claim()
         #endif
         GRASPWindowsApp.main()
     }
