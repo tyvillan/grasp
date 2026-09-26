@@ -80,7 +80,7 @@ public actor SupabaseAuth {
 
     public func signIn(email: String, password: String) async throws -> SupabaseSession {
         let body = try JSONEncoder().encode(["email": email, "password": password])
-        return try await adopt(try await tokenRequest(grantType: "password", body: body))
+        return adopt(try await tokenRequest(grantType: "password", body: body))
     }
 
     /// Creates an account. Throws `.confirmEmail` when the project requires
@@ -95,7 +95,7 @@ public actor SupabaseAuth {
         guard let token = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
             throw SupabaseError.confirmEmail
         }
-        return try await adopt(token)
+        return adopt(token)
     }
 
     /// An access token good for at least another minute, refreshing first
@@ -111,7 +111,7 @@ public actor SupabaseAuth {
         guard let current = session else { throw SupabaseError.notSignedIn }
         let body = try JSONEncoder().encode(["refresh_token": current.refreshToken])
         do {
-            return try await adopt(try await tokenRequest(grantType: "refresh_token", body: body))
+            return adopt(try await tokenRequest(grantType: "refresh_token", body: body))
         } catch SupabaseError.server(let status, _) where (400..<500).contains(status) {
             // The refresh token was revoked or already used: the account
             // has to sign in again.

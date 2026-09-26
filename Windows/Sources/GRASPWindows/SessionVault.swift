@@ -37,7 +37,8 @@ nonisolated enum SessionVault {
 
     private static func transform(
         _ data: Data,
-        _ call: (UnsafeMutablePointer<DATA_BLOB>, UnsafeMutablePointer<DATA_BLOB>) -> WindowsBool
+        // Swift's WinSDK import hands these back as Bool, not WindowsBool.
+        _ call: (UnsafeMutablePointer<DATA_BLOB>, UnsafeMutablePointer<DATA_BLOB>) -> Bool
     ) -> Data? {
         var bytes = [UInt8](data)
         return bytes.withUnsafeMutableBufferPointer { buffer -> Data? in
