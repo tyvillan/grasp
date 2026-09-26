@@ -111,6 +111,7 @@ struct Sidebar: View {
     let library: Library
     @Binding var route: Route
     @Environment(\.chooseFile) var chooseFile
+    @State var addingCourse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -169,6 +170,10 @@ struct Sidebar: View {
                     }
                 }
                 .disabled(library.isImporting)
+                Text("+ New Course")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+                    .onTapGesture { addingCourse = true }
                 if library.decks.isEmpty {
                     Button("Try sample notes") {
                         Task { await library.importSample() }
@@ -186,6 +191,11 @@ struct Sidebar: View {
                 AccountPanel(account: library.account)
             }
             .padding(12)
+        }
+        .sheet(isPresented: $addingCourse) {
+            OrganizeSheetView(library: library, sheet: .newCourse,
+                              onCreated: { route = .course($0) },
+                              close: { addingCourse = false })
         }
     }
 }
@@ -220,23 +230,36 @@ struct SidebarRow: View {
 // MARK: - Course
 
 /// A course: its deck column, then the selected deck's page. "All Cards"
-/// sits above the real decks and covers every deck in the course.
+/// sits above the real decks and covers every deck in the course. The
+/// column's ••• menu organises the course, as the Mac's right-click menus
+/// do (SwiftCrossUI has no right-click on Windows).
 struct CourseView: View {
     let library: Library
     let course: Course
     @Binding var selectedDeckId: String?
+    @State var organizing: OrganizeSheet?
 
     var body: some View {
         let decks = library.decks(inCourse: course.id)
         let allCards = DeckScope(allCardsIn: decks, courseId: course.id, courseName: course.name)
-        let selected = decks.first { $0.id == selectedDeckId }.map(DeckScope.init(deck:)) ?? allCards
+        let selectedRow = decks.first { $0.id == selectedDeckId }
+        let selected = selectedRow.map(DeckScope.init(deck:)) ?? allCards
 
         HStack(spacing: 0) {
             DeckColumn(
+                course: course,
                 decks: decks,
                 allCards: allCards,
                 selectedId: selected.id,
-                select: { selectedDeckId = $0 }
+                select: { selectedDeckId = $0 },
+                organize: { sheet in
+                    // Archiving needs no questions: it's undone from Settings.
+                    if case .archive(let course) = sheet {
+                        library.setArchived(course.id, true)
+                    } else {
+                        organizing = sheet
+                    }
+                }
             )
             .frame(width: 260.0)
             .frame(maxHeight: .infinity)
@@ -245,13 +268,22 @@ struct CourseView: View {
             if decks.isEmpty {
                 VStack(spacing: 8) {
                     Text(course.name).font(GRASPFont.title).foregroundColor(GRASPColor.textPrimary)
-                    Text("No decks yet. Import this course's notes to make some.")
+                    Text("No decks yet. Import this course's notes, or add a deck from the ••• menu.")
                         .foregroundColor(GRASPColor.textSecondary)
+                    Button("New Deck…") { organizing = .newDeck(courseId: course.id) }.fixedSize()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                DeckView(library: library, scope: selected)
+                DeckView(library: library, scope: selected, deck: selectedRow) { organizing = $0 }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .sheet(isPresented: Binding(get: { organizing != nil }, set: { if !$0 { organizing = nil } })) {
+            if let organizing {
+                OrganizeSheetView(library: library, sheet: organizing,
+                                  onCreated: { selectedDeckId = $0 },
+                                  onDeleted: { selectedDeckId = nil },
+                                  close: { self.organizing = nil })
             }
         }
     }
@@ -260,18 +292,31 @@ struct CourseView: View {
 /// The course's decks, laid out like the Mac's `DeckListView`: name on the
 /// left, then the due badge and the card count in a right-aligned column.
 struct DeckColumn: View {
+    let course: Course
     let decks: [DeckRow]
     let allCards: DeckScope
     let selectedId: String
     /// Called with a deck id, or nil for "All Cards".
     let select: (String?) -> Void
+    let organize: (OrganizeSheet) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel("Decks")
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
+            HStack(spacing: 6) {
+                SectionLabel("Decks")
+                Spacer()
+                Menu("•••") {
+                    Button("New Deck…") { organize(.newDeck(courseId: course.id)) }
+                    Button("Edit Course…") { organize(.editCourse(course)) }
+                    Button("Archive Course") { organize(.archive(course)) }
+                    Button("Delete Course…") { organize(.deleteCourse(course)) }
+                }
+                .fixedSize()
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     DeckColumnRow(
@@ -332,6 +377,9 @@ struct DeckColumnRow: View {
 struct DeckView: View {
     let library: Library
     let scope: DeckScope
+    /// The real deck, or nil for a course's All Cards.
+    let deck: DeckRow?
+    let organize: (OrganizeSheet) -> Void
     @State var mode: StudyMode?
     /// Cards or Overview, as on the Mac. Kept when you switch decks, so
     /// reading through a course's lessons stays on the Overview tab.
@@ -397,6 +445,13 @@ struct DeckView: View {
                 }
                 Spacer()
                 SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                if let deck {
+                    Menu("•••") {
+                        Button("Rename Deck…") { organize(.renameDeck(deck)) }
+                        Button("Delete Deck…") { organize(.deleteDeck(deck)) }
+                    }
+                    .fixedSize()
+                }
             }
             // Study, Learn and Test in a fixed order, as on the Mac.
             HStack(spacing: 8) {

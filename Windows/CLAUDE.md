@@ -151,7 +151,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - ~~card editing and draft review, search~~ **Done:** the Cards tab lists cards (status filter, text filter, 50 at a time) with a menu to edit, approve, suspend, move, revert an AI refinement or delete, plus New Card; Search (sidebar) finds cards and notes and opens a note to read. Logic is GRASPCore's `CardActions` (`[needs Mac check]`). Not yet: multi-select bulk actions, duplicate review, AI refine.
    - ~~Learn mode, custom tests~~ **Done:** the deck header has Study / Learn / Test, each taking over the deck page (`StudySessionView.swift`, `TestSession.swift`). Flashcards use the Mac's two verdicts (Needs Review / I Know This), not four grades. Logic is GRASPCore's `Study.mark`, `learnRound`, `recordLearnAnswer`, `startTest`, `finishTest`… in `StudyModes.swift` (`[needs Mac check]`). Answers save without reloading the library; `Library.finishSession()` reloads when a session ends. Not yet: AI-written test questions, the focus timer, keyboard shortcuts (SwiftCrossUI has no key-press handler).
    - calendar and exams
-   - profile picker and PIN lock, settings screen
+   - ~~course and deck organising~~ **Done:** the deck column's ••• menu has New Deck, Edit Course (name, code, colour, timeline), Archive and Delete Course; the deck page's ••• has Rename and Delete Deck (move its cards or delete them); + New Course sits under Import. GRASPCore `LibraryActions` (`[needs Mac check]`). SwiftCrossUI has no right-click on WinUI (`TapGesture.secondary` fatalErrors), so these are menus, not context menus.
+   - profile picker and PIN lock
    - AI actions via Ollama (the core client already works on Windows)
 5. **Platform work:**
    - PDF text via Windows.Data.Pdf and OCR via Windows.Media.Ocr (`PDFExtractor`/`ImageExtractor` currently return nil on Windows)

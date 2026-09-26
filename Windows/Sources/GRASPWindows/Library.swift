@@ -421,14 +421,72 @@ final class Library {
         try? ProfileStore.update(profile, supportDirectory: supportDirectory)
     }
 
-    /// Shows an archived course again (the Mac's `setCourseArchived`).
+    /// Shows an archived course again.
     func unarchiveCourse(_ courseId: String) {
+        setArchived(courseId, false)
+    }
+
+    // MARK: - Organising courses and decks
+
+    func setArchived(_ courseId: String, _ archived: Bool) {
+        change { try LibraryActions.setCourseArchived(courseId, archived: archived, db: $0) }
+    }
+
+    /// Saves an edited course, with its timeline typed as text ("Fall
+    /// 2026"); an empty timeline files it under "No Timeline".
+    func saveCourse(_ course: Course, timeline: String) {
         change { db in
-            guard var course = try Course.fetchOne(db, key: courseId) else { return }
-            course.isArchived = false
-            course.updatedAt = Date()
-            try course.save(db)
+            var updated = course
+            updated.name = course.name.trimmingCharacters(in: .whitespaces)
+            let trimmed = timeline.trimmingCharacters(in: .whitespacesAndNewlines)
+            updated.semesterId = trimmed.isEmpty ? nil : try LibraryActions.findOrCreateSemester(name: trimmed, db: db)
+            try LibraryActions.updateCourse(updated, db: db)
         }
+    }
+
+    func addCourse(name: String, code: String?, timeline: String) -> String? {
+        var id: String?
+        change { db in
+            let trimmed = timeline.trimmingCharacters(in: .whitespacesAndNewlines)
+            let semesterId = trimmed.isEmpty ? nil : try LibraryActions.findOrCreateSemester(name: trimmed, db: db)
+            id = try LibraryActions.addManualCourse(name: name.trimmingCharacters(in: .whitespaces),
+                                                    code: code, semesterId: semesterId, db: db)
+        }
+        return id
+    }
+
+    func courseDeletionImpact(_ courseId: String) -> (materials: Int, cards: Int, reviews: Int)? {
+        try? database.queue.read { try LibraryActions.courseDeletionImpact(courseId, db: $0) }
+    }
+
+    func deleteCourse(_ courseId: String) {
+        change { try LibraryActions.removeCourseAndExclude(courseId, db: $0) }
+    }
+
+    func materialCount(inCourse courseId: String) -> Int {
+        (try? database.queue.read { try LibraryActions.materialCount(inCourse: courseId, db: $0) }) ?? 0
+    }
+
+    func semesterName(_ semesterId: String?) -> String {
+        semesters.first { $0.id == semesterId }?.name ?? ""
+    }
+
+    func createDeck(courseId: String, name: String) -> String? {
+        var id: String?
+        change { id = try LibraryActions.createDeck(courseId: courseId, name: name.trimmingCharacters(in: .whitespaces), db: $0) }
+        return id
+    }
+
+    func renameDeck(_ deckId: String, to name: String) {
+        change { try LibraryActions.renameDeck(deckId, name: name.trimmingCharacters(in: .whitespaces), db: $0) }
+    }
+
+    func deckCardCount(_ deckId: String) -> Int {
+        (try? database.queue.read { try LibraryActions.deckCardCount(deckId, db: $0) }) ?? 0
+    }
+
+    func deleteDeck(_ deckId: String, movingCardsTo target: String?) {
+        change { try LibraryActions.deleteDeck(deckId, migrateCardsTo: target, db: $0) }
     }
 
     /// Lets imports walk a folder again (the Mac's `includeFolder`).
