@@ -37,6 +37,64 @@ let platform = "Linux"
 let platform = "another platform"
 #endif
 
+// `swift run grasp-check extract <file>` prints the text GRASP reads from
+// one file (a PDF's text layer or its OCR, an image's OCR, a slide deck's
+// text) -- for checking a file before importing it, not part of the check.
+let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.first == "extract", arguments.count == 2 {
+    let url = URL(fileURLWithPath: arguments[1])
+    let text: String?
+    switch url.pathExtension.lowercased() {
+    case "pdf": text = PDFExtractor.extractText(from: url)
+    case "png", "jpg", "jpeg": text = ImageExtractor.extractText(from: url)
+    case "pptx": text = PptxExtractor.extractText(from: url)
+    default: text = try? String(contentsOf: url, encoding: .utf8)
+    }
+    guard let text else {
+        print("Couldn't read \(url.lastPathComponent).")
+        exit(1)
+    }
+    print(text)
+    exit(0)
+}
+
+// `swift run grasp-check guide <file>` prints what the study-guide parser
+// reads from a guide: a PDF, markdown, or a .txt of pages separated by
+// blank lines (saved `extract` output, so OCR doesn't run on every try).
+if arguments.first == "guide", arguments.count == 2 {
+    let url = URL(fileURLWithPath: arguments[1])
+    let pages: [String]?
+    switch url.pathExtension.lowercased() {
+    case "pdf": pages = PDFExtractor.extractPages(from: url)
+    case "txt": pages = (try? String(contentsOf: url, encoding: .utf8))?.components(separatedBy: "\n\n")
+    default: pages = (try? String(contentsOf: url, encoding: .utf8)).map { [$0] }
+    }
+    guard let pages else {
+        print("Couldn't read \(url.lastPathComponent).")
+        exit(1)
+    }
+    let guide = StudyGuideParser.parse(pages: pages)
+    print("Title: \(guide.title ?? "-")")
+    print("Exam date: \(guide.examDate ?? "-") · format: \(guide.format.joined(separator: " · "))")
+    for note in guide.notes { print("  note: \(note.prefix(90))") }
+    for part in guide.parts {
+        print("\nPart \(part.number.map(String.init) ?? "?") · \(part.title) · \(part.questionCount.map { "\($0) questions" } ?? "no count") · page \(part.page ?? 0)")
+        for skill in part.skills { print("  skill: \(skill.prefix(100))") }
+        for trap in part.traps { print("  trap: \(trap.prefix(100))") }
+        for term in part.terms { print("  term: \(term.term) = \(term.definition.replacingOccurrences(of: "\n", with: " / ").prefix(80))") }
+        for formula in part.formulas { print("  formula: \(formula.replacingOccurrences(of: "\n", with: " / ").prefix(90))") }
+        for item in part.remember { print("  remember: \(item.prefix(90))") }
+        for note in part.notes { print("  note: \(note.replacingOccurrences(of: "\n", with: " / ").prefix(90))") }
+        for example in part.examples {
+            print("  \(example.isPractice ? "practice" : "illustration") \(example.label ?? "Example") p\(example.page ?? 0)")
+            print("    Q: \(example.question.replacingOccurrences(of: "\n", with: " / ").prefix(140))")
+            for step in example.steps { print("    step: \(step.prefix(90))") }
+            if let answer = example.answer { print("    A: \(answer.replacingOccurrences(of: "\n", with: " / ").prefix(140))") }
+        }
+    }
+    exit(0)
+}
+
 print("GRASP core check on \(platform)\n")
 
 let workspace = FileManager.default.temporaryDirectory

@@ -38,6 +38,9 @@ public enum SyncSchema {
         Table(name: "testAttempt", primaryKey: ["id"]),
         Table(name: "testItem", primaryKey: ["id"]),
         Table(name: "calendarEvent", primaryKey: ["id"]),
+        Table(name: "studyGuide", primaryKey: ["id"]),
+        Table(name: "studyGuidePartDeck", primaryKey: ["guideId", "partIndex", "deckId"]),
+        Table(name: "skillRating", primaryKey: ["guideId", "skillId"]),
         Table(name: "excludedFolder", primaryKey: ["folderPath"]),
     ]
 
@@ -88,9 +91,14 @@ public enum SyncSchema {
     /// (Re)creates the change-capturing triggers for every synced table.
     /// A later migration that adds a column needs nothing; one that adds a
     /// synced table appends it to `tables` and calls this again.
+    ///
+    /// Tables that don't exist yet are skipped: an earlier migration (v8)
+    /// calls this on a fresh database before later migrations have created
+    /// the tables they added to `tables`, and those migrations install
+    /// their own tables' triggers when they call this again.
     public static func installTriggers(_ db: Database) throws {
         let guardClause = "(SELECT enabled = 1 AND applyingRemote = 0 FROM syncState WHERE id = 1)"
-        for table in tables {
+        for table in tables where try db.tableExists(table.name) {
             for (event, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
                 let trigger = "sync_\(table.name)_\(event.lowercased())"
                 try db.execute(sql: "DROP TRIGGER IF EXISTS \(trigger)")

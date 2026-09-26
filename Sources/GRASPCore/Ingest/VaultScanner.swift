@@ -15,6 +15,8 @@ public struct ImportSummary: Sendable, Equatable {
     public var filesSkippedEmpty = 0
     public var cardsCreated = 0
     public var duplicatesSkipped = 0
+    /// Files read as exam study guides rather than lecture notes.
+    public var studyGuidesImported = 0
     public var semesterCount = 0
     public var courseCount = 0
     public var errors: [String] = []
@@ -536,8 +538,16 @@ public actor VaultScanner {
             ?? parsedName.topic.flatMap { FilenameParsing.chapter(fromTopic: $0) }
         material.updatedAt = Date()
 
+        // A study guide keeps its page breaks, so its parts and examples
+        // can say which page a table or figure is on. Extracted once: OCR
+        // of a screenshot guide takes a while.
+        let isGuide = StudyGuideMatcher.isStudyGuide(title: fileName)
+        var pages: [String]?
         let extracted: String?
         switch kind {
+        case .pdf where isGuide:
+            pages = PDFExtractor.extractPages(from: fileURL)
+            extracted = pages?.filter { !$0.isEmpty }.joined(separator: "\n\n")
         case .pdf: extracted = PDFExtractor.extractText(from: fileURL)
         case .docx: extracted = DocxExtractor.extractText(from: fileURL)
         case .ipynb: extracted = IpynbExtractor.extractText(from: fileURL)
@@ -563,7 +573,7 @@ public actor VaultScanner {
         }
 
         try finishImportingBody(
-            &material, courseId: courseId, rawBody: extracted,
+            &material, courseId: courseId, rawBody: extracted, pages: pages,
             filenameDate: parsedName.dateFromFilename,
             hasLectureIdentity: parsedName.dateFromFilename != nil && parsedName.unitLabel != nil,
             db: db, summary: &summary
@@ -611,8 +621,9 @@ public actor VaultScanner {
     /// hand: clean, reflow, decide study-worthiness, persist the note text,
     /// and (re)parse deterministic cards.
     private func finishImportingBody(
-        _ material: inout Material, courseId: String, rawBody: String, filenameDate: Date?,
-        hasLectureIdentity: Bool = false, db: Database, summary: inout ImportSummary
+        _ material: inout Material, courseId: String, rawBody: String, pages: [String]? = nil,
+        filenameDate: Date?, hasLectureIdentity: Bool = false, db: Database,
+        summary: inout ImportSummary
     ) throws {
         let cleaned = TextCleaning.clean(rawBody)
         let (dateFromBody, bodyWithoutDate) = TextCleaning.extractDateLine(cleaned)
@@ -620,9 +631,15 @@ public actor VaultScanner {
         let wordCount = reflowed.split(whereSeparator: { $0 == " " || $0 == "\n" }).count
         let hasMath = reflowed.contains("\\(") || reflowed.contains("\\[")
 
+        // A study guide spans a whole exam, so its "cards" would pile into
+        // one catch-all deck detached from the lectures they came from. It
+        // becomes a `StudyGuide` instead (below), tied to the exam and to
+        // the lecture decks it covers.
+        let isGuide = StudyGuideMatcher.isStudyGuide(title: material.title)
         material.noteDate = dateFromBody ?? filenameDate
         material.isStudyWorthy = wordCount >= 30
             && wordCount <= Self.maxWordsForPairParsing
+            && !isGuide
             && !Self.isReferenceDocument(
                 title: material.title, hasLectureIdentity: hasLectureIdentity
             )
@@ -643,6 +660,11 @@ public actor VaultScanner {
         // a note turned all of its approved cards back into fresh drafts and
         // brought deleted ones back.
         try Self.deleteReplaceableDrafts(materialId: material.id, db: db)
+
+        if isGuide {
+            try StudyGuideActions.importGuide(material: material, pages: pages ?? [rawBody], db: db)
+            summary.studyGuidesImported += 1
+        }
 
         if material.isStudyWorthy {
             let noteHadCards = try Card.filter(Column("materialId") == material.id).fetchCount(db) > 0

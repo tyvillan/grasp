@@ -337,6 +337,56 @@ enum Schema {
             try SyncSchema.createTables(db)
         }
 
+        // Exam study guides (see `StudyGuide`). A guide is its own row, not
+        // a kind of deck or overview: it belongs to an exam rather than a
+        // lecture, spans several decks, and carries what lecture notes don't
+        // (question counts per part, skills, traps). The parsed document is
+        // one JSON body like `noteOverview`'s; which decks each part covers,
+        // and how sure the student is of each skill, are rows of their own
+        // because the student edits them and they must sync one at a time.
+        migrator.registerMigration("v9_study_guide") { db in
+            try db.create(table: "studyGuide") { t in
+                t.column("id", .text).primaryKey()
+                t.column("courseId", .text).notNull().indexed()
+                    .references("course", onDelete: .cascade)
+                t.column("examEventId", .text).indexed()
+                    .references("calendarEvent", onDelete: .setNull)
+                t.column("materialId", .text)
+                    .references("material", onDelete: .setNull)
+                t.column("title", .text).notNull()
+                t.column("bodyJSON", .text).notNull()
+                t.column("bodySchemaVersion", .integer).notNull().defaults(to: 1)
+                t.column("sourceContentHash", .text)
+                t.column("parser", .text).notNull().defaults(to: "rules")
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX studyGuide_materialId ON studyGuide(materialId)
+                WHERE materialId IS NOT NULL
+                """)
+            try db.create(table: "studyGuidePartDeck") { t in
+                t.column("guideId", .text).notNull()
+                    .references("studyGuide", onDelete: .cascade)
+                t.column("partIndex", .integer).notNull()
+                t.column("deckId", .text).notNull().indexed()
+                    .references("deck", onDelete: .cascade)
+                t.column("isManual", .boolean).notNull().defaults(to: false)
+                t.primaryKey(["guideId", "partIndex", "deckId"])
+            }
+            try db.create(table: "skillRating") { t in
+                t.column("guideId", .text).notNull()
+                    .references("studyGuide", onDelete: .cascade)
+                t.column("skillId", .text).notNull()
+                t.column("rating", .text).notNull()
+                t.column("ratedAt", .datetime).notNull()
+                t.primaryKey(["guideId", "skillId"])
+            }
+            // The new tables sync like the rest; this re-creates every
+            // table's triggers, which is idempotent for the old ones.
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 }
