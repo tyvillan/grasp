@@ -139,6 +139,13 @@ public enum ProfileStore {
             try? fm.copyItem(at: url, to: backup)
         }
         let data = try JSONEncoder().encode(profiles)
+        #if os(Windows)
+        // An atomic write swaps the file in by renaming it, which Windows
+        // refuses (error 32) while anything -- Defender, the search indexer
+        // -- has profiles.json open. A plain write only needs to open it.
+        try data.write(to: url)
+        #else
         try data.write(to: url, options: .atomic)
+        #endif
     }
 }

@@ -3,14 +3,47 @@ import GRASPCore
 import GRDB
 import Observation
 
-/// One deck as the sidebar lists it.
+/// One deck as the deck column lists it.
 struct DeckRow: Identifiable, Hashable {
     let id: String
+    let courseId: String
     let courseName: String
     let name: String
     let total: Int
     let due: Int
     let drafts: Int
+}
+
+/// What a deck page shows: one deck, or a course's "All Cards" -- every
+/// deck in it at once, as on the Mac.
+struct DeckScope: Hashable {
+    let id: String
+    let title: String
+    let courseName: String
+    let deckIds: [String]
+    let total: Int
+    let due: Int
+    let drafts: Int
+
+    init(deck: DeckRow) {
+        id = deck.id
+        title = deck.name
+        courseName = deck.courseName
+        deckIds = [deck.id]
+        total = deck.total
+        due = deck.due
+        drafts = deck.drafts
+    }
+
+    init(allCardsIn decks: [DeckRow], courseId: String, courseName: String) {
+        id = "all:\(courseId)"
+        title = "All Cards"
+        self.courseName = courseName
+        deckIds = decks.map(\.id)
+        total = decks.reduce(0) { $0 + $1.total }
+        due = decks.reduce(0) { $0 + $1.due }
+        drafts = decks.reduce(0) { $0 + $1.drafts }
+    }
 }
 
 /// The signed-in profile's library: what the screens show, and the
@@ -19,7 +52,13 @@ struct DeckRow: Identifiable, Hashable {
 @Observable
 final class Library {
     let database: GRASPDatabase
+    /// Every live deck in a course that isn't archived, in each course's
+    /// deck order (`sortIndex`, `chapter`, `name`, as the Mac orders them).
     private(set) var decks: [DeckRow] = []
+    /// Oldest first, by `sortKey`; the sidebar shows them newest first.
+    private(set) var semesters: [Semester] = []
+    /// Courses that aren't archived, keyed by semester; `nil` is "No Timeline".
+    private(set) var coursesBySemester: [String?: [Course]] = [:]
     /// The result of the last import, or why it failed.
     var status: String?
     private(set) var isImporting = false
@@ -54,9 +93,16 @@ final class Library {
 
     func reload() {
         let now = Date()
-        decks = (try? database.queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT deck.id, deck.name, course.name AS courseName,
+        try? database.queue.read { db in
+            // Same ordering as the Mac's AppStore.reload().
+            semesters = try Semester.order(Column("sortKey")).fetchAll(db)
+            let courses = try Course
+                .filter(Column("isArchived") == false)
+                .order(Column("sortIndex"), Column("name"))
+                .fetchAll(db)
+            coursesBySemester = Dictionary(grouping: courses, by: \.semesterId)
+            decks = try Row.fetchAll(db, sql: """
+                SELECT deck.id, deck.name, deck.courseId, course.name AS courseName,
                        COUNT(card.id) AS total,
                        COALESCE(SUM(CASE WHEN card.status = 'active' AND card.due <= ? THEN 1 ELSE 0 END), 0) AS due,
                        COALESCE(SUM(CASE WHEN card.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts
@@ -67,13 +113,34 @@ final class Library {
                      AND card.deletedAt IS NULL AND card.status != 'suspended'
                 WHERE deck.deletedAt IS NULL AND course.isArchived = 0
                 GROUP BY deck.id
-                ORDER BY course.name, deck.sortIndex, deck.name
+                ORDER BY deck.sortIndex, deck.chapter, deck.name
                 """, arguments: [now])
             .map { row in
-                DeckRow(id: row["id"], courseName: row["courseName"], name: row["name"],
-                        total: row["total"], due: row["due"], drafts: row["drafts"])
+                DeckRow(id: row["id"], courseId: row["courseId"], courseName: row["courseName"],
+                        name: row["name"], total: row["total"], due: row["due"], drafts: row["drafts"])
             }
-        }) ?? []
+        }
+    }
+
+    /// Courses newest semester first, then "No Timeline", as the Mac's
+    /// sidebar lists them. Semesters with no live course are left out.
+    var courseSections: [(title: String, courses: [Course])] {
+        var sections = semesters.reversed().compactMap { semester -> (String, [Course])? in
+            guard let courses = coursesBySemester[semester.id], !courses.isEmpty else { return nil }
+            return (semester.name, courses)
+        }
+        if let unfiled = coursesBySemester[nil], !unfiled.isEmpty {
+            sections.append(("No Timeline", unfiled))
+        }
+        return sections
+    }
+
+    func course(_ id: String) -> Course? {
+        coursesBySemester.values.lazy.flatMap { $0 }.first { $0.id == id }
+    }
+
+    func decks(inCourse courseId: String) -> [DeckRow] {
+        decks.filter { $0.courseId == courseId }
     }
 
     // MARK: - Importing
@@ -110,12 +177,12 @@ final class Library {
 
     // MARK: - Studying
 
-    func dueCards(inDeck deckId: String) -> [Card] {
-        (try? database.queue.read { try Study.dueCards(inDecks: [deckId], db: $0) }) ?? []
+    func dueCards(inDecks deckIds: [String]) -> [Card] {
+        (try? database.queue.read { try Study.dueCards(inDecks: deckIds, db: $0) }) ?? []
     }
 
-    func approveDrafts(inDeck deckId: String) {
-        try? database.queue.write { try Study.approveDrafts(inDecks: [deckId], db: $0) }
+    func approveDrafts(inDecks deckIds: [String]) {
+        try? database.queue.write { try Study.approveDrafts(inDecks: deckIds, db: $0) }
         reload()
         account.noteLocalChange()
     }
@@ -128,10 +195,10 @@ final class Library {
 
     // MARK: - Figures
 
-    /// The first row reduction in this deck's notes, walked step by step.
-    func rowReduction(inDeck deckId: String) -> RowReductionSteps? {
+    /// The first row reduction in these decks' notes, walked step by step.
+    func rowReduction(inDecks deckIds: [String]) -> RowReductionSteps? {
         try? database.queue.read { db in
-            for material in try OverviewQueries.materials(forDecks: [deckId], db: db) {
+            for material in try OverviewQueries.materials(forDecks: deckIds, db: db) {
                 guard let note = try NoteText.fetchOne(db, key: material.id) else { continue }
                 for text in [note.raw, note.reflowed] {
                     if let walk = NoteMatrices.walkthroughs(in: text).first {

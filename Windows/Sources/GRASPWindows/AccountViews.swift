@@ -10,13 +10,12 @@ struct AccountPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Divider()
             if let email = account.email {
-                Text("Signed in as \(email)").font(.caption)
+                Text("Signed in as \(email)").font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
                 if account.isSyncing {
-                    Text("Syncing…").font(.caption).foregroundColor(.gray)
+                    Text("Syncing…").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
                 } else if let status = account.status {
-                    Text(status).font(.caption).foregroundColor(.gray)
+                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
                 }
                 HStack(spacing: 8) {
                     Button("Sync now") { Task { await account.syncNow() } }
@@ -27,7 +26,7 @@ struct AccountPanel: View {
                 }
             } else {
                 if let status = account.status {
-                    Text(status).font(.caption).foregroundColor(.gray)
+                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
                 }
                 Button("Sign in to sync…") { showingSignIn = true }
             }
