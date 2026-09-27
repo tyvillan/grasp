@@ -13,6 +13,9 @@ import SwiftCrossUI
 /// every one of them up front; one at a time keeps the tab quick.
 struct OverviewPane: View {
     let library: Library
+    /// A key term's "cards" chip: show those cards on the Cards tab, as the
+    /// Mac does.
+    var onOpenCards: ([String]) -> Void = { _ in }
     let scope: DeckScope
     @State var lessonIndex = 0
     /// Notes waiting on "Write Them" in the confirmation panel.
@@ -83,7 +86,7 @@ struct OverviewPane: View {
     private func lessonPage(_ overview: DeckOverview, index: Int) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                LessonView(overview: overview.entries[index])
+                LessonView(overview: overview.entries[index], onOpenCards: onOpenCards)
                 if index + 1 < overview.entries.count {
                     HStack(spacing: 8) {
                         Spacer()
@@ -321,6 +324,7 @@ struct ProgressBar: View {
 /// overflows the main thread's stack on Windows (see CLAUDE.md).
 struct LessonView: View {
     let overview: RenderedOverview
+    var onOpenCards: ([String]) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -329,7 +333,7 @@ struct LessonView: View {
                 ObjectivesCallout(objectives: overview.objectives)
             }
             ForEach(overview.sections, id: \.id) { section in
-                LessonSectionView(section: section)
+                LessonSectionView(section: section, onOpenCards: onOpenCards)
             }
             if !overview.formulas.isEmpty {
                 FormulasCallout(formulas: overview.formulas)
@@ -489,6 +493,7 @@ private struct DiagramSection: View {
 
 private struct LessonSectionView: View {
     let section: RenderedSection
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -507,7 +512,7 @@ private struct LessonSectionView: View {
             }
 
             if !section.terms.isEmpty {
-                KeyTermsCallout(terms: section.terms, isMath: section.isMath)
+                KeyTermsCallout(terms: section.terms, isMath: section.isMath, onOpenCards: onOpenCards)
                     .padding(.top, 4)
             }
 
@@ -559,6 +564,7 @@ struct Callout<Content: View>: View {
 private struct KeyTermsCallout: View {
     let terms: [LinkedDefinition]
     let isMath: Bool
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         Callout(label: terms.count == 1 ? "Key term" : "Key terms", tint: GRASPColor.success) {
@@ -570,8 +576,9 @@ private struct KeyTermsCallout: View {
                                 .font(LessonFont.prose.weight(.semibold))
                                 .foregroundColor(GRASPColor.textPrimary)
                             if !term.cardIds.isEmpty {
-                                Chip(text: term.cardIds.count == 1 ? "1 card" : "\(term.cardIds.count) cards",
+                                Chip(text: term.cardIds.count == 1 ? "1 card ›" : "\(term.cardIds.count) cards ›",
                                      tint: GRASPColor.success, soft: GRASPColor.successSoft)
+                                    .onTapGesture { onOpenCards(term.cardIds) }
                             }
                         }
                         Text(LessonText.clean(term.text, math: isMath))

@@ -453,6 +453,8 @@ struct DeckView: View {
     /// Cards or Overview, as on the Mac. Kept when you switch decks, so
     /// reading through a course's lessons stays on the Overview tab.
     @State var tab: DeckTab = .cards
+    /// Cards picked from an overview's key term, shown alone on the Cards tab.
+    @State var focusCards: Set<String>?
 
     enum DeckTab: String, CaseIterable {
         case cards = "Cards"
@@ -470,7 +472,10 @@ struct DeckView: View {
                     CardJobStrip(job: job) { library.dismissCardJob(forCourse: library.courseId(of: scope)) }
                 }
                 if tab == .overview {
-                    OverviewPane(library: library, scope: scope)
+                    OverviewPane(library: library, onOpenCards: { ids in
+                        focusCards = Set(ids)
+                        tab = .cards
+                    }, scope: scope)
                 } else {
                     cardsPage
                 }
@@ -596,7 +601,7 @@ struct DeckView: View {
                     Text("New cards start as drafts. Approve them to study them.")
                         .foregroundColor(GRASPColor.textSecondary)
                 }
-                CardList(library: library, scope: scope)
+                CardList(library: library, scope: scope, focus: $focusCards)
             }
             .padding(28)
         }

@@ -10,6 +10,8 @@ import SwiftCrossUI
 struct CardList: View {
     let library: Library
     let scope: DeckScope
+    /// Cards opened from an overview's key term; nil shows the whole deck.
+    @Binding var focus: Set<String>?
     @State var filter: CardFilter = .all
     @State var mastery: MasteryFilter = .all
     @State var sort: CardSort = .deckOrder
@@ -29,8 +31,22 @@ struct CardList: View {
         let levels = library.learnLevels(inDecks: scope.deckIds)
         let matching = sort.apply(cards.filter {
             filter.includes($0) && mastery.includes($0, levels: levels) && matches($0)
+                && (focus?.contains($0.id) ?? true)
         })
         VStack(alignment: .leading, spacing: 12) {
+            if let focus {
+                HStack(spacing: 10) {
+                    Text("Showing the \(focus.count == 1 ? "card" : "\(focus.count) cards") for a key term in the overview.")
+                        .font(GRASPFont.body)
+                        .foregroundColor(GRASPColor.textSecondary)
+                    Spacer()
+                    Button("Show All Cards") { self.focus = nil }.fixedSize()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(GRASPColor.successSoft)
+                .cornerRadius(8)
+            }
             HStack(spacing: 10) {
                 SegmentedChoice(options: CardFilter.allCases, selection: filter,
                                 label: { "\($0.label) \(cards.filter($0.includes).count)" }) {
@@ -103,6 +119,7 @@ struct CardList: View {
             shown = Self.pageSize
             text = ""
             selection = nil
+            focus = nil
         }
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
