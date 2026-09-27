@@ -297,6 +297,14 @@ private struct CardActionsBar: View {
             if card.isContextRefined {
                 Button("Revert AI Rewrite") { apply { library.revertContextRefinement(card.id) } }.fixedSize()
             }
+            // Any card from a note, approved or not: a clumsy or off-topic
+            // card can need a second look long after it was approved.
+            if card.materialId != nil {
+                Button("Refine with AI") {
+                    apply { library.refineCardWithAI(card.id, courseId: library.courseId(ofCard: card.id)) }
+                }
+                .fixedSize()
+            }
             Spacer()
             if !moveTargets.isEmpty {
                 Text("Move to").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()

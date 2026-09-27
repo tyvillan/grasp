@@ -195,9 +195,29 @@ struct SettingsScreen: View {
             case .running(let models) where models.isEmpty:
                 Caption("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in a terminal.")
             case .running(let models):
-                Caption("Models on this PC: \(models.joined(separator: ", ")).")
+                Caption("Models on this PC: \(models.joined(separator: ", ")). GRASP uses "
+                        + "\(OllamaModelChoice.resolve(preferred: nil, installed: models) ?? models[0]) for lessons, "
+                        + "card refinement and filling gaps (a deck's Tools menu).")
             }
-            Caption("AI card refinement, lessons and test questions come to Windows later; this shows whether GRASP can see Ollama.")
+            if case .running(let models) = ollama, !models.isEmpty {
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check all cards against their notes")
+                            .font(GRASPFont.rowTitle)
+                            .foregroundColor(GRASPColor.textPrimary)
+                        Caption("A one-time sweep, card by card: a definition that reads like assignment instructions or a vague fragment is rewritten from its note, or removed if the note doesn't support one. Rewrites can be reverted from each card. Takes a while on a big library.")
+                    }
+                    Spacer()
+                    Button("Check All Cards") { library.sweepAllCardsWithAI() }
+                        .disabled(library.cardJob(forCourse: nil).map { !$0.isFinished } ?? false)
+                        .fixedSize()
+                }
+                if let job = library.cardJob(forCourse: nil) {
+                    CardJobStrip(job: job) { library.dismissCardJob(forCourse: nil) }
+                        .cornerRadius(6)
+                }
+            }
         }
     }
 

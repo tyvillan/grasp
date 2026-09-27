@@ -537,6 +537,22 @@ final class Library {
         overviewJobs[courseId ?? ""] = nil
     }
 
+    /// The card AI job for each course ("" for library-wide ones).
+    private(set) var cardJobs: [String: CardAIJob] = [:]
+
+    func cardJob(forCourse courseId: String?) -> CardAIJob? { cardJobs[courseId ?? ""] }
+
+    func dismissCardJob(forCourse courseId: String?) { cardJobs[courseId ?? ""] = nil }
+
+    /// One card AI job at a time per course.
+    func startCardJob(_ headline: String, courseId: String?,
+                      _ work: @escaping (any CardGenerator, GRASPDatabase) async -> String) {
+        guard cardJob(forCourse: courseId).map(\.isFinished) ?? true else { return }
+        let job = CardAIJob(headline: headline)
+        cardJobs[courseId ?? ""] = job
+        job.run(library: self, work)
+    }
+
     /// A lesson was just saved: show it, and sync it to the Mac.
     func overviewsChanged() {
         reload()

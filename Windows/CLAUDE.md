@@ -153,7 +153,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - calendar and exams
    - ~~course and deck organising~~ **Done:** the deck column's ••• menu has New Deck, Edit Course (name, code, colour, timeline), Archive and Delete Course; the deck page's ••• has Rename and Delete Deck (move its cards or delete them); + New Course sits under Import. GRASPCore `LibraryActions` (`[needs Mac check]`). SwiftCrossUI has no right-click on WinUI (`TapGesture.secondary` fatalErrors), so these are menus, not context menus.
    - profile picker and PIN lock
-   - AI actions via Ollama (the core client already works on Windows)
+   - ~~AI card actions~~ **Done:** the deck header's Tools menu has Refine Drafts with AI, Fill Gaps with AI and Review Duplicates; the card window has Refine with AI; Settings has the check-every-card sweep. GRASPCore `CardAI` (`[needs Mac check]`); `CardAIJob` runs them with progress and Stop. Not yet: AI-written test questions.
 5. **Platform work:**
    - PDF text via Windows.Data.Pdf and OCR via Windows.Media.Ocr (`PDFExtractor`/`ImageExtractor` currently return nil on Windows)
    - ~~Google sign-in~~ **Done:** PKCE through `SupabaseAuth.oauthStart` / `completeOAuth`, back via `grasp://auth-callback` (already allowed in Supabase for the Mac). Tyler still has to try it for real.

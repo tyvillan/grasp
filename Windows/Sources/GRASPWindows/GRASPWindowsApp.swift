@@ -397,6 +397,9 @@ struct DeckView: View {
             } else {
                 header
                 Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                if let job = library.cardJob(forCourse: library.courseId(of: scope)) {
+                    CardJobStrip(job: job) { library.dismissCardJob(forCourse: library.courseId(of: scope)) }
+                }
                 if tab == .overview {
                     OverviewPane(library: library, scope: scope)
                 } else {
@@ -409,7 +412,46 @@ struct DeckView: View {
             if mode != nil { end() }
             takeStudyRequest()
         }
-        .onAppear { takeStudyRequest() }    }
+        .onAppear { takeStudyRequest() }
+        .task { hasModel = await library.localModel() != nil }
+        .sheet(isPresented: Binding(get: { tool != nil }, set: { if !$0 { tool = nil } })) {
+            switch tool {
+            case .fillGaps:
+                FillGapsSheet(start: { perNote, topic in
+                    library.fillGapsWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope),
+                                           perNote: perNote, topic: topic)
+                }, close: { tool = nil })
+            case .duplicates:
+                DuplicateReviewSheet(groups: library.duplicateGroups(inDecks: scope.deckIds),
+                                     merge: { library.mergeDuplicates($0) }, close: { tool = nil })
+            case nil:
+                EmptyView()
+            }
+        }
+    }
+
+    /// Whether Ollama is up, checked when the page opens: the AI items only
+    /// appear when there's a model to run them, as on the Mac.
+    @State var hasModel = false
+    @State var tool: DeckTool?
+
+    enum DeckTool { case fillGaps, duplicates }
+
+    /// The Mac's deck tools: the AI actions, and duplicate review.
+    private var toolsMenu: some View {
+        Menu("Tools") {
+            if hasModel {
+                if scope.drafts > 0 {
+                    Button("Refine \(scope.drafts) Drafts with AI") {
+                        library.refineDeckWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope))
+                    }
+                }
+                Button("Fill Gaps with AI…") { tool = .fillGaps }
+            }
+            Button("Review Duplicates…") { tool = .duplicates }
+        }
+        .fixedSize()
+    }
 
     @ViewBuilder
     private func session(_ mode: StudyMode) -> some View {
@@ -467,6 +509,7 @@ struct DeckView: View {
                         .fixedSize()
                 }
                 Spacer()
+                toolsMenu
             }
         }
         .padding(.horizontal, 28)
