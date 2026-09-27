@@ -11,8 +11,11 @@ import CoreGraphics
 /// it. `nil` is reserved for the file itself failing to load at all.
 public enum ImageExtractor {
     public static func extractText(from url: URL) -> String? {
-        #if !canImport(Vision)
-        // Windows: not yet -- Windows.Media.Ocr is the planned reader.
+        #if os(Windows)
+        // Windows' own OCR engine (see WindowsOCR); skipped under tests like Vision below.
+        guard ProcessInfo.processInfo.environment["GRASP_SKIP_OCR"] != "1" else { return "" }
+        return WindowsOCR.extractText(from: url)
+        #elseif !canImport(Vision)
         return nil
         #else
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),

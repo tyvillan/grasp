@@ -20,6 +20,14 @@ final class AppSettings {
     var calendarMode: CalendarMode = .month { didSet { save() } }
     /// The notes folder "Import now" re-imports; nil until one is chosen.
     var notesFolder: String? { didSet { save() } }
+    /// Tests add questions the local model writes from your notes, as the
+    /// Mac's "AI test questions" setting does.
+    var aiTestQuestions = false { didSet { save() } }
+    /// The focus timer's work and break lengths and its per-interval card
+    /// target (0 hides it), with the Mac's defaults.
+    var focusWorkMinutes = 25 { didSet { save() } }
+    var focusBreakMinutes = 5 { didSet { save() } }
+    var focusCardTarget = 20 { didSet { save() } }
 
     @ObservationIgnored private let file: URL
     @ObservationIgnored private var isLoading = false
@@ -29,6 +37,10 @@ final class AppSettings {
         var weekStartsOnMonday: Bool?
         var calendarMode: CalendarMode?
         var notesFolder: String?
+        var aiTestQuestions: Bool?
+        var focusWorkMinutes: Int?
+        var focusBreakMinutes: Int?
+        var focusCardTarget: Int?
     }
 
     init(file: URL) {
@@ -41,6 +53,10 @@ final class AppSettings {
         weekStartsOnMonday = stored.weekStartsOnMonday ?? weekStartsOnMonday
         calendarMode = stored.calendarMode ?? calendarMode
         notesFolder = stored.notesFolder
+        aiTestQuestions = stored.aiTestQuestions ?? aiTestQuestions
+        focusWorkMinutes = stored.focusWorkMinutes ?? focusWorkMinutes
+        focusBreakMinutes = stored.focusBreakMinutes ?? focusBreakMinutes
+        focusCardTarget = stored.focusCardTarget ?? focusCardTarget
     }
 
     /// The calendar the app's date grids use, starting the week on the
@@ -54,7 +70,9 @@ final class AppSettings {
     private func save() {
         guard !isLoading else { return }
         let stored = Stored(dailyGoal: dailyGoal, weekStartsOnMonday: weekStartsOnMonday,
-                            calendarMode: calendarMode, notesFolder: notesFolder)
+                            calendarMode: calendarMode, notesFolder: notesFolder,
+                            aiTestQuestions: aiTestQuestions, focusWorkMinutes: focusWorkMinutes,
+                            focusBreakMinutes: focusBreakMinutes, focusCardTarget: focusCardTarget)
         guard let data = try? JSONEncoder().encode(stored) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Not atomic: Windows refuses the rename an atomic write ends with

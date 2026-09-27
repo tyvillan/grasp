@@ -61,11 +61,12 @@ final class Library {
     private(set) var coursesBySemester: [String?: [Course]] = [:]
     /// The result of the last import, or why it failed.
     var status: String?
-    private(set) var isImporting = false
+    /// Set while any import runs (the notes folder, or files into a course).
+    var isImporting = false
     /// Sign-in and sync. Set up after the library loads, since it reloads
     /// the library when another device's changes arrive.
     private(set) var account: Account!
-    /// The open profile (there's no profile picker yet, so the first).
+    /// The open profile, chosen in `ProfilePicker` (or the only one).
     private(set) var profile: Profile
     /// This profile's preferences.
     let settings: AppSettings
@@ -79,23 +80,49 @@ final class Library {
     private(set) var revision = 0
     private let supportDirectory: URL
 
-    init() throws {
+    init(profile: Profile) throws {
         let support = try Self.supportDirectory()
         supportDirectory = support
+        self.profile = profile
+        settings = AppSettings(file: profile.databaseURL(supportDirectory: support)
+            .deletingLastPathComponent().appendingPathComponent("settings.json"))
+        database = try GRASPDatabase(path: profile.databaseURL(supportDirectory: support))
+        reload()
+        account = Account(database: database, profile: profile, supportDirectory: support) { [weak self] in
+            self?.reload()
+        }
+    }
+
+    /// Leaving this profile for another: stop syncing and any AI runs, so
+    /// nothing keeps writing to a library no longer on screen.
+    func close() {
+        account.stop()
+        for job in overviewJobs.values { job.stop() }
+        for job in cardJobs.values { job.stop() }
+    }
+
+    /// Every profile on this PC, making the first one on a fresh install.
+    nonisolated static func profiles() throws -> [Profile] {
+        let support = try supportDirectory()
         var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
-        // No profile picker or sign-in yet: a fresh install gets one profile.
         if profiles.isEmpty {
             profiles = [Profile(name: "Me")]
             try ProfileStore.save(profiles, supportDirectory: support)
         }
-        profile = profiles[0]
-        settings = AppSettings(file: profiles[0].databaseURL(supportDirectory: support)
-            .deletingLastPathComponent().appendingPathComponent("settings.json"))
-        database = try GRASPDatabase(path: profiles[0].databaseURL(supportDirectory: support))
-        reload()
-        account = Account(database: database, profile: profiles[0], supportDirectory: support) { [weak self] in
-            self?.reload()
-        }
+        return profiles
+    }
+
+    nonisolated static func addProfile(_ profile: Profile) throws {
+        let support = try supportDirectory()
+        var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
+        profiles.append(profile)
+        try ProfileStore.save(profiles, supportDirectory: support)
+    }
+
+    /// Sets, changes or (with nil) removes this profile's PIN.
+    func setPIN(_ pin: String?) {
+        profile.pinHash = pin.map(ProfileStore.hashPIN)
+        try? ProfileStore.update(profile, supportDirectory: supportDirectory)
     }
 
     /// Where the library lives. `GRASP_SUPPORT_DIR` overrides it -- on a
@@ -225,10 +252,93 @@ final class Library {
         account.noteLocalChange()
     }
 
-    func grade(_ card: Card, _ grade: FSRS.Grade) {
-        try? database.queue.write { try Study.grade(card.id, grade: grade, source: "flashcards", db: $0) }
-        reload()
+    // Answers during a session are saved at once but the library isn't
+    // reloaded until the session ends (`finishSession`): a reload redraws the
+    // deck page behind the session, which made every answer lag.
+
+    /// Saves one answer and schedules a sync, without a reload.
+    private func record(_ body: (Database) throws -> Void) {
+        try? database.queue.write { try body($0) }
         account.noteLocalChange()
+    }
+
+    /// Home's per-deck figures, with when each was last studied.
+    func dashboardDecks() -> [Dashboard.DeckSummary] {
+        let key = "\(revision)"
+        if let cached = dashboardCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try Dashboard.decks(db: $0) }) ?? []
+        dashboardCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var dashboardCache: (key: String, value: [Dashboard.DeckSummary])?
+
+    /// Home's "Continue" opens a deck straight into flashcards: the deck
+    /// page takes this on arrival.
+    @ObservationIgnored private var pendingStudyDeck: String?
+
+    func requestStudy(deckId: String) { pendingStudyDeck = deckId }
+
+    func takeStudyRequest(for scopeId: String) -> Bool {
+        guard pendingStudyDeck == scopeId else { return false }
+        pendingStudyDeck = nil
+        return true
+    }
+
+    /// A study session ended: bring due counts, streak and mastery up to date.
+    func finishSession() {
+        reload()
+    }
+
+    /// "I Know This" / "Needs Review".
+    func mark(_ cardId: String, understood: Bool) {
+        record { try Study.mark(cardId, understood: understood, db: $0) }
+    }
+
+    func learnRound(inDecks deckIds: [String]) -> [LearnEngine.RoundQuestion] {
+        var rng = SystemRandomNumberGenerator()
+        return (try? database.queue.read { try Study.learnRound(forDecks: deckIds, using: &rng, db: $0) }) ?? []
+    }
+
+    func recordLearnAnswer(cardId: String, wasCorrect: Bool) {
+        record { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, db: $0) }
+    }
+
+    func mastery(inDecks deckIds: [String]) -> (mastered: Int, total: Int) {
+        (try? database.queue.read { try Study.mastery(forDecks: deckIds, db: $0) }) ?? (0, 0)
+    }
+
+    func learnLevels(inDecks deckIds: [String]) -> [String: LearnEngine.Level] {
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = levelsCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try Study.learnLevels(forDecks: deckIds, db: $0) }) ?? [:]
+        levelsCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var levelsCache: (key: String, value: [String: LearnEngine.Level])?
+
+    /// Writes the attempt; nil when every card was filtered out.
+    func startTest(inDecks deckIds: [String], config: TestBuilder.Config, aiQuestions: [LearnEngine.RoundQuestion] = [])
+        -> (attemptId: String, questions: [LearnEngine.RoundQuestion])? {
+        var rng = SystemRandomNumberGenerator()
+        let result = try? database.queue.write {
+            try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions, using: &rng, db: $0)
+        }
+        guard let result, !result.questions.isEmpty else { return nil }
+        return result
+    }
+
+    func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) {
+        record { try Study.submitTestAnswer(attemptId: attemptId, ordinal: ordinal, given: given, isCorrect: isCorrect, db: $0) }
+    }
+
+    func finishTest(attemptId: String) {
+        record { _ = try Study.finishTest(attemptId: attemptId, db: $0) }
+    }
+
+    func overrideTestAnswer(attemptId: String, ordinal: Int, cardId: String?) {
+        record { try Study.overrideTestItemCorrect(attemptId: attemptId, ordinal: ordinal, cardId: cardId, db: $0) }
     }
 
     // MARK: - Cards
@@ -243,6 +353,10 @@ final class Library {
 
     /// The last card list read, for the same reason as `overviewCache`.
     @ObservationIgnored private var cardsCache: (key: String, value: [Card])?
+
+    func card(_ id: String) -> Card? {
+        try? database.queue.read { try Card.fetchOne($0, key: id) }
+    }
 
     func editCard(_ cardId: String, front: String, back: String) {
         change { _ = try CardActions.updateText(cardId: cardId, front: front, back: back, db: $0) }
@@ -336,14 +450,72 @@ final class Library {
         try? ProfileStore.update(profile, supportDirectory: supportDirectory)
     }
 
-    /// Shows an archived course again (the Mac's `setCourseArchived`).
+    /// Shows an archived course again.
     func unarchiveCourse(_ courseId: String) {
+        setArchived(courseId, false)
+    }
+
+    // MARK: - Organising courses and decks
+
+    func setArchived(_ courseId: String, _ archived: Bool) {
+        change { try LibraryActions.setCourseArchived(courseId, archived: archived, db: $0) }
+    }
+
+    /// Saves an edited course, with its timeline typed as text ("Fall
+    /// 2026"); an empty timeline files it under "No Timeline".
+    func saveCourse(_ course: Course, timeline: String) {
         change { db in
-            guard var course = try Course.fetchOne(db, key: courseId) else { return }
-            course.isArchived = false
-            course.updatedAt = Date()
-            try course.save(db)
+            var updated = course
+            updated.name = course.name.trimmingCharacters(in: .whitespaces)
+            let trimmed = timeline.trimmingCharacters(in: .whitespacesAndNewlines)
+            updated.semesterId = trimmed.isEmpty ? nil : try LibraryActions.findOrCreateSemester(name: trimmed, db: db)
+            try LibraryActions.updateCourse(updated, db: db)
         }
+    }
+
+    func addCourse(name: String, code: String?, timeline: String) -> String? {
+        var id: String?
+        change { db in
+            let trimmed = timeline.trimmingCharacters(in: .whitespacesAndNewlines)
+            let semesterId = trimmed.isEmpty ? nil : try LibraryActions.findOrCreateSemester(name: trimmed, db: db)
+            id = try LibraryActions.addManualCourse(name: name.trimmingCharacters(in: .whitespaces),
+                                                    code: code, semesterId: semesterId, db: db)
+        }
+        return id
+    }
+
+    func courseDeletionImpact(_ courseId: String) -> (materials: Int, cards: Int, reviews: Int)? {
+        try? database.queue.read { try LibraryActions.courseDeletionImpact(courseId, db: $0) }
+    }
+
+    func deleteCourse(_ courseId: String) {
+        change { try LibraryActions.removeCourseAndExclude(courseId, db: $0) }
+    }
+
+    func materialCount(inCourse courseId: String) -> Int {
+        (try? database.queue.read { try LibraryActions.materialCount(inCourse: courseId, db: $0) }) ?? 0
+    }
+
+    func semesterName(_ semesterId: String?) -> String {
+        semesters.first { $0.id == semesterId }?.name ?? ""
+    }
+
+    func createDeck(courseId: String, name: String) -> String? {
+        var id: String?
+        change { id = try LibraryActions.createDeck(courseId: courseId, name: name.trimmingCharacters(in: .whitespaces), db: $0) }
+        return id
+    }
+
+    func renameDeck(_ deckId: String, to name: String) {
+        change { try LibraryActions.renameDeck(deckId, name: name.trimmingCharacters(in: .whitespaces), db: $0) }
+    }
+
+    func deckCardCount(_ deckId: String) -> Int {
+        (try? database.queue.read { try LibraryActions.deckCardCount(deckId, db: $0) }) ?? 0
+    }
+
+    func deleteDeck(_ deckId: String, movingCardsTo target: String?) {
+        change { try LibraryActions.deleteDeck(deckId, migrateCardsTo: target, db: $0) }
     }
 
     /// Lets imports walk a folder again (the Mac's `includeFolder`).
@@ -392,6 +564,22 @@ final class Library {
 
     func dismissOverviewJob(forCourse courseId: String?) {
         overviewJobs[courseId ?? ""] = nil
+    }
+
+    /// The card AI job for each course ("" for library-wide ones).
+    private(set) var cardJobs: [String: CardAIJob] = [:]
+
+    func cardJob(forCourse courseId: String?) -> CardAIJob? { cardJobs[courseId ?? ""] }
+
+    func dismissCardJob(forCourse courseId: String?) { cardJobs[courseId ?? ""] = nil }
+
+    /// One card AI job at a time per course.
+    func startCardJob(_ headline: String, courseId: String?,
+                      _ work: @escaping (any CardGenerator, GRASPDatabase) async -> String) {
+        guard cardJob(forCourse: courseId).map(\.isFinished) ?? true else { return }
+        let job = CardAIJob(headline: headline)
+        cardJobs[courseId ?? ""] = job
+        job.run(library: self, work)
     }
 
     /// A lesson was just saved: show it, and sync it to the Mac.

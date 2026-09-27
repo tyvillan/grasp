@@ -13,6 +13,9 @@ import SwiftCrossUI
 /// every one of them up front; one at a time keeps the tab quick.
 struct OverviewPane: View {
     let library: Library
+    /// A key term's "cards" chip: show those cards on the Cards tab, as the
+    /// Mac does.
+    var onOpenCards: ([String]) -> Void = { _ in }
     let scope: DeckScope
     @State var lessonIndex = 0
     /// Notes waiting on "Write Them" in the confirmation panel.
@@ -83,7 +86,7 @@ struct OverviewPane: View {
     private func lessonPage(_ overview: DeckOverview, index: Int) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                LessonView(overview: overview.entries[index])
+                LessonView(overview: overview.entries[index], onOpenCards: onOpenCards)
                 if index + 1 < overview.entries.count {
                     HStack(spacing: 8) {
                         Spacer()
@@ -291,18 +294,20 @@ private struct JobStrip: View {
 
 /// A thin amber bar. GeometryReader rather than WinUI's ProgressBar, which
 /// draws in Windows' accent colour.
-private struct ProgressBar: View {
+struct ProgressBar: View {
     let fraction: Double
+    var tint: Color = GRASPColor.accent
+    var height = 4.0
 
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width.isFinite ? Double(proxy.size.width) : 0
             ZStack(alignment: .leading) {
-                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: width, height: 4.0)
-                Rectangle().fill(GRASPColor.accent).frame(width: max(0, min(1, fraction)) * width, height: 4.0)
+                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: width, height: height)
+                Rectangle().fill(tint).frame(width: max(0, min(1, fraction)) * width, height: height)
             }
         }
-        .frame(height: 4.0)
+        .frame(height: height)
     }
 }
 
@@ -319,6 +324,7 @@ private struct ProgressBar: View {
 /// overflows the main thread's stack on Windows (see CLAUDE.md).
 struct LessonView: View {
     let overview: RenderedOverview
+    var onOpenCards: ([String]) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -327,7 +333,7 @@ struct LessonView: View {
                 ObjectivesCallout(objectives: overview.objectives)
             }
             ForEach(overview.sections, id: \.id) { section in
-                LessonSectionView(section: section)
+                LessonSectionView(section: section, onOpenCards: onOpenCards)
             }
             if !overview.formulas.isEmpty {
                 FormulasCallout(formulas: overview.formulas)
@@ -336,7 +342,8 @@ struct LessonView: View {
                 TakeawaysView(takeaways: overview.takeaways)
             }
             if overview.diagram != nil || overview.mermaidSource != nil {
-                DiagramSection(diagram: overview.diagram, source: overview.mermaidSource)
+                DiagramSection(diagram: overview.diagram, source: overview.mermaidSource,
+                               linkedNodes: overview.linkedNodes, onOpenCards: onOpenCards)
             }
         }
     }
@@ -355,6 +362,7 @@ private struct LessonHeader: View {
                     Chip(text: "Out of date", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
                 }
                 Spacer()
+                QuietLink(title: "Copy Lesson") { Clipboard.copy(LessonText.markdown(overview)) }
             }
             Text(LessonText.clean(overview.title))
                 .font(LessonFont.title)
@@ -465,12 +473,19 @@ private struct TakeawayRow: View {
 private struct DiagramSection: View {
     let diagram: LaidOutDiagram?
     let source: String?
+    let linkedNodes: [String: [String]]
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("How it all fits together").font(LessonFont.h2).foregroundColor(GRASPColor.textPrimary)
             if let diagram {
-                ConceptMapView(diagram: diagram)
+                ConceptMapView(diagram: diagram, linkedNodes: linkedNodes, onOpenCards: onOpenCards)
+                if !linkedNodes.values.allSatisfy(\.isEmpty) {
+                    Text("Green boxes name one of your cards; click one to see it.")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
+                }
             } else if let source {
                 // Couldn't be parsed: the source is more use than nothing.
                 Text(source)
@@ -486,6 +501,7 @@ private struct DiagramSection: View {
 
 private struct LessonSectionView: View {
     let section: RenderedSection
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -504,7 +520,7 @@ private struct LessonSectionView: View {
             }
 
             if !section.terms.isEmpty {
-                KeyTermsCallout(terms: section.terms, isMath: section.isMath)
+                KeyTermsCallout(terms: section.terms, isMath: section.isMath, onOpenCards: onOpenCards)
                     .padding(.top, 4)
             }
 
@@ -556,6 +572,7 @@ struct Callout<Content: View>: View {
 private struct KeyTermsCallout: View {
     let terms: [LinkedDefinition]
     let isMath: Bool
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         Callout(label: terms.count == 1 ? "Key term" : "Key terms", tint: GRASPColor.success) {
@@ -567,8 +584,9 @@ private struct KeyTermsCallout: View {
                                 .font(LessonFont.prose.weight(.semibold))
                                 .foregroundColor(GRASPColor.textPrimary)
                             if !term.cardIds.isEmpty {
-                                Chip(text: term.cardIds.count == 1 ? "1 card" : "\(term.cardIds.count) cards",
+                                Chip(text: term.cardIds.count == 1 ? "1 card ›" : "\(term.cardIds.count) cards ›",
                                      tint: GRASPColor.success, soft: GRASPColor.successSoft)
+                                    .onTapGesture { onOpenCards(term.cardIds) }
                             }
                         }
                         Text(LessonText.clean(term.text, math: isMath))
@@ -816,5 +834,57 @@ extension LessonText {
             .replacingOccurrences(of: "_", with: " ")
             .trimmingCharacters(in: .whitespaces)
         return (topic?.isEmpty == false ? topic : nil) ?? fileName
+    }
+}
+
+extension LessonText {
+    /// The whole lesson as Markdown, for pasting elsewhere -- the Mac's
+    /// "Copy Lesson".
+    static func markdown(_ overview: RenderedOverview) -> String {
+        var lines: [String] = []
+        if let kicker = overview.kicker { lines.append("*\(kicker)*") }
+        lines.append("# \(overview.title)")
+        lines.append("")
+        if let hook = overview.hook {
+            lines += [hook, ""]
+        }
+        if !overview.objectives.isEmpty {
+            lines.append("**By the end you should be able to:**")
+            lines += overview.objectives.map { "- \($0)" }
+            lines.append("")
+        }
+        for section in overview.sections {
+            lines += ["## \(section.heading)", ""]
+            for paragraph in section.paragraphs { lines += [paragraph, ""] }
+            for term in section.terms {
+                lines.append("> **\(term.term)** — \(term.text)")
+                if let example = term.example { lines.append(">  - Is: \(example)") }
+                if let nonExample = term.nonExample { lines.append(">  - Isn't: \(nonExample)") }
+            }
+            if !section.terms.isEmpty { lines.append("") }
+            if let example = section.example {
+                lines.append("**Worked example\(example.title.map { ": \($0)" } ?? "")**")
+                if let setup = example.setup { lines.append(setup) }
+                for (index, step) in example.steps.enumerated() {
+                    lines.append("\(index + 1). \(step.action)" + (step.result.map { " → `\($0)`" } ?? "")
+                                 + (step.why.map { " (\($0))" } ?? ""))
+                }
+                if let outcome = example.outcome { lines.append(outcome) }
+                lines.append("")
+            }
+            if let check = section.check {
+                lines += ["> **Pause and check:** \(check.question)", ">", "> *Answer:* \(check.answer)", ""]
+            }
+        }
+        if !overview.formulas.isEmpty {
+            lines.append("## Formulas")
+            lines += overview.formulas.map { "- \($0.name): \($0.latex ?? $0.plain)" }
+            lines.append("")
+        }
+        if !overview.takeaways.isEmpty {
+            lines.append("## Key takeaways")
+            lines += overview.takeaways.map { "- \($0)" }
+        }
+        return lines.joined(separator: "\n")
     }
 }

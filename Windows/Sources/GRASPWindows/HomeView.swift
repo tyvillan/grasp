@@ -20,22 +20,61 @@ struct HomeView: View {
         let streak = library.studyStreak()
         let upcoming = library.upcomingExams()
         // Outside the ScrollView, where the width is known, as on the Mac.
+        let decks = library.dashboardDecks()
+        let headline = Dashboard.jumpBackIn(decks)
+        let recents = Dashboard.recents(decks)
         GeometryReader { proxy in
+            let content = proxy.size.width.isFinite ? proxy.size.width - 2 * Self.horizontalPadding : 800
+            // The Mac's rule: the Recent rail sits beside the main column
+            // from 860 points wide, and folds underneath below that.
+            let showsRail = proxy.size.width >= 860
+            let mainWidth = showsRail ? content - Self.railWidth - 32 : content
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     statStrip(streak: streak).padding(.top, 26)
                     dailyGoalBar(streak: streak).padding(.top, 14)
-                    if !upcoming.isEmpty {
-                        upcomingExams(upcoming).padding(.top, 32)
+                    if showsRail {
+                        HStack(alignment: .top, spacing: 32) {
+                            mainColumn(upcoming: upcoming, headline: headline, width: mainWidth)
+                            RecentRail(decks: recents) { onStudy($0.courseId, $0.deckId) }
+                                .frame(width: Self.railWidth)
+                        }
+                        .padding(.top, 32)
+                    } else {
+                        VStack(alignment: .leading, spacing: 36) {
+                            mainColumn(upcoming: upcoming, headline: headline, width: mainWidth)
+                            RecentRail(decks: recents) { onStudy($0.courseId, $0.deckId) }
+                        }
+                        .padding(.top, 32)
                     }
-                    coursesShelf(width: proxy.size.width - 2 * Self.horizontalPadding)
-                        .padding(.top, 34)
                 }
                 .padding(.horizontal, Int(Self.horizontalPadding))
                 .padding(.top, 28)
                 .padding(.bottom, 40)
             }
+        }
+    }
+
+    private static let railWidth = 260.0
+
+    /// Upcoming exams first -- a test in three days outranks whatever deck
+    /// was open last -- then "pick up where you left off", then the courses.
+    private func mainColumn(upcoming: [CalendarEvent], headline: Dashboard.DeckSummary?, width: Double) -> some View {
+        VStack(alignment: .leading, spacing: 34) {
+            if !upcoming.isEmpty {
+                upcomingExams(upcoming)
+            }
+            if let headline {
+                ContinueCard(deck: headline, onContinue: {
+                    library.requestStudy(deckId: headline.deckId)
+                    onStudy(headline.courseId, headline.deckId)
+                }, onOpen: {
+                    onStudy(headline.courseId, headline.deckId)
+                })
+                .frame(maxWidth: 720.0)
+            }
+            coursesShelf(width: width)
         }
     }
 
@@ -357,5 +396,107 @@ private struct CourseTile: View {
         .cornerRadius(10)
         .onHover { isHovering = $0 }
         .onTapGesture(perform: open)
+    }
+}
+
+/// "Pick up where you left off": the one raised element on the dashboard,
+/// so "where was I?" is answered before anything else is read.
+private struct ContinueCard: View {
+    let deck: Dashboard.DeckSummary
+    let onContinue: () -> Void
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel(deck.dueCount > 0 ? "Pick up where you left off" : "Last studied")
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(deck.deckName)
+                        .font(Font.system(size: 24, weight: .semibold))
+                        .foregroundColor(GRASPColor.textPrimary)
+                    Text(deck.courseName).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
+                }
+                Spacer()
+                if deck.dueCount > 0 {
+                    HStack(alignment: .bottom, spacing: 5) {
+                        Text("\(deck.dueCount)").font(GRASPFont.numeral).foregroundColor(GRASPColor.accent)
+                        Text("due").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
+                    }
+                }
+            }
+            .padding(.top, 14)
+            VStack(alignment: .leading, spacing: 7) {
+                ProgressBar(fraction: deck.cardCount == 0 ? 0 : Double(deck.reviewedCount) / Double(deck.cardCount))
+                Text("\(deck.reviewedCount) of \(deck.cardCount) cards reviewed")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+            .padding(.top, 20)
+            HStack(spacing: 8) {
+                Button("Continue") { onContinue() }.disabled(deck.dueCount == 0).fixedSize()
+                Button("Open Deck") { onOpen() }.fixedSize()
+            }
+            .padding(.top, 20)
+        }
+        .padding(22)
+        .background(GRASPColor.surfaceRaised)
+        .cornerRadius(14)
+    }
+}
+
+/// Decks studied recently, newest first.
+private struct RecentRail: View {
+    let decks: [Dashboard.DeckSummary]
+    let open: (Dashboard.DeckSummary) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Recent")
+            if decks.isEmpty {
+                Text("Decks you study will collect here.")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(decks, id: \.deckId) { deck in
+                        RecentRow(deck: deck).onTapGesture { open(deck) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct RecentRow: View {
+    let deck: Dashboard.DeckSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deck.deckName).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary).lineLimit(1)
+                    Text(deck.courseName).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(1)
+                }
+                Spacer()
+                if let last = deck.lastReviewedAt {
+                    Text(RecentRow.ago(last)).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()
+                }
+            }
+            .padding(.vertical, 9)
+            .padding(.horizontal, 8)
+            Rectangle().fill(GRASPColor.hairlineStrong).frame(height: 1.0)
+        }
+    }
+
+    /// "5m ago", "3h ago", "2d ago" -- the Mac's narrow relative style.
+    nonisolated static func ago(_ date: Date, now: Date = Date()) -> String {
+        let seconds = max(0, now.timeIntervalSince(date))
+        switch seconds {
+        case ..<60: return "now"
+        case ..<3600: return "\(Int(seconds / 60))m ago"
+        case ..<86_400: return "\(Int(seconds / 3600))h ago"
+        case ..<(86_400 * 30): return "\(Int(seconds / 86_400))d ago"
+        default: return "\(Int(seconds / (86_400 * 30)))mo ago"
+        }
     }
 }

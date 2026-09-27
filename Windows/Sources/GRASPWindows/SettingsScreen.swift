@@ -9,8 +9,15 @@ import SwiftCrossUI
 /// duplicate/off-topic sweeps arrive with those features.
 struct SettingsScreen: View {
     let library: Library
+    let switchProfile: () -> Void
     @Environment(\.chooseFile) var chooseFile
     @State var profileName = ""
+    @State var newPIN = ""
+    @State var showingDuplicates = false
+    @State var duplicateGroups: [CardAI.DuplicateGroup] = []
+    /// The model GRASP uses; empty means GRASP's pick (the Mac's
+    /// "picking a model pins it").
+    @State var chosenModel = UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey) ?? ""
     @State var showingSignIn = false
     @State var confirmingSignOut = false
     @State var ollama: OllamaStatus = .checking
@@ -33,11 +40,13 @@ struct SettingsScreen: View {
                 profileSection
                 accountSection
                 studyGoalSection
+                focusTimerSection
                 calendarSection
                 notesFolderSection
                 localAISection
                 hiddenCoursesSection
                 excludedFoldersSection
+                duplicatesSection
                 aboutSection
             }
             .padding(.horizontal, 32)
@@ -65,6 +74,32 @@ struct SettingsScreen: View {
                     .fixedSize()
             }
             Caption("Used for the greeting on Home. Each profile keeps its own library and settings on this PC.")
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(library.profile.pinHash == nil ? "No PIN" : "Locked with a PIN")
+                        .font(GRASPFont.rowTitle)
+                        .foregroundColor(GRASPColor.textPrimary)
+                    Caption("A 4-digit PIN asked for when this profile is opened.")
+                }
+                Spacer()
+                SecureField("4-digit PIN", text: $newPIN)
+                    .frame(width: 110.0)
+                Button(library.profile.pinHash == nil ? "Set PIN" : "Change PIN") {
+                    library.setPIN(newPIN)
+                    newPIN = ""
+                }
+                .disabled(newPIN.count != 4 || !newPIN.allSatisfy(\.isNumber))
+                .fixedSize()
+                if library.profile.pinHash != nil {
+                    Button("Remove PIN") { library.setPIN(nil) }.fixedSize()
+                }
+            }
+            HStack(spacing: 8) {
+                Caption("Other people can have their own profile, each with its own library and account.")
+                Spacer()
+                Button("Switch Profile…") { switchProfile() }.fixedSize()
+            }
         }
     }
 
@@ -128,6 +163,49 @@ struct SettingsScreen: View {
         }
     }
 
+    private var focusTimerSection: some View {
+        SettingsCard("Focus Timer") {
+            stepper("\(settings.focusWorkMinutes) min work interval",
+                    minus: { settings.focusWorkMinutes = max(5, settings.focusWorkMinutes - 5) },
+                    plus: { settings.focusWorkMinutes = min(90, settings.focusWorkMinutes + 5) })
+            stepper("\(settings.focusBreakMinutes) min break",
+                    minus: { settings.focusBreakMinutes = max(1, settings.focusBreakMinutes - 1) },
+                    plus: { settings.focusBreakMinutes = min(30, settings.focusBreakMinutes + 1) })
+            stepper(settings.focusCardTarget == 0 ? "No card target" : "\(settings.focusCardTarget) cards per interval",
+                    minus: { settings.focusCardTarget = max(0, settings.focusCardTarget - 5) },
+                    plus: { settings.focusCardTarget = min(200, settings.focusCardTarget + 5) })
+            Caption("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
+        }
+    }
+
+    private func stepper(_ label: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Button("−") { minus() }.fixedSize()
+            Text(label).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary).frame(width: 180.0)
+            Button("+") { plus() }.fixedSize()
+            Spacer()
+        }
+    }
+
+    private var duplicatesSection: some View {
+        SettingsCard("Duplicate Cards") {
+            HStack(spacing: 8) {
+                Button("Scan All Courses for Duplicates…") {
+                    duplicateGroups = library.duplicateGroupsAcrossAllCourses()
+                    showingDuplicates = true
+                }
+                .fixedSize()
+                Spacer()
+            }
+            Caption("Looks for near-identical cards across every course, not just one deck -- it catches the same material imported under two course folders. Nothing is removed automatically: you pick which card survives in each group.")
+        }
+        .sheet(isPresented: $showingDuplicates) {
+            DuplicateReviewSheet(groups: duplicateGroups, merge: { library.mergeDuplicates($0) }) {
+                showingDuplicates = false
+            }
+        }
+    }
+
     private var calendarSection: some View {
         SettingsCard("Calendar") {
             settingRow("Week starts on") {
@@ -172,7 +250,7 @@ struct SettingsScreen: View {
             } else if let status = library.status {
                 Caption(status)
             }
-            Caption("GRASP only reads from this folder; it never writes to your notes. It looks for College\\<semester>\\<course> folders inside it. PDFs and images aren't read on Windows yet.")
+            Caption("GRASP only reads from this folder; it never writes to your notes. It looks for College\\<semester>\\<course> folders inside it. PDFs and images are read with Windows' own text recognition.")
         }
     }
 
@@ -191,13 +269,62 @@ struct SettingsScreen: View {
             case .checking:
                 EmptyView()
             case .notDetected:
-                Caption("GRASP couldn't reach a local Ollama server on this PC. Install Ollama for Windows from ollama.com and pull a model, e.g. \"ollama pull qwen3.5:9b\".")
+                // The Mac's "Setup Local AI": the steps, and a way to start.
+                Caption("GRASP couldn't reach Ollama on this PC. To set it up: 1. install Ollama for Windows from ollama.com (or run \"winget install Ollama.Ollama\"); 2. in a terminal, run \"ollama pull qwen3.5:9b\" (about 6 GB; it needs a graphics card with 8 GB, or plenty of patience on the processor); 3. click Check Again. Ollama starts with Windows after that.")
+                Button("Open ollama.com") { ExternalLink.open(URL(string: "https://ollama.com/download/windows")!) }.fixedSize()
             case .running(let models) where models.isEmpty:
-                Caption("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in a terminal.")
+                Caption("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in a terminal, then click Check Again.")
             case .running(let models):
-                Caption("Models on this PC: \(models.joined(separator: ", ")).")
+                let choices = [Choice(id: nil, description: "Automatic (\(OllamaModelChoice.resolve(preferred: nil, installed: models) ?? models[0]))")]
+                    + models.map { Choice(id: $0, description: $0) }
+                HStack(spacing: 8) {
+                    Text("Model").font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                    Picker(of: choices, selection: Binding(
+                        get: { choices.first { $0.id == (chosenModel.isEmpty ? nil : chosenModel) } ?? choices[0] },
+                        set: { choice in
+                            chosenModel = choice?.id ?? ""
+                            if let id = choice?.id {
+                                UserDefaults.standard.set(id, forKey: OllamaModelChoice.defaultsKey)
+                            } else {
+                                UserDefaults.standard.removeObject(forKey: OllamaModelChoice.defaultsKey)
+                            }
+                        }
+                    ))
+                    Spacer()
+                }
+                Caption("Used for lessons, test questions, card refinement and filling gaps. Automatic picks the best one installed: qwen3.5:9b wrote the most accurate lessons in testing.")
             }
-            Caption("AI card refinement, lessons and test questions come to Windows later; this shows whether GRASP can see Ollama.")
+            if case .running(let models) = ollama, !models.isEmpty {
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AI test questions")
+                            .font(GRASPFont.rowTitle)
+                            .foregroundColor(GRASPColor.textPrimary)
+                        Caption("Tests mix in written questions the model writes from your notes -- about a third of the questions, up to 10. Starting a test takes a little longer; you can skip the wait.")
+                    }
+                    Spacer()
+                    SegmentedChoice(options: [false, true], selection: library.settings.aiTestQuestions,
+                                    label: { $0 ? "On" : "Off" }) { library.settings.aiTestQuestions = $0 }
+                }
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check all cards against their notes")
+                            .font(GRASPFont.rowTitle)
+                            .foregroundColor(GRASPColor.textPrimary)
+                        Caption("A one-time sweep, card by card: a definition that reads like assignment instructions or a vague fragment is rewritten from its note, or removed if the note doesn't support one. Rewrites can be reverted from each card. Takes a while on a big library.")
+                    }
+                    Spacer()
+                    Button("Check All Cards") { library.sweepAllCardsWithAI() }
+                        .disabled(library.cardJob(forCourse: nil).map { !$0.isFinished } ?? false)
+                        .fixedSize()
+                }
+                if let job = library.cardJob(forCourse: nil) {
+                    CardJobStrip(job: job) { library.dismissCardJob(forCourse: nil) }
+                        .cornerRadius(6)
+                }
+            }
         }
     }
 

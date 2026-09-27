@@ -51,9 +51,12 @@ public enum PDFExtractor {
             }
         }
         return pages.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        #elseif os(Windows)
+        // Rendered and read by Windows' own OCR (see WindowsOCR), which
+        // returns the whole document at once: one "page", so a guide read
+        // here has no page numbers.
+        return WindowsOCR.extractText(from: url).map { [$0] }
         #else
-        // Windows: not yet -- Windows.Data.Pdf is the planned reader. nil
-        // reads as "couldn't extract", so the file is listed, not guessed at.
         return nil
         #endif
     }

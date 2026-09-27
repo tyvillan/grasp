@@ -15,56 +15,22 @@ extension AppStore {
         var existsOnDisk: Bool { FileManager.default.fileExists(atPath: url.path) }
     }
 
-    /// The files a deck's cards were made from, in reading order.
-    ///
-    /// "In this deck" means a file at least one live card in the deck came
-    /// from -- the deck itself has no list of files, only cards that point
-    /// back at the note they were read out of. Hand-typed cards point at
-    /// nothing, so they're counted separately by the caller.
+    /// The files a deck's cards were made from, in reading order, and how
+    /// many cards were typed by hand (see `DeckFiles.list`, shared with
+    /// Windows).
     func deckFiles(inDecks deckIds: [String]) throws -> (files: [DeckFile], handTypedCardCount: Int) {
-        guard !deckIds.isEmpty else { return ([], 0) }
-        let placeholders = databaseQuestionMarks(count: deckIds.count)
-        let (materials, rows) = try database.queue.read { db in
-            let materials = try OverviewQueries.materials(forDecks: deckIds, db: db)
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT card.materialId AS materialId,
-                       COUNT(DISTINCT card.id) AS cards,
-                       COUNT(DISTINCT CASE WHEN card.status = ? THEN card.id END) AS drafts
-                FROM deckCard
-                JOIN card ON card.id = deckCard.cardId AND card.deletedAt IS NULL
-                WHERE deckCard.deckId IN (\(placeholders))
-                GROUP BY card.materialId
-                """, arguments: StatementArguments([CardStatus.draft.rawValue] + deckIds))
-            return (materials, rows)
+        let listed = try database.queue.read { db in try DeckFiles.list(inDecks: deckIds, db: db) }
+        let files = listed.files.map { file in
+            DeckFile(material: file.material, cardCount: file.cardCount, draftCount: file.draftCount,
+                     url: fileURL(for: file.material))
         }
-
-        var counts: [String: (cards: Int, drafts: Int)] = [:]
-        var handTyped = 0
-        for row in rows {
-            let cards: Int = row["cards"]
-            if let materialId: String = row["materialId"] {
-                counts[materialId] = (cards, row["drafts"])
-            } else {
-                handTyped = cards
-            }
-        }
-
-        let files = materials.map { material in
-            let count = counts[material.id] ?? (0, 0)
-            return DeckFile(
-                material: material, cardCount: count.cards, draftCount: count.drafts,
-                url: fileURL(for: material)
-            )
-        }
-        return (files, handTyped)
+        return (files, listed.handTypedCardCount)
     }
 
     /// Where a material lives on disk. Vault notes are stored relative to
     /// the vault; files added by hand from elsewhere keep their full path.
     func fileURL(for material: Material) -> URL {
-        if material.relativePath.hasPrefix("/") {
-            return URL(fileURLWithPath: material.relativePath)
-        }
-        return URL(fileURLWithPath: vaultPath).appendingPathComponent(material.relativePath)
+        DeckFiles.url(for: material, vaultRoot: URL(fileURLWithPath: vaultPath))
+            ?? URL(fileURLWithPath: material.relativePath)
     }
 }

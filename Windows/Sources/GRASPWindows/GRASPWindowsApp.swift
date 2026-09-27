@@ -1,11 +1,12 @@
 import DefaultBackend
 import Foundation
+import Observation
 import GRASPCore
 import SwiftCrossUI
 
 /// Started by `Launcher`, which sets up logging first.
 struct GRASPWindowsApp: App {
-    @State var opened = Result { try Library() }
+    @State var session = AppSession()
 
     init() {
         #if os(Windows)
@@ -15,18 +16,69 @@ struct GRASPWindowsApp: App {
 
     var body: some Scene {
         WindowGroup("GRASP") {
-            switch opened {
-            case .success(let library):
-                ContentView(library: library)
-            case .failure(let error):
+            switch session.phase {
+            case .picking(let profiles):
+                ProfilePicker(profiles: profiles, open: { session.open($0) }, create: { session.create($0) })
+            case .open(let library):
+                ContentView(library: library, switchProfile: { session.switchProfile() })
+            case .failed(let message):
                 VStack(spacing: 8) {
                     Text("GRASP couldn't open your library").font(.title2)
-                    Text(String(describing: error))
+                    Text(message)
                 }
                 .padding(24)
             }
         }
         .defaultSize(width: 1100, height: 720)
+    }
+}
+
+/// Which profile is open. The Mac shows "Who's studying?" at every launch;
+/// here it's skipped when there's one profile with no PIN, which is the
+/// usual case on a personal PC, and shown otherwise or on "Switch Profile".
+@Observable
+final class AppSession {
+    enum Phase {
+        case picking([Profile])
+        case open(Library)
+        case failed(String)
+    }
+
+    private(set) var phase: Phase = .failed("Starting…")
+
+    init() {
+        do {
+            let profiles = try Library.profiles()
+            if profiles.count == 1, profiles[0].pinHash == nil {
+                open(profiles[0])
+            } else {
+                phase = .picking(profiles)
+            }
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func open(_ profile: Profile) {
+        do {
+            phase = .open(try Library(profile: profile))
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func create(_ profile: Profile) {
+        do {
+            try Library.addProfile(profile)
+            open(profile)
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func switchProfile() {
+        if case .open(let library) = phase { library.close() }
+        phase = .picking((try? Library.profiles()) ?? [])
     }
 }
 
@@ -48,6 +100,7 @@ enum Route: Hashable {
 /// its sidebar using the pane's stale width, which clipped the column.
 struct ContentView: View {
     let library: Library
+    let switchProfile: () -> Void
     @State var route: Route = .home
     /// The deck picked in each course's deck column, so switching courses
     /// and back keeps your place. A missing entry means "All Cards".
@@ -64,6 +117,9 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(GRASPColor.canvas)
         }
+        #if os(Windows)
+        .onAppear { KeyCommands.install() }
+        #endif
     }
 
     @ViewBuilder
@@ -74,7 +130,7 @@ struct ContentView: View {
         case .calendar:
             CalendarScreen(library: library, onStudy: study)
         case .settings:
-            SettingsScreen(library: library)
+            SettingsScreen(library: library, switchProfile: switchProfile)
         case .search:
             SearchScreen(library: library, onOpenDeck: study)
         case .course(let courseId):
@@ -111,6 +167,7 @@ struct Sidebar: View {
     let library: Library
     @Binding var route: Route
     @Environment(\.chooseFile) var chooseFile
+    @State var addingCourse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -169,6 +226,10 @@ struct Sidebar: View {
                     }
                 }
                 .disabled(library.isImporting)
+                Text("+ New Course")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+                    .onTapGesture { addingCourse = true }
                 if library.decks.isEmpty {
                     Button("Try sample notes") {
                         Task { await library.importSample() }
@@ -186,6 +247,11 @@ struct Sidebar: View {
                 AccountPanel(account: library.account)
             }
             .padding(12)
+        }
+        .sheet(isPresented: $addingCourse) {
+            OrganizeSheetView(library: library, sheet: .newCourse,
+                              onCreated: { route = .course($0) },
+                              close: { addingCourse = false })
         }
     }
 }
@@ -220,23 +286,47 @@ struct SidebarRow: View {
 // MARK: - Course
 
 /// A course: its deck column, then the selected deck's page. "All Cards"
-/// sits above the real decks and covers every deck in the course.
+/// sits above the real decks and covers every deck in the course. The
+/// column's ••• menu organises the course, as the Mac's right-click menus
+/// do (SwiftCrossUI has no right-click on Windows).
 struct CourseView: View {
     let library: Library
     let course: Course
     @Binding var selectedDeckId: String?
+    @State var organizing: OrganizeSheet?
+    @Environment(\.chooseFile) var chooseFile
 
     var body: some View {
         let decks = library.decks(inCourse: course.id)
         let allCards = DeckScope(allCardsIn: decks, courseId: course.id, courseName: course.name)
-        let selected = decks.first { $0.id == selectedDeckId }.map(DeckScope.init(deck:)) ?? allCards
+        let selectedRow = decks.first { $0.id == selectedDeckId }
+        let selected = selectedRow.map(DeckScope.init(deck:)) ?? allCards
 
         HStack(spacing: 0) {
             DeckColumn(
+                course: course,
                 decks: decks,
                 allCards: allCards,
                 selectedId: selected.id,
-                select: { selectedDeckId = $0 }
+                select: { selectedDeckId = $0 },
+                organize: { sheet in
+                    // Archiving needs no questions: it's undone from Settings.
+                    if case .archive(let course) = sheet {
+                        library.setArchived(course.id, true)
+                    } else if case .addFiles(let course) = sheet {
+                        Task {
+                            guard let url = await chooseFile(
+                                title: "Choose a file or folder to add to \(course.name)",
+                                defaultButtonLabel: "Add",
+                                allowSelectingFiles: true,
+                                allowSelectingDirectories: true
+                            ) else { return }
+                            await library.importFiles([url], intoCourse: course.id)
+                        }
+                    } else {
+                        organizing = sheet
+                    }
+                }
             )
             .frame(width: 260.0)
             .frame(maxHeight: .infinity)
@@ -245,13 +335,22 @@ struct CourseView: View {
             if decks.isEmpty {
                 VStack(spacing: 8) {
                     Text(course.name).font(GRASPFont.title).foregroundColor(GRASPColor.textPrimary)
-                    Text("No decks yet. Import this course's notes to make some.")
+                    Text("No decks yet. Import this course's notes, or add a deck from the ••• menu.")
                         .foregroundColor(GRASPColor.textSecondary)
+                    Button("New Deck…") { organizing = .newDeck(courseId: course.id) }.fixedSize()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                DeckView(library: library, scope: selected)
+                DeckView(library: library, scope: selected, deck: selectedRow) { organizing = $0 }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .sheet(isPresented: Binding(get: { organizing != nil }, set: { if !$0 { organizing = nil } })) {
+            if let organizing {
+                OrganizeSheetView(library: library, sheet: organizing,
+                                  onCreated: { selectedDeckId = $0 },
+                                  onDeleted: { selectedDeckId = nil },
+                                  close: { self.organizing = nil })
             }
         }
     }
@@ -260,18 +359,33 @@ struct CourseView: View {
 /// The course's decks, laid out like the Mac's `DeckListView`: name on the
 /// left, then the due badge and the card count in a right-aligned column.
 struct DeckColumn: View {
+    let course: Course
     let decks: [DeckRow]
     let allCards: DeckScope
     let selectedId: String
     /// Called with a deck id, or nil for "All Cards".
     let select: (String?) -> Void
+    let organize: (OrganizeSheet) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel("Decks")
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 8)
+            HStack(spacing: 6) {
+                SectionLabel("Decks")
+                Spacer()
+                Menu("•••") {
+                    Button("New Deck…") { organize(.newDeck(courseId: course.id)) }
+                    Button("Edit Course…") { organize(.editCourse(course)) }
+                    Button("Dates for This Course…") { organize(.dates(course)) }
+                    Button("Add Files…") { organize(.addFiles(course)) }
+                    Button("Archive Course") { organize(.archive(course)) }
+                    Button("Delete Course…") { organize(.deleteCourse(course)) }
+                }
+                .fixedSize()
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     DeckColumnRow(
@@ -326,15 +440,21 @@ struct DeckColumnRow: View {
 
 // MARK: - Deck page
 
-/// A deck (or a course's All Cards): study what's due, approve drafts, and
-/// see the row reduction from its notes.
+/// A deck (or a course's All Cards), after the Mac's `DeckDetailView`: its
+/// name and make-up, Study / Learn / Test, and the Cards and Overview tabs.
+/// A study session takes over the whole page until it ends.
 struct DeckView: View {
     let library: Library
     let scope: DeckScope
-    @State var session: [Card]? = nil
+    /// The real deck, or nil for a course's All Cards.
+    let deck: DeckRow?
+    let organize: (OrganizeSheet) -> Void
+    @State var mode: StudyMode?
     /// Cards or Overview, as on the Mac. Kept when you switch decks, so
     /// reading through a course's lessons stays on the Overview tab.
     @State var tab: DeckTab = .cards
+    /// Cards picked from an overview's key term, shown alone on the Cards tab.
+    @State var focusCards: Set<String>?
 
     enum DeckTab: String, CaseIterable {
         case cards = "Cards"
@@ -343,6 +463,99 @@ struct DeckView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let mode {
+                session(mode)
+            } else {
+                header
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                if let job = library.cardJob(forCourse: library.courseId(of: scope)) {
+                    CardJobStrip(job: job) { library.dismissCardJob(forCourse: library.courseId(of: scope)) }
+                }
+                if tab == .overview {
+                    OverviewPane(library: library, onOpenCards: { ids in
+                        focusCards = Set(ids)
+                        tab = .cards
+                    }, scope: scope)
+                } else {
+                    cardsPage
+                }
+            }
+        }
+        // A new deck starts fresh, not mid-way through the last one's session.
+        .onChange(of: scope.id) {
+            if mode != nil { end() }
+            takeStudyRequest()
+        }
+        .onAppear { takeStudyRequest() }
+        .task { hasModel = await library.localModel() != nil }
+        .sheet(isPresented: Binding(get: { tool != nil }, set: { if !$0 { tool = nil } })) {
+            switch tool {
+            case .fillGaps:
+                FillGapsSheet(start: { perNote, topic in
+                    library.fillGapsWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope),
+                                           perNote: perNote, topic: topic)
+                }, close: { tool = nil })
+            case .duplicates:
+                DuplicateReviewSheet(groups: library.duplicateGroups(inDecks: scope.deckIds),
+                                     merge: { library.mergeDuplicates($0) }, close: { tool = nil })
+            case .files:
+                DeckFilesSheet(library: library, scope: scope) { tool = nil }
+            case nil:
+                EmptyView()
+            }
+        }
+    }
+
+    /// Whether Ollama is up, checked when the page opens: the AI items only
+    /// appear when there's a model to run them, as on the Mac.
+    @State var hasModel = false
+    @State var tool: DeckTool?
+
+    enum DeckTool { case fillGaps, duplicates, files }
+
+    /// The Mac's deck tools: the AI actions, and duplicate review.
+    private var toolsMenu: some View {
+        Menu("Tools") {
+            if hasModel {
+                if scope.drafts > 0 {
+                    Button("Refine \(scope.drafts) Drafts with AI") {
+                        library.refineDeckWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope))
+                    }
+                }
+                Button("Fill Gaps with AI…") { tool = .fillGaps }
+            }
+            Button("Review Duplicates…") { tool = .duplicates }
+            Button("Files in This Deck…") { tool = .files }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func session(_ mode: StudyMode) -> some View {
+        switch mode {
+        case .flashcards(let cards):
+            FlashcardSession(library: library, deckName: scope.title, cards: cards, finish: end)
+        case .learn:
+            LearnSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
+        case .test:
+            TestSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
+        }
+    }
+
+    private func end() {
+        mode = nil
+        library.finishSession()
+    }
+
+    /// Arrived from Home's "Continue": start the flashcards right away.
+    private func takeStudyRequest() {
+        guard library.takeStudyRequest(for: scope.id) else { return }
+        let due = library.dueCards(inDecks: scope.deckIds)
+        if !due.isEmpty { mode = .flashcards(due) }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     SectionLabel(scope.courseName)
@@ -350,60 +563,57 @@ struct DeckView: View {
                     Text(summary).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
                 }
                 Spacer()
-                // A study session owns the page until it ends.
-                if session == nil {
-                    SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                if let deck {
+                    Menu("•••") {
+                        Button("Rename Deck…") { organize(.renameDeck(deck)) }
+                        Button("Delete Deck…") { organize(.deleteDeck(deck)) }
+                    }
+                    .fixedSize()
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 16)
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
-
-            if tab == .overview && session == nil {
-                OverviewPane(library: library, scope: scope)
-            } else {
-                cardsPage
+            // Study, Learn and Test in a fixed order, as on the Mac.
+            HStack(spacing: 8) {
+                Button(scope.due == 0 ? "Study (nothing due)" : "Study \(scope.due) Due") {
+                    mode = .flashcards(library.dueCards(inDecks: scope.deckIds))
+                }
+                .disabled(scope.due == 0)
+                .fixedSize()
+                Button("Learn") { mode = .learn }.disabled(scope.total == scope.drafts).fixedSize()
+                Button("Test") { mode = .test }.disabled(scope.total == scope.drafts).fixedSize()
+                if scope.drafts > 0 {
+                    Button("Approve \(scope.drafts) Drafts") { library.approveDrafts(inDecks: scope.deckIds) }
+                        .fixedSize()
+                }
+                Spacer()
+                toolsMenu
             }
         }
-        // A new deck starts fresh, not mid-way through the last one's session.
-        .onChange(of: scope.id) { session = nil }
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 16)
     }
 
     private var cardsPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let cards = session {
-                    StudySessionView(library: library, cards: cards) { session = nil }
-                } else {
-                    HStack(spacing: 10) {
-                        Button(scope.due == 0 ? "Nothing due" : "Study \(scope.due) due") {
-                            session = library.dueCards(inDecks: scope.deckIds)
-                        }
-                        .disabled(scope.due == 0)
-                        .fixedSize()
-                        if scope.drafts > 0 {
-                            Button("Approve \(scope.drafts) drafts") {
-                                library.approveDrafts(inDecks: scope.deckIds)
-                            }
-                            .fixedSize()
-                        }
-                    }
-                    if scope.drafts > 0 && scope.due == 0 {
-                        Text("New cards start as drafts. Approve them to study them.")
-                            .foregroundColor(GRASPColor.textSecondary)
-                    }
-                    CardList(library: library, scope: scope)
+                if scope.drafts > 0 && scope.due == 0 {
+                    Text("New cards start as drafts. Approve them to study them.")
+                        .foregroundColor(GRASPColor.textSecondary)
                 }
+                CardList(library: library, scope: scope, focus: $focusCards)
             }
             .padding(28)
         }
     }
 
+    /// "268 cards · 127 due · 141 drafts · 40 understood".
     private var summary: String {
         var parts = ["\(scope.total) cards"]
         if scope.due > 0 { parts.append("\(scope.due) due") }
         if scope.drafts > 0 { parts.append("\(scope.drafts) drafts") }
+        let understood = library.learnLevels(inDecks: scope.deckIds).values.filter { $0 == .mastered }.count
+        if understood > 0 { parts.append("\(understood) understood") }
         return parts.joined(separator: " · ")
     }
 }

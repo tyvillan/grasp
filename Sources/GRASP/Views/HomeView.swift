@@ -36,24 +36,12 @@ struct HomeView: View {
     private var totalCards: Int { decks.reduce(0) { $0 + $1.cardCount } }
     private var courseCount: Int { Set(decks.map(\.courseId)).count }
 
-    private var jumpBackIn: AppStore.DeckSummary? {
-        if let mostRecent = decks.filter({ $0.lastReviewedAt != nil })
-            .max(by: { $0.lastReviewedAt! < $1.lastReviewedAt! }) {
-            return mostRecent
-        }
-        return decks.filter { $0.dueCount > 0 }.max { $0.dueCount < $1.dueCount }
-    }
+    /// The deck studied most recently, else the one with the most due.
+    private var jumpBackIn: AppStore.DeckSummary? { Dashboard.jumpBackIn(decks) }
 
     /// Decks studied at least once, most recent first -- the "Recents"
-    /// list. The deck already in "Jump back in" is dropped so the same
-    /// deck doesn't headline the page twice.
-    private var recents: [AppStore.DeckSummary] {
-        decks
-            .filter { $0.lastReviewedAt != nil && $0.deckId != jumpBackIn?.deckId }
-            .sorted { $0.lastReviewedAt! > $1.lastReviewedAt! }
-            .prefix(6)
-            .map { $0 }
-    }
+    /// list, without the deck already in "Jump back in".
+    private var recents: [AppStore.DeckSummary] { Dashboard.recents(decks) }
 
     /// Built from the store's course list rather than from the deck rows,
     /// so a course with no decks yet -- one added by hand before its notes
