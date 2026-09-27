@@ -59,7 +59,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 
 ## Speed (Tyler found the app slow)
 
-- **Tyler runs the release build.** `Desktop\GRASP.lnk` points at `Windows\.build\out\Products\Release-windows-x86_64\GRASPWindows.exe`. After shipping a change, rebuild it with `grasp.cmd app-release` (close his window first). Debug is for development only: it opened the window in 7.1 s against 2.4 s, and switched screens about twice as slowly.
+- **Tyler runs the installed app** in `%LOCALAPPDATA%\Programs\GRASP` (Start menu and desktop shortcuts, listed in Settings > Apps). After shipping a change, run `scripts\windows\install.ps1` (builds release, closes his window, reinstalls; `-SkipBuild` reuses the last build, `-Uninstall` removes it). It copies the Swift runtime DLLs beside the exe, so it runs without the toolchain on PATH. Debug is for development only: it opened the window in 7.1 s against 2.4 s, and switched screens about twice as slowly.
 - **Cost is per view on screen, not per modifier.** Measured (debug): each Text or shape costs about 2.5 ms to create, `.padding`/`.background`/`.cornerRadius`/`.onTapGesture` add almost nothing, and every screen change also pays about 150 ms to re-measure the whole window (sidebar included). Database reads are 0-30 ms and not the problem.
 - So: keep rows light (no per-row `Menu`: 50 card rows with one each took 1.6 s), page long lists (cards show 25 at a time), and put actions in a sheet or a single toolbar instead of on every row.
 - `Library.cards(inDecks:)` and `deckOverview(inDecks:)` cache on `revision`; follow that for any other read a body makes.
@@ -158,7 +158,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - PDF text and image OCR: still nil on Windows. swift-winui's `UWP` module has no projections for Windows.Data.Pdf or Windows.Media.Ocr (only C headers in CWinRT), and Windows.Data.Pdf renders pages but doesn't extract text. Options: generate projections with swift-winrt, or a pure-Swift PDF text reader. Low priority while notes are imported on the Mac.
    - ~~Deck files, source note, Copy Lesson~~ **Done:** Tools → Files in This Deck (GRASPCore `DeckFiles`, `[needs Mac check]`), Show Source Note in the card window, Copy Lesson on overviews; `ExternalLink`/`Clipboard` wrap ShellExecute and the Win32 clipboard.
    - ~~Google sign-in~~ **Done:** PKCE through `SupabaseAuth.oauthStart` / `completeOAuth`, back via `grasp://auth-callback` (already allowed in Supabase for the Mac). Tyler still has to try it for real.
-   - an installer or packaging, and an app icon
+   - ~~an installer~~ **Done:** `scripts\windows\install.ps1` (per-user, no admin). A signed MSIX would need a certificate.
 
 ## When you finish a chunk
 
