@@ -151,6 +151,14 @@ final class Account {
         start()
     }
 
+    /// Stops syncing without signing out -- switching to another profile.
+    /// The next time this profile opens, syncing starts again.
+    func stop() {
+        loop?.cancel()
+        pendingSync?.cancel()
+        linkWatch?.cancel()
+    }
+
     /// Stops syncing and signs out on this PC. The library stays here.
     func signOut() async {
         loop?.cancel()

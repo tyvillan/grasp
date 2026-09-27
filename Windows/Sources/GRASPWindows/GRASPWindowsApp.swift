@@ -1,11 +1,12 @@
 import DefaultBackend
 import Foundation
+import Observation
 import GRASPCore
 import SwiftCrossUI
 
 /// Started by `Launcher`, which sets up logging first.
 struct GRASPWindowsApp: App {
-    @State var opened = Result { try Library() }
+    @State var session = AppSession()
 
     init() {
         #if os(Windows)
@@ -15,18 +16,69 @@ struct GRASPWindowsApp: App {
 
     var body: some Scene {
         WindowGroup("GRASP") {
-            switch opened {
-            case .success(let library):
-                ContentView(library: library)
-            case .failure(let error):
+            switch session.phase {
+            case .picking(let profiles):
+                ProfilePicker(profiles: profiles, open: { session.open($0) }, create: { session.create($0) })
+            case .open(let library):
+                ContentView(library: library, switchProfile: { session.switchProfile() })
+            case .failed(let message):
                 VStack(spacing: 8) {
                     Text("GRASP couldn't open your library").font(.title2)
-                    Text(String(describing: error))
+                    Text(message)
                 }
                 .padding(24)
             }
         }
         .defaultSize(width: 1100, height: 720)
+    }
+}
+
+/// Which profile is open. The Mac shows "Who's studying?" at every launch;
+/// here it's skipped when there's one profile with no PIN, which is the
+/// usual case on a personal PC, and shown otherwise or on "Switch Profile".
+@Observable
+final class AppSession {
+    enum Phase {
+        case picking([Profile])
+        case open(Library)
+        case failed(String)
+    }
+
+    private(set) var phase: Phase = .failed("Starting…")
+
+    init() {
+        do {
+            let profiles = try Library.profiles()
+            if profiles.count == 1, profiles[0].pinHash == nil {
+                open(profiles[0])
+            } else {
+                phase = .picking(profiles)
+            }
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func open(_ profile: Profile) {
+        do {
+            phase = .open(try Library(profile: profile))
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func create(_ profile: Profile) {
+        do {
+            try Library.addProfile(profile)
+            open(profile)
+        } catch {
+            phase = .failed(String(describing: error))
+        }
+    }
+
+    func switchProfile() {
+        if case .open(let library) = phase { library.close() }
+        phase = .picking((try? Library.profiles()) ?? [])
     }
 }
 
@@ -48,6 +100,7 @@ enum Route: Hashable {
 /// its sidebar using the pane's stale width, which clipped the column.
 struct ContentView: View {
     let library: Library
+    let switchProfile: () -> Void
     @State var route: Route = .home
     /// The deck picked in each course's deck column, so switching courses
     /// and back keeps your place. A missing entry means "All Cards".
@@ -74,7 +127,7 @@ struct ContentView: View {
         case .calendar:
             CalendarScreen(library: library, onStudy: study)
         case .settings:
-            SettingsScreen(library: library)
+            SettingsScreen(library: library, switchProfile: switchProfile)
         case .search:
             SearchScreen(library: library, onOpenDeck: study)
         case .course(let courseId):

@@ -9,8 +9,10 @@ import SwiftCrossUI
 /// duplicate/off-topic sweeps arrive with those features.
 struct SettingsScreen: View {
     let library: Library
+    let switchProfile: () -> Void
     @Environment(\.chooseFile) var chooseFile
     @State var profileName = ""
+    @State var newPIN = ""
     @State var showingSignIn = false
     @State var confirmingSignOut = false
     @State var ollama: OllamaStatus = .checking
@@ -65,6 +67,32 @@ struct SettingsScreen: View {
                     .fixedSize()
             }
             Caption("Used for the greeting on Home. Each profile keeps its own library and settings on this PC.")
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(library.profile.pinHash == nil ? "No PIN" : "Locked with a PIN")
+                        .font(GRASPFont.rowTitle)
+                        .foregroundColor(GRASPColor.textPrimary)
+                    Caption("A 4-digit PIN asked for when this profile is opened.")
+                }
+                Spacer()
+                SecureField("4-digit PIN", text: $newPIN)
+                    .frame(width: 110.0)
+                Button(library.profile.pinHash == nil ? "Set PIN" : "Change PIN") {
+                    library.setPIN(newPIN)
+                    newPIN = ""
+                }
+                .disabled(newPIN.count != 4 || !newPIN.allSatisfy(\.isNumber))
+                .fixedSize()
+                if library.profile.pinHash != nil {
+                    Button("Remove PIN") { library.setPIN(nil) }.fixedSize()
+                }
+            }
+            HStack(spacing: 8) {
+                Caption("Other people can have their own profile, each with its own library and account.")
+                Spacer()
+                Button("Switch Profile…") { switchProfile() }.fixedSize()
+            }
         }
     }
 

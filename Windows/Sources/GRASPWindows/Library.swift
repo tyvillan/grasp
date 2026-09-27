@@ -65,7 +65,7 @@ final class Library {
     /// Sign-in and sync. Set up after the library loads, since it reloads
     /// the library when another device's changes arrive.
     private(set) var account: Account!
-    /// The open profile (there's no profile picker yet, so the first).
+    /// The open profile, chosen in `ProfilePicker` (or the only one).
     private(set) var profile: Profile
     /// This profile's preferences.
     let settings: AppSettings
@@ -79,23 +79,49 @@ final class Library {
     private(set) var revision = 0
     private let supportDirectory: URL
 
-    init() throws {
+    init(profile: Profile) throws {
         let support = try Self.supportDirectory()
         supportDirectory = support
+        self.profile = profile
+        settings = AppSettings(file: profile.databaseURL(supportDirectory: support)
+            .deletingLastPathComponent().appendingPathComponent("settings.json"))
+        database = try GRASPDatabase(path: profile.databaseURL(supportDirectory: support))
+        reload()
+        account = Account(database: database, profile: profile, supportDirectory: support) { [weak self] in
+            self?.reload()
+        }
+    }
+
+    /// Leaving this profile for another: stop syncing and any AI runs, so
+    /// nothing keeps writing to a library no longer on screen.
+    func close() {
+        account.stop()
+        for job in overviewJobs.values { job.stop() }
+        for job in cardJobs.values { job.stop() }
+    }
+
+    /// Every profile on this PC, making the first one on a fresh install.
+    nonisolated static func profiles() throws -> [Profile] {
+        let support = try supportDirectory()
         var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
-        // No profile picker or sign-in yet: a fresh install gets one profile.
         if profiles.isEmpty {
             profiles = [Profile(name: "Me")]
             try ProfileStore.save(profiles, supportDirectory: support)
         }
-        profile = profiles[0]
-        settings = AppSettings(file: profiles[0].databaseURL(supportDirectory: support)
-            .deletingLastPathComponent().appendingPathComponent("settings.json"))
-        database = try GRASPDatabase(path: profiles[0].databaseURL(supportDirectory: support))
-        reload()
-        account = Account(database: database, profile: profiles[0], supportDirectory: support) { [weak self] in
-            self?.reload()
-        }
+        return profiles
+    }
+
+    nonisolated static func addProfile(_ profile: Profile) throws {
+        let support = try supportDirectory()
+        var profiles = try ProfileStore.loadOrMigrate(supportDirectory: support)
+        profiles.append(profile)
+        try ProfileStore.save(profiles, supportDirectory: support)
+    }
+
+    /// Sets, changes or (with nil) removes this profile's PIN.
+    func setPIN(_ pin: String?) {
+        profile.pinHash = pin.map(ProfileStore.hashPIN)
+        try? ProfileStore.update(profile, supportDirectory: supportDirectory)
     }
 
     /// Where the library lives. `GRASP_SUPPORT_DIR` overrides it -- on a
