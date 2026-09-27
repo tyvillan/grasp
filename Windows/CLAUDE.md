@@ -155,7 +155,8 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - profile picker and PIN lock
    - ~~AI card actions~~ **Done:** the deck header's Tools menu has Refine Drafts with AI, Fill Gaps with AI and Review Duplicates; the card window has Refine with AI; Settings has the check-every-card sweep. GRASPCore `CardAI` (`[needs Mac check]`); `CardAIJob` runs them with progress and Stop.
 5. **Platform work:**
-   - PDF text via Windows.Data.Pdf and OCR via Windows.Media.Ocr (`PDFExtractor`/`ImageExtractor` currently return nil on Windows)
+   - PDF text and image OCR: still nil on Windows. swift-winui's `UWP` module has no projections for Windows.Data.Pdf or Windows.Media.Ocr (only C headers in CWinRT), and Windows.Data.Pdf renders pages but doesn't extract text. Options: generate projections with swift-winrt, or a pure-Swift PDF text reader. Low priority while notes are imported on the Mac.
+   - ~~Deck files, source note, Copy Lesson~~ **Done:** Tools → Files in This Deck (GRASPCore `DeckFiles`, `[needs Mac check]`), Show Source Note in the card window, Copy Lesson on overviews; `ExternalLink`/`Clipboard` wrap ShellExecute and the Win32 clipboard.
    - ~~Google sign-in~~ **Done:** PKCE through `SupabaseAuth.oauthStart` / `completeOAuth`, back via `grasp://auth-callback` (already allowed in Supabase for the Mac). Tyler still has to try it for real.
    - an installer or packaging, and an app icon
 

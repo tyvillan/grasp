@@ -357,6 +357,7 @@ private struct LessonHeader: View {
                     Chip(text: "Out of date", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
                 }
                 Spacer()
+                QuietLink(title: "Copy Lesson") { Clipboard.copy(LessonText.markdown(overview)) }
             }
             Text(LessonText.clean(overview.title))
                 .font(LessonFont.title)
@@ -818,5 +819,57 @@ extension LessonText {
             .replacingOccurrences(of: "_", with: " ")
             .trimmingCharacters(in: .whitespaces)
         return (topic?.isEmpty == false ? topic : nil) ?? fileName
+    }
+}
+
+extension LessonText {
+    /// The whole lesson as Markdown, for pasting elsewhere -- the Mac's
+    /// "Copy Lesson".
+    static func markdown(_ overview: RenderedOverview) -> String {
+        var lines: [String] = []
+        if let kicker = overview.kicker { lines.append("*\(kicker)*") }
+        lines.append("# \(overview.title)")
+        lines.append("")
+        if let hook = overview.hook {
+            lines += [hook, ""]
+        }
+        if !overview.objectives.isEmpty {
+            lines.append("**By the end you should be able to:**")
+            lines += overview.objectives.map { "- \($0)" }
+            lines.append("")
+        }
+        for section in overview.sections {
+            lines += ["## \(section.heading)", ""]
+            for paragraph in section.paragraphs { lines += [paragraph, ""] }
+            for term in section.terms {
+                lines.append("> **\(term.term)** — \(term.text)")
+                if let example = term.example { lines.append(">  - Is: \(example)") }
+                if let nonExample = term.nonExample { lines.append(">  - Isn't: \(nonExample)") }
+            }
+            if !section.terms.isEmpty { lines.append("") }
+            if let example = section.example {
+                lines.append("**Worked example\(example.title.map { ": \($0)" } ?? "")**")
+                if let setup = example.setup { lines.append(setup) }
+                for (index, step) in example.steps.enumerated() {
+                    lines.append("\(index + 1). \(step.action)" + (step.result.map { " → `\($0)`" } ?? "")
+                                 + (step.why.map { " (\($0))" } ?? ""))
+                }
+                if let outcome = example.outcome { lines.append(outcome) }
+                lines.append("")
+            }
+            if let check = section.check {
+                lines += ["> **Pause and check:** \(check.question)", ">", "> *Answer:* \(check.answer)", ""]
+            }
+        }
+        if !overview.formulas.isEmpty {
+            lines.append("## Formulas")
+            lines += overview.formulas.map { "- \($0.name): \($0.latex ?? $0.plain)" }
+            lines.append("")
+        }
+        if !overview.takeaways.isEmpty {
+            lines.append("## Key takeaways")
+            lines += overview.takeaways.map { "- \($0)" }
+        }
+        return lines.joined(separator: "\n")
     }
 }

@@ -185,6 +185,7 @@ struct CardEditor: View {
     @State var back: String
     @State var deckId: String?
     @State var confirmingDelete = false
+    @State var showingNote = false
 
     init(library: Library, target: CardEditorTarget, deckChoices: [Choice], moveTargets: [Choice],
          close: @escaping () -> Void) {
@@ -226,6 +227,23 @@ struct CardEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 SectionLabel("Back")
                 TextEditor(text: $back).frame(height: 130.0)
+            }
+            // The Mac's "View Source Note", shown in place: a sheet can't
+            // open another sheet on Windows.
+            if let materialId = target.card?.materialId {
+                QuietLink(title: showingNote ? "Hide Source Note ▴" : "Show Source Note ▾") { showingNote.toggle() }
+                if showingNote {
+                    ScrollView {
+                        Text(library.note(materialId)?.text ?? "This card's note isn't in the library.")
+                            .font(GRASPFont.body)
+                            .foregroundColor(GRASPColor.textSecondary)
+                            .frame(maxWidth: 440.0)
+                    }
+                    .frame(height: 180.0)
+                    .padding(10)
+                    .background(GRASPColor.surface)
+                    .cornerRadius(6)
+                }
             }
             if let card = target.card, card.origin == .parser {
                 Text("Edited cards stay as you wrote them when the note is imported again.")

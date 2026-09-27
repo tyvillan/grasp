@@ -424,6 +424,8 @@ struct DeckView: View {
             case .duplicates:
                 DuplicateReviewSheet(groups: library.duplicateGroups(inDecks: scope.deckIds),
                                      merge: { library.mergeDuplicates($0) }, close: { tool = nil })
+            case .files:
+                DeckFilesSheet(library: library, scope: scope) { tool = nil }
             case nil:
                 EmptyView()
             }
@@ -435,7 +437,7 @@ struct DeckView: View {
     @State var hasModel = false
     @State var tool: DeckTool?
 
-    enum DeckTool { case fillGaps, duplicates }
+    enum DeckTool { case fillGaps, duplicates, files }
 
     /// The Mac's deck tools: the AI actions, and duplicate review.
     private var toolsMenu: some View {
@@ -449,6 +451,7 @@ struct DeckView: View {
                 Button("Fill Gaps with AI…") { tool = .fillGaps }
             }
             Button("Review Duplicates…") { tool = .duplicates }
+            Button("Files in This Deck…") { tool = .files }
         }
         .fixedSize()
     }
