@@ -13,6 +13,11 @@ struct SettingsScreen: View {
     @Environment(\.chooseFile) var chooseFile
     @State var profileName = ""
     @State var newPIN = ""
+    @State var showingDuplicates = false
+    @State var duplicateGroups: [CardAI.DuplicateGroup] = []
+    /// The model GRASP uses; empty means GRASP's pick (the Mac's
+    /// "picking a model pins it").
+    @State var chosenModel = UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey) ?? ""
     @State var showingSignIn = false
     @State var confirmingSignOut = false
     @State var ollama: OllamaStatus = .checking
@@ -35,11 +40,13 @@ struct SettingsScreen: View {
                 profileSection
                 accountSection
                 studyGoalSection
+                focusTimerSection
                 calendarSection
                 notesFolderSection
                 localAISection
                 hiddenCoursesSection
                 excludedFoldersSection
+                duplicatesSection
                 aboutSection
             }
             .padding(.horizontal, 32)
@@ -156,6 +163,49 @@ struct SettingsScreen: View {
         }
     }
 
+    private var focusTimerSection: some View {
+        SettingsCard("Focus Timer") {
+            stepper("\(settings.focusWorkMinutes) min work interval",
+                    minus: { settings.focusWorkMinutes = max(5, settings.focusWorkMinutes - 5) },
+                    plus: { settings.focusWorkMinutes = min(90, settings.focusWorkMinutes + 5) })
+            stepper("\(settings.focusBreakMinutes) min break",
+                    minus: { settings.focusBreakMinutes = max(1, settings.focusBreakMinutes - 1) },
+                    plus: { settings.focusBreakMinutes = min(30, settings.focusBreakMinutes + 1) })
+            stepper(settings.focusCardTarget == 0 ? "No card target" : "\(settings.focusCardTarget) cards per interval",
+                    minus: { settings.focusCardTarget = max(0, settings.focusCardTarget - 5) },
+                    plus: { settings.focusCardTarget = min(200, settings.focusCardTarget + 5) })
+            Caption("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
+        }
+    }
+
+    private func stepper(_ label: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Button("−") { minus() }.fixedSize()
+            Text(label).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary).frame(width: 180.0)
+            Button("+") { plus() }.fixedSize()
+            Spacer()
+        }
+    }
+
+    private var duplicatesSection: some View {
+        SettingsCard("Duplicate Cards") {
+            HStack(spacing: 8) {
+                Button("Scan All Courses for Duplicates…") {
+                    duplicateGroups = library.duplicateGroupsAcrossAllCourses()
+                    showingDuplicates = true
+                }
+                .fixedSize()
+                Spacer()
+            }
+            Caption("Looks for near-identical cards across every course, not just one deck -- it catches the same material imported under two course folders. Nothing is removed automatically: you pick which card survives in each group.")
+        }
+        .sheet(isPresented: $showingDuplicates) {
+            DuplicateReviewSheet(groups: duplicateGroups, merge: { library.mergeDuplicates($0) }) {
+                showingDuplicates = false
+            }
+        }
+    }
+
     private var calendarSection: some View {
         SettingsCard("Calendar") {
             settingRow("Week starts on") {
@@ -219,13 +269,30 @@ struct SettingsScreen: View {
             case .checking:
                 EmptyView()
             case .notDetected:
-                Caption("GRASP couldn't reach a local Ollama server on this PC. Install Ollama for Windows from ollama.com and pull a model, e.g. \"ollama pull qwen3.5:9b\".")
+                // The Mac's "Setup Local AI": the steps, and a way to start.
+                Caption("GRASP couldn't reach Ollama on this PC. To set it up: 1. install Ollama for Windows from ollama.com (or run \"winget install Ollama.Ollama\"); 2. in a terminal, run \"ollama pull qwen3.5:9b\" (about 6 GB; it needs a graphics card with 8 GB, or plenty of patience on the processor); 3. click Check Again. Ollama starts with Windows after that.")
+                Button("Open ollama.com") { ExternalLink.open(URL(string: "https://ollama.com/download/windows")!) }.fixedSize()
             case .running(let models) where models.isEmpty:
-                Caption("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in a terminal.")
+                Caption("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in a terminal, then click Check Again.")
             case .running(let models):
-                Caption("Models on this PC: \(models.joined(separator: ", ")). GRASP uses "
-                        + "\(OllamaModelChoice.resolve(preferred: nil, installed: models) ?? models[0]) for lessons, "
-                        + "card refinement and filling gaps (a deck's Tools menu).")
+                let choices = [Choice(id: nil, description: "Automatic (\(OllamaModelChoice.resolve(preferred: nil, installed: models) ?? models[0]))")]
+                    + models.map { Choice(id: $0, description: $0) }
+                HStack(spacing: 8) {
+                    Text("Model").font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                    Picker(of: choices, selection: Binding(
+                        get: { choices.first { $0.id == (chosenModel.isEmpty ? nil : chosenModel) } ?? choices[0] },
+                        set: { choice in
+                            chosenModel = choice?.id ?? ""
+                            if let id = choice?.id {
+                                UserDefaults.standard.set(id, forKey: OllamaModelChoice.defaultsKey)
+                            } else {
+                                UserDefaults.standard.removeObject(forKey: OllamaModelChoice.defaultsKey)
+                            }
+                        }
+                    ))
+                    Spacer()
+                }
+                Caption("Used for lessons, test questions, card refinement and filling gaps. Automatic picks the best one installed: qwen3.5:9b wrote the most accurate lessons in testing.")
             }
             if case .running(let models) = ollama, !models.isEmpty {
                 Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)

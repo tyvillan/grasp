@@ -102,6 +102,10 @@ extension Library {
         }
     }
 
+    func duplicateGroupsAcrossAllCourses() -> [CardAI.DuplicateGroup] {
+        (try? database.queue.read { try CardAI.duplicateGroupsAcrossAllCourses(db: $0) }) ?? []
+    }
+
     func duplicateGroups(inDecks deckIds: [String]) -> [CardAI.DuplicateGroup] {
         CardAI.duplicateGroups(cards(inDecks: deckIds))
     }
