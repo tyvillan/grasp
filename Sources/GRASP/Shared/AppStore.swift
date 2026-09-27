@@ -230,457 +230,76 @@ final class AppStore {
         }
     }
 
-    /// Refines every draft card in a deck (grouped by source note, so each
-    /// batch gets that note's own text as context), if a generator is
-    /// available. Returns how many cards were actually refined; 0 with no
-    /// error is the expected outcome when nothing is available.
+    // MARK: - AI card actions
+    //
+    // GRASPCore's `CardAI` does the work, shared with Windows; the store
+    // picks the generator and reloads afterwards.
+
+    typealias ContextCheckEntry = CardAI.ContextCheckEntry
+    typealias ContextCheckSummary = CardAI.ContextCheckSummary
+    typealias RefineDeckSummary = CardAI.RefineDeckSummary
+    typealias CardRefineOutcome = CardAI.CardRefineOutcome
+
+    /// Rewords every draft in a deck, note by note. Returns how many changed;
+    /// 0 is the expected outcome when no model is available.
     func refineDraftCards(inDeck deckId: String) async -> Int {
         await refineDraftCards(inDecks: [deckId])
     }
 
-    /// The plural of the above -- a course-wide "Refine with AI" groups
-    /// drafts by source note exactly the same way regardless of which
-    /// (possibly several) decks they currently sit in.
     func refineDraftCards(inDecks deckIds: [String]) async -> Int {
-        let drafts: [Card]
-        do {
-            let cardIds = try await database.queue.read { db in
-                try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
-            }
-            guard !cardIds.isEmpty else { return 0 }
-            drafts = try await database.queue.read { db in
-                try Card
-                    .filter(cardIds.contains(Column("id")))
-                    .filter(Column("status") == CardStatus.draft.rawValue)
-                    // Deleted drafts keep their deck rows; without this they
-                    // were sent to the model and rewritten -- including ones
-                    // the context check had removed a moment before.
-                    .filter(Column("deletedAt") == nil)
-                    .fetchAll(db)
-            }
-        } catch {
-            return 0
-        }
-        return await refineWording(of: drafts)
-    }
-
-    /// Wording cleanup (parsing artifacts, awkward phrasing) for exactly
-    /// these cards, grouped by source note for context -- the shared
-    /// engine behind `refineDraftCards` (draft-only, deck-scoped) and
-    /// `refineCard` (any single card, any status). No status filter here
-    /// at all: which cards are even offered to it is entirely the
-    /// caller's job. Cards with no `materialId` are dropped -- there's no
-    /// note to ground a rewrite in. Fails soft, same as every other
-    /// generator-backed flow: no generator, no note text, or a mid-batch
-    /// DB error just leaves that batch of cards untouched rather than
-    /// throwing.
-    private func refineWording(of cards: [Card]) async -> Int {
-        let generator = await CardGenerators.select()
-        guard await generator.isAvailable else { return 0 }
-        let withNotes = cards.filter { $0.materialId != nil }
-        guard !withNotes.isEmpty else { return 0 }
-        let byMaterial = Dictionary(grouping: withNotes, by: { $0.materialId! })
-
-        let progress = AIProgress.current
-        var refinedCount = 0
-        for (index, (materialId, materialCards)) in byMaterial.enumerated() {
-            if Task.isCancelled { break }
-            let context = (try? noteText(forMaterial: materialId))?.reflowed ?? ""
-            let candidates = materialCards.map {
-                CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0)
-            }
-            progress?.begin("Rewording cards from note \(index + 1) of \(byMaterial.count)")
-            let refined = await generator.refine(candidates, noteContext: context)
-            progress?.advance()
-            // A stopped request comes back as the unchanged originals --
-            // saving those would stamp untouched cards as AI-refined.
-            if Task.isCancelled { break }
-            guard refined.count == materialCards.count else { continue }
-            do {
-                let changed = try await database.queue.write { db -> Int in
-                    var changed = 0
-                    for (card, result) in zip(materialCards, refined) {
-                        // Re-fetched rather than mutating the passed-in
-                        // `card` in place: the context-check pass a caller
-                        // like `refineCard` runs first may have just
-                        // rewritten this same row, and this write must
-                        // land on top of that, not silently undo it.
-                        guard var updated = try Card.fetchOne(db, key: card.id),
-                              updated.deletedAt == nil
-                        else { continue }
-                        let front = result.front.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let back = result.back.trimmingCharacters(in: .whitespacesAndNewlines)
-                        // Unchanged (or emptied) is not a refinement. Saving
-                        // it anyway stamped cards "refined by AI" that the
-                        // model never touched -- every card, whenever a
-                        // call failed and passed its input back.
-                        guard !front.isEmpty, !back.isEmpty,
-                              front != updated.front || back != updated.back
-                        else { continue }
-                        updated.front = front
-                        updated.back = back
-                        // Not "parser" anymore: protects it from the
-                        // scanner's re-import cleanup, which only clears
-                        // origin == .parser drafts. Doesn't touch
-                        // `status` -- refinement is not the same as
-                        // approval, for a draft or an already-active card.
-                        updated.origin = .ollama
-                        updated.updatedAt = Date()
-                        try updated.save(db)
-                        changed += 1
-                    }
-                    return changed
-                }
-                refinedCount += changed
-            } catch {
-                continue
-            }
-        }
+        let count = await CardAI.refineDraftCards(inDecks: deckIds, using: await CardGenerators.select(),
+                                                  database: database)
         reload()
-        return refinedCount
+        return count
     }
 
-    /// One card's outcome from a context-verification pass, kept only for
-    /// the summary the caller shows/logs afterward -- see `verifyContext`.
-    struct ContextCheckEntry: Sendable, Identifiable {
-        var id: String { cardId }
-        let cardId: String
-        let front: String
-        let courseName: String
-    }
-
-    struct ContextCheckSummary: Sendable {
-        var refined: [ContextCheckEntry] = []
-        var removed: [ContextCheckEntry] = []
-        var isEmpty: Bool { refined.isEmpty && removed.isEmpty }
-    }
-
-    /// Checks a card's own recorded pieces of context validation against
-    /// its source note and course -- flagging assignment instructions,
-    /// submission logistics, or a vague fragment that the deterministic
-    /// parser's own filters (see `PairParser.isAssignmentMetaText`) didn't
-    /// catch. Shared by two callers with different scopes: the draft-time
-    /// check on a fresh import (`verifyCardContext`, still-unapproved
-    /// cards only) and the one-time sweep over cards already approved
-    /// long ago (`sweepAllCardsForContext`). Cards with no `materialId`
-    /// (hand-typed, no source note to check against) are skipped
-    /// entirely -- there's nothing here for them to be checked against.
-    ///
-    /// A `.refine` verdict rewrites the card's `back` in place (keeping
-    /// the original in `originalBack` for the review UI's revert
-    /// option); a `.reject` verdict soft-deletes it, same as any other
-    /// card removal in this app. Fails soft at every step -- no generator
-    /// available, no source text for a note, a DB error mid-pass -- by
-    /// simply leaving the remaining cards untouched rather than throwing,
-    /// consistent with every other `CardGenerator`-backed flow.
-    private func verifyContext(of cards: [Card]) async -> ContextCheckSummary {
-        var summary = ContextCheckSummary()
-        let candidates = cards.filter { $0.materialId != nil }
-        guard !candidates.isEmpty else { return summary }
-
-        let generator = await CardGenerators.select()
-        guard await generator.isAvailable else { return summary }
-
-        let materialIds = Set(candidates.map { $0.materialId! })
-        let courseNameByMaterial: [String: String]
-        do {
-            courseNameByMaterial = try await database.queue.read { db -> [String: String] in
-                let materials = try Material.filter(materialIds.contains(Column("id"))).fetchAll(db)
-                let courseIds = Set(materials.map(\.courseId))
-                let courses = try Course.filter(courseIds.contains(Column("id"))).fetchAll(db)
-                let courseById = Dictionary(uniqueKeysWithValues: courses.map { ($0.id, $0) })
-                return Dictionary(uniqueKeysWithValues: materials.map { ($0.id, courseById[$0.courseId]?.name ?? "") })
-            }
-        } catch {
-            return summary
-        }
-
-        let progress = AIProgress.current
-        var checked = 0
-        let byMaterial = Dictionary(grouping: candidates, by: { $0.materialId! })
-        noteLoop: for (materialId, materialCards) in byMaterial {
-            guard let context = (try? noteText(forMaterial: materialId))?.reflowed, !context.isEmpty else {
-                // No call made, but still counted so the bar reaches the end.
-                checked += materialCards.count
-                progress?.advance(materialCards.count)
-                continue
-            }
-            let courseName = courseNameByMaterial[materialId] ?? ""
-
-            for card in materialCards {
-                if Task.isCancelled { break noteLoop }
-                checked += 1
-                progress?.begin("Checking card \(checked) of \(candidates.count)")
-                let result = await generator.validateContext(
-                    front: card.front, back: card.back, noteContext: context, courseName: courseName
-                )
-                progress?.advance()
-                if Task.isCancelled { break noteLoop }
-                do {
-                    switch result.verdict {
-                    case .valid:
-                        continue
-                    case .refine(let newBack):
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            if updated.originalBack == nil { updated.originalBack = updated.back }
-                            updated.back = newBack
-                            updated.isContextRefined = true
-                            updated.updatedAt = Date()
-                            try updated.save(db)
-                        }
-                        summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
-                    case .reject:
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            updated.deletedAt = Date()
-                            updated.updatedAt = Date()
-                            try updated.save(db)
-                        }
-                        summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
-                    }
-                } catch {
-                    continue
-                }
-            }
-        }
+    /// The draft-time context check: every still-unapproved card in scope,
+    /// checked against its note before it's ever approved.
+    func verifyCardContext(inDecks deckIds: [String]) async -> ContextCheckSummary {
+        let drafts = await CardAI.draftCards(inDecks: deckIds, database: database)
+        let summary = await CardAI.verifyContext(of: drafts, using: await CardGenerators.select(), database: database)
         reload()
         return summary
     }
 
-    /// The draft-time context check: runs over every still-unapproved
-    /// card in scope, right where "Refine with AI" already runs, so a bad
-    /// extraction can be caught before it's ever approved into real study
-    /// material. `topic`-less, deck-scoped exactly like `refineDraftCards`.
-    func verifyCardContext(inDecks deckIds: [String]) async -> ContextCheckSummary {
-        await verifyContext(of: draftCards(inDecks: deckIds))
-    }
-
-    /// Every live draft in these decks. Empty on a read error, which every
-    /// caller treats as "nothing to do".
-    private func draftCards(inDecks deckIds: [String]) async -> [Card] {
-        do {
-            let cardIds = try await database.queue.read { db in
-                try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
-            }
-            guard !cardIds.isEmpty else { return [] }
-            return try await database.queue.read { db in
-                try Card
-                    .filter(cardIds.contains(Column("id")))
-                    .filter(Column("status") == CardStatus.draft.rawValue)
-                    .filter(Column("deletedAt") == nil)
-                    .fetchAll(db)
-            }
-        } catch {
-            return []
-        }
-    }
-
-    /// The one-time sweep: every live card in the whole vault, approved or
-    /// not, checked against its own source note -- the only way to catch
-    /// an off-topic card that was approved long before this feature
-    /// existed. Deliberately vault-wide rather than deck/course-scoped
-    /// (unlike `verifyCardContext`): a first pass over already-curated
-    /// content is exactly the kind of thing worth doing everywhere at
-    /// once rather than course by course.
+    /// The one-time sweep: every live card in the library, approved or not,
+    /// checked against its own note.
     func sweepAllCardsForContext() async -> ContextCheckSummary {
-        let liveCards: [Card]
-        do {
-            liveCards = try await database.queue.read { db in
-                try Card.filter(Column("deletedAt") == nil).fetchAll(db)
-            }
-        } catch {
-            return ContextCheckSummary()
-        }
-        AIProgress.current?.expect(liveCards.filter { $0.materialId != nil }.count)
-        return await verifyContext(of: liveCards)
+        let summary = await CardAI.sweepAllCards(using: await CardGenerators.select(), database: database)
+        reload()
+        return summary
     }
 
-    /// The combined result of "Refine Deck with AI" -- the single button
-    /// that replaced the separate "Refine with AI" and "Check for
-    /// Off-Topic Cards" actions.
-    struct RefineDeckSummary: Sendable {
-        var wordingRefinedCount = 0
-        var context = ContextCheckSummary()
-        var isEmpty: Bool { wordingRefinedCount == 0 && context.isEmpty }
-    }
-
-    /// "Refine Deck with AI": one action, two passes, always in this
-    /// order. Pass 1 (`verifyCardContext`) prunes or rewrites drafts that
-    /// aren't real definitions at all -- assignment text, off-topic
-    /// fragments. Pass 2 (`refineDraftCards`) then cleans up wording
-    /// (parsing artifacts, awkward phrasing) on whatever drafts survive.
-    /// Doing it in this order, not the reverse or a single mixed pass, is
-    /// what fixes the bug where a genuinely off-topic card used to just
-    /// come out of "Refine with AI" more smoothly worded but still
-    /// wrong -- that wording-cleanup prompt's whole job is to preserve
-    /// meaning, so handing it a bad card early meant it dutifully
-    /// polished the wrong meaning instead of replacing it. By the time
-    /// pass 2 runs now, anything genuinely off-topic is already gone or
-    /// already rewritten from scratch in pass 1.
+    /// "Refine Deck with AI": the context check on every draft first (which
+    /// removes or rewrites what isn't a real definition), then wording
+    /// cleanup on what survives -- in that order, so an off-topic card isn't
+    /// just polished.
     func refineDeckWithAI(inDecks deckIds: [String]) async -> RefineDeckSummary {
-        // Counted up front for both passes -- one call per draft card, then
-        // one per source note -- so the bar runs once from start to end
-        // instead of filling for pass 1 and then jumping backwards.
-        if let progress = AIProgress.current {
-            let drafts = await draftCards(inDecks: deckIds).filter { $0.materialId != nil }
-            progress.expect(drafts.count + Set(drafts.compactMap(\.materialId)).count)
-        }
-        let context = await verifyCardContext(inDecks: deckIds)
-        if Task.isCancelled { return RefineDeckSummary(context: context) }
-        let wordingRefinedCount = await refineDraftCards(inDecks: deckIds)
-        return RefineDeckSummary(wordingRefinedCount: wordingRefinedCount, context: context)
+        let summary = await CardAI.refineDeck(inDecks: deckIds, using: await CardGenerators.select(),
+                                              database: database)
+        reload()
+        return summary
     }
 
-    enum CardRefineOutcome: Sendable {
-        /// Looked off-topic against its own note and was soft-deleted.
-        case removed
-        /// The context check rewrote it, the wording pass cleaned it up,
-        /// or both -- any real change counts, since the caller only needs
-        /// to know whether to say "done" or "nothing to do here."
-        case refined
-        /// No generator, no source note, or a hand-typed card with
-        /// nothing to check it against.
-        case unavailable
-    }
-
-    /// The single-card "Refine with AI" action -- available from a card's
-    /// own menu whether it's still a draft or was approved months ago,
-    /// unlike "Refine Deck with AI" (drafts only). Runs the exact same
-    /// two-stage pipeline as that deck-wide action, just scoped to one
-    /// card: the context check first (which can rewrite a bad definition
-    /// or remove an off-topic one outright), then wording cleanup on
-    /// whatever survives -- an approved card sitting in the deck for
-    /// months has just as much chance of being clumsily worded or quietly
-    /// off-topic as a fresh draft does, and there was previously no way to
-    /// ask for a second look at just that one card.
+    /// "Refine with AI" on one card, draft or approved: the same two passes.
     @discardableResult
     func refineCard(_ cardId: String) async -> CardRefineOutcome {
-        guard let card = try? await database.queue.read({ db in try Card.fetchOne(db, key: cardId) }),
-              card.materialId != nil
-        else { return .unavailable }
-
-        let generator = await CardGenerators.select()
-        guard await generator.isAvailable else { return .unavailable }
-
-        let contextResult = await verifyContext(of: [card])
-        if !contextResult.removed.isEmpty { return .removed }
-
-        // Re-fetched: the context pass above may have just rewritten
-        // `back` in the database, and the wording pass needs to clean up
-        // whatever text is live now, not the pre-refinement copy still
-        // held in `card`.
-        guard let current = try? await database.queue.read({ db in try Card.fetchOne(db, key: cardId) })
-        else { return contextResult.refined.isEmpty ? .unavailable : .refined }
-
-        let wordingRefinedCount = await refineWording(of: [current])
-        return (wordingRefinedCount > 0 || !contextResult.refined.isEmpty) ? .refined : .unavailable
+        let outcome = await CardAI.refineCard(cardId, using: await CardGenerators.select(), database: database)
+        reload()
+        return outcome
     }
 
-    /// The default cap on how many additional cards a single note can
-    /// contribute per run -- a note the parser already covered well should
-    /// yield few or none; this just keeps one unusually chatty response
-    /// from flooding a deck.
-    private static let defaultMaxGeneratedPerNote = 3
-
-    /// Proposes new cards for concepts a note's own text implies but the
-    /// parser's fixed extraction shapes didn't happen to capture -- e.g. a
-    /// term used in passing but never given its own definition line. Grouped
-    /// by source note exactly like `refineDraftCards`, since the model's
-    /// only source of truth is that note's own text, not general knowledge.
-    /// Every new card lands as `origin: .aiGenerated, status: .draft`: gated
-    /// behind the same review queue as everything else, and permanently
-    /// distinguishable afterward (unlike `.ollama`, this origin is never
-    /// reassigned on approval) so it stays clear which cards came straight
-    /// from the student's notes and which the AI filled in.
+    /// New draft cards, marked AI-generated, for what a note implies but its
+    /// cards miss -- grounded in that note's own text.
     func generateAdditionalCards(
-        inDecks deckIds: [String], maxPerNote: Int = defaultMaxGeneratedPerNote, topic: String? = nil
+        inDecks deckIds: [String], maxPerNote: Int = CardAI.defaultMaxGeneratedPerNote, topic: String? = nil
     ) async -> Int {
-        let generator = await CardGenerators.select()
-        guard await generator.isAvailable else { return 0 }
-
-        let existingByMaterial: [String: [Card]]
-        let deckOfCard: [String: String]
-        do {
-            let (cards, deckCards) = try await database.queue.read { db -> ([Card], [DeckCard]) in
-                let deckCards = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db)
-                let cardIds = deckCards.map(\.cardId)
-                guard !cardIds.isEmpty else { return ([], []) }
-                let cards = try Card
-                    .filter(cardIds.contains(Column("id")))
-                    .filter(Column("deletedAt") == nil)
-                    .filter(Column("materialId") != nil)
-                    .fetchAll(db)
-                return (cards, deckCards)
-            }
-            guard !cards.isEmpty else { return 0 }
-            existingByMaterial = Dictionary(grouping: cards, by: { $0.materialId! })
-            deckOfCard = Dictionary(deckCards.map { ($0.cardId, $0.deckId) }, uniquingKeysWith: { first, _ in first })
-        } catch {
-            return 0
-        }
-
-        // Seeded across every note in scope up front, not rebuilt per note,
-        // so a proposal that duplicates a card from a *different* source
-        // note in the same deck is still caught, exactly like import-time
-        // suppression already does across a whole deck.
-        var duplicateIndex = DuplicateDetector.Index(existingByMaterial.values.flatMap { $0 })
-        var createdCount = 0
-        let progress = AIProgress.current
-        progress?.expect(existingByMaterial.count)
-
-        for (index, (materialId, existing)) in existingByMaterial.enumerated() {
-            if Task.isCancelled { break }
-            guard let context = (try? noteText(forMaterial: materialId))?.reflowed, !context.isEmpty,
-                  let deckId = existing.first.flatMap({ deckOfCard[$0.id] })
-            else { progress?.advance(); continue }
-            let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
-            progress?.begin("Reading note \(index + 1) of \(existingByMaterial.count)")
-            let proposed = await generator.generateAdditional(
-                existing: candidates, noteContext: context, maxCount: maxPerNote, topic: topic
-            )
-            progress?.advance()
-            if Task.isCancelled { break }
-            guard !proposed.isEmpty else { continue }
-
-            // `duplicateIndex` is only ever read/mutated back on this
-            // (non-concurrent) loop, never inside the `write` closure
-            // itself -- a snapshot goes in, a fresh local copy does the
-            // work under the closure's own isolation, and the actually-
-            // inserted rows come back out to fold into the real index.
-            let indexSnapshot = duplicateIndex
-            do {
-                let inserted = try await database.queue.write { db -> [(id: String, front: String, back: String)] in
-                    var localIndex = indexSnapshot
-                    var next = try Int.fetchOne(db, sql:
-                        "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                        arguments: [deckId]
-                    ) ?? 0
-                    var inserted: [(id: String, front: String, back: String)] = []
-                    for generated in proposed {
-                        guard localIndex.matchId(front: generated.front, back: generated.back) == nil else { continue }
-                        let card = Card(
-                            materialId: materialId, front: generated.front, back: generated.back,
-                            origin: .aiGenerated, status: .draft
-                        )
-                        try card.save(db)
-                        try DeckCard(deckId: deckId, cardId: card.id, sortIndex: next).save(db)
-                        localIndex.insert(id: card.id, front: generated.front, back: generated.back)
-                        inserted.append((card.id, generated.front, generated.back))
-                        next += 1
-                    }
-                    return inserted
-                }
-                for item in inserted {
-                    duplicateIndex.insert(id: item.id, front: item.front, back: item.back)
-                }
-                createdCount += inserted.count
-            } catch {
-                continue
-            }
-        }
+        let count = await CardAI.generateAdditionalCards(
+            inDecks: deckIds, maxPerNote: maxPerNote, topic: topic,
+            using: await CardGenerators.select(), database: database
+        )
         reload()
-        return createdCount
+        return count
     }
 
     func reload() {
@@ -762,96 +381,19 @@ final class AppStore {
     /// deck, for the "Remove Duplicates" review flow -- the backlog
     /// counterpart to `VaultScanner`'s import-time suppression, which only
     /// prevents *new* duplicates going forward.
-    struct DuplicateGroup: Identifiable {
-        var id: String { cards[0].id }
-        let cards: [Card]
-        let suggestedKeepId: String
-        /// True when two or more cards in the group each carry real review
-        /// history -- deleting either would throw away real study data, so
-        /// the review sheet defaults this group to "keep both" rather than
-        /// guessing which history to discard.
-        let hasCompetingHistory: Bool
-    }
+    typealias DuplicateGroup = CardAI.DuplicateGroup
 
     func duplicateGroups(inDeck deckId: String) throws -> [DuplicateGroup] {
         try duplicateGroups(inDecks: [deckId])
     }
 
-    /// The plural of the above -- run across every deck in a course at
-    /// once, so a duplicate that crept in via two different decks (not
-    /// just two notes in the same one) shows up too.
     func duplicateGroups(inDecks deckIds: [String]) throws -> [DuplicateGroup] {
-        Self.buildDuplicateGroups(try cards(inDecks: deckIds))
+        CardAI.duplicateGroups(try cards(inDecks: deckIds))
     }
 
-    /// A deliberate, manually-triggered sweep across *every* course at
-    /// once -- the counterpart to `duplicateGroups(inDecks:)`'s per-course
-    /// scope, for a duplicate that scope structurally can't see (e.g. the
-    /// same lecture PDF imported under two different course folders,
-    /// which import-time suppression and the per-course review sheet both
-    /// only ever compare within, never across).
-    /// Duplicate groups in every course -- found course by course, never
-    /// across courses.
-    ///
-    /// The detector treats two cards with the same term as duplicates even
-    /// when their definitions differ, which is right inside one course (a
-    /// term defined twice) and wrong across two: run over the whole vault
-    /// it merged Anthropology's "Class" (a social stratum) into Software
-    /// Design's "Class" (a blueprint), Geology's "Composition" into OOP
-    /// composition, and about two dozen more homonyms, deleting one side of
-    /// each.
+    /// Within each course, across every course.
     func duplicateGroupsAcrossAllCourses() throws -> [DuplicateGroup] {
-        let byCourse = try database.queue.read { db -> [String: [Card]] in
-            let cards = try Card.filter(Column("deletedAt") == nil).fetchAll(db)
-            let courseOfMaterial = try Material.fetchAll(db)
-                .reduce(into: [String: String]()) { $0[$1.id] = $1.courseId }
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT deckCard.cardId AS cardId, deck.courseId AS courseId
-                FROM deckCard JOIN deck ON deck.id = deckCard.deckId
-                """)
-            let courseOfCard = rows.reduce(into: [String: String]()) { map, row in
-                map[row["cardId"]] = row["courseId"]
-            }
-            return Dictionary(grouping: cards) { card in
-                card.materialId.flatMap { courseOfMaterial[$0] } ?? courseOfCard[card.id] ?? ""
-            }
-        }
-        return byCourse.values.flatMap { Self.buildDuplicateGroups($0) }
-    }
-
-    private static func buildDuplicateGroups(_ cards: [Card]) -> [DuplicateGroup] {
-        DuplicateDetector.groups(cards).map { group in
-            let withHistory = group.filter { $0.reps > 0 }
-            let keeper = group.max { lhs, rhs in
-                Self.duplicateKeepRank(lhs).lexicographicallyPrecedes(Self.duplicateKeepRank(rhs))
-            }
-            return DuplicateGroup(
-                cards: group,
-                suggestedKeepId: keeper?.id ?? group[0].id,
-                hasCompetingHistory: withHistory.count >= 2
-            )
-        }
-    }
-
-    /// Higher wins. Real review history first (deleting it loses study
-    /// data a history-free twin doesn't have), then a hand-edited card
-    /// over parsed output, then active over draft over suspended (keeping
-    /// a suspended twin would silently pull the concept out of study),
-    /// then the fuller definition, then simply the older row.
-    private static func duplicateKeepRank(_ card: Card) -> [Int] {
-        let statusRank: Int
-        switch card.status {
-        case .active: statusRank = 2
-        case .draft: statusRank = 1
-        case .suspended: statusRank = 0
-        }
-        return [
-            card.reps > 0 ? 1 : 0,
-            card.origin == .manual ? 1 : 0,
-            statusRank,
-            card.back.count,
-            Int(-card.createdAt.timeIntervalSince1970),
-        ]
+        try database.queue.read { db in try CardAI.duplicateGroupsAcrossAllCourses(db: db) }
     }
 
     func courses(inSemester semesterId: String?) -> [Course] {
@@ -868,51 +410,14 @@ final class AppStore {
         coursesBySemester[nil] ?? []
     }
 
-    struct DeckSummary: Identifiable, Sendable {
-        var id: String { deckId }
-        let deckId: String
-        let deckName: String
-        let courseId: String
-        let courseName: String
-        let cardCount: Int
-        let dueCount: Int
-        /// Cards with at least one review, for the "N/M cards reviewed"
-        /// progress a deck shows on the dashboard.
-        let reviewedCount: Int
-        let lastReviewedAt: Date?
-    }
+    /// A deck's Home figures -- the core's `Dashboard.DeckSummary`.
+    typealias DeckSummary = Dashboard.DeckSummary
 
     /// Every deck with its card/due counts, course name, and last-studied
     /// timestamp in one query -- the Home dashboard's entire data need,
-    /// since it has to rank across every course at once (which deck to
-    /// "jump back into", which courses have cards due) rather than one
-    /// course at a time like the rest of the app.
+    /// since it ranks across every course at once (see `Dashboard.decks`).
     func dashboardDecks(now: Date = Date()) throws -> [DeckSummary] {
-        try database.queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT deck.id AS deckId, deck.name AS deckName, course.id AS courseId, course.name AS courseName,
-                       COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status != 'suspended' THEN card.id END) AS cardCount,
-                       COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status = 'active' AND card.due <= ? THEN card.id END) AS dueCount,
-                       COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.reps > 0 THEN card.id END) AS reviewedCount,
-                       MAX(review.reviewedAt) AS lastReviewedAt
-                FROM deck
-                JOIN course ON course.id = deck.courseId
-                LEFT JOIN deckCard ON deckCard.deckId = deck.id
-                LEFT JOIN card ON card.id = deckCard.cardId
-                LEFT JOIN review ON review.cardId = card.id
-                -- Archived courses are hidden everywhere else; counting them
-                -- here made Home's totals disagree with the course list.
-                WHERE deck.deletedAt IS NULL AND course.isArchived = 0
-                GROUP BY deck.id
-                """, arguments: [now])
-                .map { row in
-                    DeckSummary(
-                        deckId: row["deckId"], deckName: row["deckName"], courseId: row["courseId"],
-                        courseName: row["courseName"], cardCount: row["cardCount"], dueCount: row["dueCount"],
-                        reviewedCount: row["reviewedCount"], lastReviewedAt: row["lastReviewedAt"]
-                    )
-                }
-        }
+        try database.queue.read { db in try Dashboard.decks(now: now, db: db) }
     }
 
     func deck(_ id: String) throws -> Deck? {
@@ -1095,44 +600,8 @@ final class AppStore {
     /// ladder candidates from every deck in the course at once.
     func learnRound(deckIds: [String]) throws -> [LearnEngine.RoundQuestion] {
         try database.queue.read { db in
-            let candidates = try Self.learnCandidates(forDecks: deckIds, db: db)
-                .sorted { a, b in
-                    a.lastSeenAt ?? .distantPast < b.lastSeenAt ?? .distantPast
-                }
-                .map(\.candidate)
             var rng = SystemRandomNumberGenerator()
-            return LearnEngine.buildRound(from: candidates, using: &rng)
-        }
-    }
-
-    nonisolated private static func learnCandidates(
-        forDeck deckId: String, db: Database
-    ) throws -> [(candidate: LearnEngine.Candidate, lastSeenAt: Date?)] {
-        try learnCandidates(forDecks: [deckId], db: db)
-    }
-
-    /// `nonisolated` (unlike most of this class) so it can run inside a
-    /// GRDB `@Sendable` read closure called from an `async` context (see
-    /// `startTest`) without hopping back to the main actor -- it only ever
-    /// touches the `Database` connection it's handed, no store state.
-    nonisolated private static func learnCandidates(
-        forDecks deckIds: [String], db: Database
-    ) throws -> [(candidate: LearnEngine.Candidate, lastSeenAt: Date?)] {
-        let cardIds = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
-        guard !cardIds.isEmpty else { return [] }
-        let cards = try Card
-            .filter(cardIds.contains(Column("id")))
-            .filter(Column("deletedAt") == nil)
-            .filter(Column("status") == CardStatus.active.rawValue)
-            .fetchAll(db)
-        let states = try LearnState.filter(cardIds.contains(Column("cardId"))).fetchAll(db)
-        let stateByCard = Dictionary(uniqueKeysWithValues: states.map { ($0.cardId, $0) })
-
-        return cards.map { card in
-            let state = stateByCard[card.id]
-            let level = LearnEngine.Level(rawValue: state?.level ?? 0) ?? .new
-            let candidate = LearnEngine.Candidate(cardId: card.id, front: card.front, back: card.back, level: level)
-            return (candidate, state?.lastSeenAt)
+            return try Study.learnRound(forDecks: deckIds, using: &rng, db: db)
         }
     }
 
@@ -1140,13 +609,7 @@ final class AppStore {
     /// streak, independent of FSRS scheduling.
     func recordLearnAnswer(cardId: String, wasCorrect: Bool, now: Date = Date()) throws {
         try database.queue.write { db in
-            let existing = try LearnState.fetchOne(db, key: cardId)
-            let currentLevel = LearnEngine.Level(rawValue: existing?.level ?? 0) ?? .new
-            let (nextLevel, streak) = LearnEngine.advance(
-                level: currentLevel, consecutiveCorrect: existing?.consecutiveCorrect ?? 0, wasCorrect: wasCorrect
-            )
-            try LearnState(cardId: cardId, level: nextLevel.rawValue, consecutiveCorrect: streak, lastSeenAt: now)
-                .save(db)
+            try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, now: now, db: db)
         }
         reload()
     }
@@ -1161,11 +624,7 @@ final class AppStore {
     /// The plural of the above, for Learn mode's mastery bar when run
     /// across every deck in a course.
     func deckMastery(deckIds: [String]) throws -> (mastered: Int, total: Int) {
-        try database.queue.read { db in
-            let candidates = try Self.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
-            let mastered = candidates.filter { $0.level == .mastered }.count
-            return (mastered, candidates.count)
-        }
+        try database.queue.read { db in try Study.mastery(forDecks: deckIds, db: db) }
     }
 
     /// Every card in a deck's current Learn ladder level, for the review
@@ -1178,28 +637,16 @@ final class AppStore {
     /// The plural of the above, for the "All Cards" master category's own
     /// mastery badges across every deck in the course.
     func learnLevels(forDecks deckIds: [String]) throws -> [String: LearnEngine.Level] {
-        try database.queue.read { db in
-            let candidates = try Self.learnCandidates(forDecks: deckIds, db: db)
-            return Dictionary(uniqueKeysWithValues: candidates.map { ($0.candidate.cardId, $0.candidate.level) })
-        }
+        try database.queue.read { db in try Study.learnLevels(forDecks: deckIds, db: db) }
     }
 
-    /// The Study screen's simplified two-option grading: "Needs Review" or
-    /// "I Know This" stands in for FSRS's four-grade scale in the UI, but
-    /// FSRS still schedules under the hood (mapped to Again/Good) so due
-    /// dates stay meaningful. The mastery signal itself -- shared with
-    /// Learn mode and test filtering via `learnState.level` -- moves
-    /// straight to its end state (mastered, or reset to new) rather than
-    /// Learn mode's gradual step-by-step ladder: a flashcard swipe is a
-    /// direct, final call the user is making, not an escalating quiz.
+    /// The Study screen's two-option grading: "Needs Review" or "I Know
+    /// This" schedules the card (again / good) and moves its Learn level
+    /// straight to its end state -- a flashcard verdict is a direct, final
+    /// call, not an escalating quiz (see `Study.mark`).
     func markCard(_ cardId: String, understood: Bool, source: String = "flashcards", now: Date = Date()) throws {
-        try gradeCard(cardId, grade: understood ? .good : .again, source: source, now: now)
         try database.queue.write { db in
-            try LearnState(
-                cardId: cardId,
-                level: understood ? LearnEngine.Level.mastered.rawValue : LearnEngine.Level.new.rawValue,
-                consecutiveCorrect: understood ? 1 : 0, lastSeenAt: now
-            ).save(db)
+            try Study.mark(cardId, understood: understood, source: source, now: now, db: db)
         }
         reload()
     }
@@ -1268,93 +715,13 @@ final class AppStore {
         // A flag as well as the cancel: Skip can be pressed before the task
         // exists (it's created after the first database read), and a cancel
         // of nothing was simply lost.
-        aiTestQuestionsSkipped = true
+        aiTestQuestionsSkipped.set(true)
         aiTestQuestionTask?.cancel()
     }
 
-    @ObservationIgnored private var aiTestQuestionsSkipped = false
-
-    private static func aiQuestionBudget(for questionCount: Int) -> Int { max(0, min(questionCount / 3, 10)) }
-
-    /// The default cap on how many AI test questions a single note can
-    /// contribute, mirroring `defaultMaxGeneratedPerNote`'s "keep one
-    /// chatty response from dominating" reasoning.
-    private static let aiTestQuestionsPerNote = 2
-
-    /// Proposes a handful of ephemeral, AI-generated written questions
-    /// grounded in the notes behind `deckIds` -- never saved as a `Card`,
-    /// never entering the review queue. Unlike `generateAdditionalCards`
-    /// (where an empty result is *always* a normal outcome, silently),
-    /// this feature is behind an explicit user-facing toggle -- so when it's
-    /// on and nothing came back, that's worth telling the user about rather
-    /// than letting the test quietly look like the toggle does nothing.
-    /// The `warning` is nil whenever there's nothing worth surfacing:
-    /// either this deck has no note-backed cards to ground a question in
-    /// (a structural non-applicability, not a failure), or generation
-    /// actually produced something.
-    private func generateAITestQuestions(
-        inDecks deckIds: [String], maxCount: Int
-    ) async -> (questions: [LearnEngine.RoundQuestion], warning: String?) {
-        guard maxCount > 0 else { return ([], nil) }
-        let generator = await CardGenerators.select()
-        guard await generator.isAvailable else {
-            return ([], "AI test questions are on in Settings, but no local AI model is reachable right now (Ollama isn't running, and no on-device model is available). This test uses your cards only.")
-        }
-
-        let existingByMaterial: [String: [Card]]
-        do {
-            let cards = try await database.queue.read { db -> [Card] in
-                let cardIds = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
-                guard !cardIds.isEmpty else { return [] }
-                return try Card
-                    .filter(cardIds.contains(Column("id")))
-                    .filter(Column("deletedAt") == nil)
-                    .filter(Column("materialId") != nil)
-                    .fetchAll(db)
-            }
-            guard !cards.isEmpty else { return ([], nil) } // no note-backed cards here -- nothing to ground on, not a failure
-            existingByMaterial = Dictionary(grouping: cards, by: { $0.materialId! })
-        } catch {
-            return ([], "AI test questions couldn't be generated (a database error occurred while reading your notes). This test uses your cards only.")
-        }
-
-        var results: [LearnEngine.RoundQuestion] = []
-        var attemptedAnyNote = false
-        // The run ends as soon as the budget is met, so the likely number of
-        // notes is the budget over what one note gives -- grown one at a time
-        // if notes come back thinner than that.
-        let progress = AIProgress.current
-        let perNote = Self.aiTestQuestionsPerNote
-        let notes = existingByMaterial.shuffled()
-        progress?.expect(min(notes.count, (maxCount + perNote - 1) / perNote))
-        for (index, (materialId, existing)) in notes.enumerated() {
-            // Skipped by the student: start the test with what's ready.
-            if Task.isCancelled || aiTestQuestionsSkipped { break }
-            guard results.count < maxCount,
-                  let context = (try? noteText(forMaterial: materialId))?.reflowed, !context.isEmpty
-            else { continue }
-            attemptedAnyNote = true
-            let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
-            progress?.begin("Writing questions from note \(index + 1)")
-            let proposed = await generator.generateTestQuestions(
-                existing: candidates, noteContext: context,
-                maxCount: min(perNote, maxCount - results.count)
-            )
-            results += proposed.map {
-                LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer, type: .written)
-            }
-            if let progress, results.count < maxCount, index + 1 < notes.count,
-               progress.snapshot.completed + 1 >= progress.snapshot.expected {
-                progress.expect(1)
-            }
-            progress?.advance()
-        }
-
-        let warning: String? = (attemptedAnyNote && results.isEmpty && !Task.isCancelled)
-            ? "AI test questions are on in Settings, but the AI didn't return any usable questions for this test's notes. This test uses your cards only."
-            : nil
-        return (Array(results.prefix(maxCount)), warning)
-    }
+    /// Read from GRASPCore's generation loop off the main actor, so it's a
+    /// lock-guarded box rather than a plain property.
+    @ObservationIgnored private let aiTestQuestionsSkipped = SkipFlag()
 
     /// The plural of the above, for a test run across every deck in a
     /// course. `testAttempt.deckId` is nullable precisely for this case --
@@ -1363,11 +730,7 @@ final class AppStore {
     func startTest(
         deckIds: [String], config: TestBuilder.Config
     ) async throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
-        aiTestQuestionsSkipped = false
-        var cards = try await database.queue.read { db in try Self.learnCandidates(forDecks: deckIds, db: db).map(\.candidate) }
-        if config.excludeMastered {
-            cards = cards.filter { $0.level != .mastered }
-        }
+        aiTestQuestionsSkipped.set(false)
 
         // AI questions are always .written -- if Written is off, none
         // sneak in regardless of the toggle, and there's nothing to warn
@@ -1377,141 +740,60 @@ final class AppStore {
         // database writes below that create the attempt.
         let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)
         if config.allowWritten && isAITestQuestionsEnabled {
-            let budget = Self.aiQuestionBudget(for: config.questionCount)
-            let task = Task { await generateAITestQuestions(inDecks: deckIds, maxCount: budget) }
+            let budget = Study.aiQuestionBudget(for: config.questionCount)
+            let database = database
+            let skipped = aiTestQuestionsSkipped
+            let task = Task {
+                await CardAI.generateTestQuestions(
+                    inDecks: deckIds, maxCount: budget, using: await CardGenerators.select(),
+                    database: database, skipped: { skipped.value }
+                )
+            }
             aiTestQuestionTask = task
             aiResult = await task.value
             aiTestQuestionTask = nil
         } else {
             aiResult = ([], nil)
         }
+
         let aiQuestions = aiResult.questions
-
-        var rng = SystemRandomNumberGenerator()
-        let pool = cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
-        var cardConfig = config
-        cardConfig.questionCount = max(0, config.questionCount - aiQuestions.count)
-        var mutableQuestions = TestBuilder.build(from: pool, config: cardConfig, using: &rng) + aiQuestions
-        if config.shuffle { mutableQuestions.shuffle(using: &rng) }
-        let questions = mutableQuestions
-        // Nothing to ask -- every card filtered out. Say so rather than write
-        // an attempt nobody can take.
-        guard !questions.isEmpty else { return ("", [], nil) }
-
-        let attemptId = try await database.queue.write { db -> String in
-            let attempt = TestAttempt(
-                deckId: deckIds.count == 1 ? deckIds.first : nil, configJSON: "{}", startedAt: Date()
-            )
-            try attempt.insert(db)
-            for (index, question) in questions.enumerated() {
-                try TestItem(
-                    id: question.id + "-" + attempt.id, attemptId: attempt.id, cardId: question.cardId,
-                    ordinal: index, questionType: question.type.rawValue, promptText: question.prompt,
-                    choicesJSON: question.choices.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
-                    correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil
-                ).insert(db)
-            }
-            return attempt.id
+        let started = try await database.queue.write { db in
+            var rng = SystemRandomNumberGenerator()
+            return try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions,
+                                       using: &rng, db: db)
         }
-        return (attemptId, questions, aiResult.warning)
+        // Nothing to ask -- every card filtered out. Say so rather than
+        // write an attempt nobody can take (`startTest` wrote none).
+        guard !started.questions.isEmpty else { return ("", [], nil) }
+        return (started.attemptId, started.questions, aiResult.warning)
     }
 
-    /// Records one answer to a test item, and grades it immediately so the
-    /// results screen never has to re-derive correctness. Keyed by
-    /// `ordinal` (unique per attempt by construction) rather than `cardId`
-    /// -- an AI-generated question has no `cardId` at all, and more than
-    /// one such question can exist in the same attempt.
+    /// Records one answer to a test item. Keyed by `ordinal` rather than
+    /// `cardId` -- an AI-generated question has no `cardId` at all.
     func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) throws {
         try database.queue.write { db in
-            guard var item = try TestItem
-                .filter(Column("attemptId") == attemptId)
-                .filter(Column("ordinal") == ordinal)
-                .fetchOne(db)
-            else { return }
-            item.givenAnswer = given
-            item.isCorrect = isCorrect
-            try item.save(db)
+            try Study.submitTestAnswer(attemptId: attemptId, ordinal: ordinal, given: given,
+                                       isCorrect: isCorrect, db: db)
         }
     }
 
-    /// Finishes a test: scores it from the recorded items, and feeds every
-    /// miss back into FSRS as an "Again" grade so a test session also
-    /// tightens the flashcard schedule, not just reports a score.
+    /// Scores a test and feeds every miss back into FSRS as an "Again", so
+    /// a test also tightens the flashcard schedule, not just reports a score.
     func finishTest(attemptId: String) throws -> (correct: Int, total: Int) {
-        let result = try database.queue.write { db -> (Int, Int) in
-            let items = try TestItem.filter(Column("attemptId") == attemptId).fetchAll(db)
-            let correct = items.filter { $0.isCorrect == true }.count
-
-            guard var attempt = try TestAttempt.fetchOne(db, key: attemptId) else {
-                return (correct, items.count)
-            }
-            attempt.finishedAt = Date()
-            attempt.scoreNumerator = correct
-            attempt.scoreDenominator = items.count
-            try attempt.save(db)
-            return (correct, items.count)
-        }
-        try gradeMissedTestItems(attemptId: attemptId)
+        let result = try database.queue.write { db in try Study.finishTest(attemptId: attemptId, db: db) }
+        reload()
         return result
     }
 
-    private func gradeMissedTestItems(attemptId: String) throws {
-        let missedCardIds = try database.queue.read { db in
-            try TestItem
-                .filter(Column("attemptId") == attemptId)
-                .filter(Column("isCorrect") == false)
-                .fetchAll(db)
-                .compactMap(\.cardId)
-        }
-        for cardId in missedCardIds {
-            try gradeCard(cardId, grade: .again, source: "test")
-        }
-    }
-
-    /// The user says a written question judged "incorrect" by fuzzy text
-    /// matching was actually right -- exact/fuzzy comparison is a poor
-    /// judge of a long or loaded free-response answer, and this is the
-    /// override valve for that. Idempotent: a question already marked
-    /// correct is left untouched, so a duplicate call (or a UI race)
-    /// can't double-count the score or double-apply the FSRS correction
-    /// below.
-    ///
-    /// If the attempt hadn't finished yet (the override happened mid-quiz,
-    /// in `TestRunView`), flipping the stored `TestItem` is all that's
-    /// needed -- `finishTest` hasn't scored anything or touched FSRS yet,
-    /// so it will simply score this item correctly when it does. If the
-    /// attempt had already finished (the override happened from
-    /// `TestResultsView`, which only ever shows after `finishTest` already
-    /// ran), this also corrects the attempt's stored score and, for a
-    /// card-backed question, re-grades the card "Good" to counteract the
-    /// "Again" grade `finishTest` already applied for that miss. That's a
-    /// best-effort correction, not a perfect undo -- FSRS state isn't
-    /// reversible -- but it's truer than leaving a card penalized for an
-    /// answer that was actually right.
+    /// "I was right" on a written answer fuzzy matching marked wrong. On a
+    /// finished attempt this also corrects the score and re-grades the card
+    /// Good against the Again `finishTest` gave it -- a best-effort
+    /// correction, since FSRS state isn't reversible. Idempotent.
     func overrideTestItemCorrect(attemptId: String, ordinal: Int, cardId: String?) throws {
-        let correctedAFinishedAttempt = try database.queue.write { db -> Bool in
-            guard var item = try TestItem
-                .filter(Column("attemptId") == attemptId)
-                .filter(Column("ordinal") == ordinal)
-                .fetchOne(db),
-                item.isCorrect != true
-            else { return false }
-            item.isCorrect = true
-            try item.save(db)
-
-            guard var attempt = try TestAttempt.fetchOne(db, key: attemptId), attempt.finishedAt != nil else {
-                return false
-            }
-            attempt.scoreNumerator = min((attempt.scoreNumerator ?? 0) + 1, attempt.scoreDenominator ?? .max)
-            try attempt.save(db)
-            return true
+        try database.queue.write { db in
+            try Study.overrideTestItemCorrect(attemptId: attemptId, ordinal: ordinal, cardId: cardId, db: db)
         }
-        if correctedAFinishedAttempt, let cardId {
-            // `gradeCard` opens its own write transaction, same as every
-            // other grading call site -- kept outside this one rather than
-            // nested inside it.
-            try? gradeCard(cardId, grade: .good, source: "test-override")
-        }
+        reload()
     }
 
     func calendarEvents(forCourse courseId: String) throws -> [CalendarEvent] {
@@ -1703,15 +985,11 @@ final class AppStore {
     }
 
     func materialCount(inCourse courseId: String) throws -> Int {
-        try database.queue.read { db in
-            try Material.filter(Column("courseId") == courseId).fetchCount(db)
-        }
+        try database.queue.read { db in try LibraryActions.materialCount(inCourse: courseId, db: db) }
     }
 
     func updateCourse(_ course: Course) throws {
-        var updated = course
-        updated.updatedAt = Date()
-        try database.queue.write { db in try updated.save(db) }
+        try database.queue.write { db in try LibraryActions.updateCourse(course, db: db) }
         reload()
     }
 
@@ -1720,42 +998,16 @@ final class AppStore {
     /// than resurrecting it as a new course.
     func setCourseArchived(_ courseId: String, archived: Bool) throws {
         try database.queue.write { db in
-            guard var course = try Course.fetchOne(db, key: courseId) else { return }
-            course.isArchived = archived
-            course.updatedAt = Date()
-            try course.save(db)
+            try LibraryActions.setCourseArchived(courseId, archived: archived, db: db)
         }
         reload()
     }
 
-    /// What a delete would actually remove -- so the confirmation can say
-    /// it in numbers instead of asking the user to take it on faith.
-    /// Cards are counted by current deck membership (`deckCard` -> `deck`
-    /// -> `courseId`), not `card.materialId` -> `material.courseId`: the
-    /// latter only reaches parser-derived cards and silently excludes every
-    /// hand-typed one (`materialId` is nil for those), and would also
-    /// disagree with reality for a card that started life in this course's
-    /// notes but has since been moved to a different course's deck.
+    /// What a delete would actually remove, so the confirmation can say it
+    /// in numbers. Cards are counted by deck membership, which also reaches
+    /// hand-typed cards (see `LibraryActions.courseDeletionImpact`).
     func courseDeletionImpact(_ courseId: String) throws -> (materials: Int, cards: Int, reviews: Int) {
-        try database.queue.read { db in
-            let materials = try Material.filter(Column("courseId") == courseId).fetchCount(db)
-            // Live cards only: deleted ones still have deck rows, and
-            // counting them made the warning claim more than the student
-            // has.
-            let cards = try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM card WHERE deletedAt IS NULL AND id IN (
-                    SELECT cardId FROM deckCard WHERE deckId IN (SELECT id FROM deck WHERE courseId = ?)
-                )
-                """, arguments: [courseId]) ?? 0
-            let reviews = try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM review WHERE cardId IN (
-                    SELECT id FROM card WHERE deletedAt IS NULL AND id IN (
-                        SELECT cardId FROM deckCard WHERE deckId IN (SELECT id FROM deck WHERE courseId = ?)
-                    )
-                )
-                """, arguments: [courseId]) ?? 0
-            return (materials, cards, reviews)
-        }
+        try database.queue.read { db in try LibraryActions.courseDeletionImpact(courseId, db: db) }
     }
 
     /// Removes a course and everything derived from it. Notes in the vault
@@ -1787,87 +1039,28 @@ final class AppStore {
 
     /// The only way a course is deleted: excludes its vault folder first
     /// (if it has one), so the next scan can never recreate it, then
-    /// removes the course and everything derived from it. A
-    /// manually-created course has no folder to exclude, so for those
-    /// this is just a plain delete -- there's nothing a rescan could ever
-    /// recreate in the first place. There's deliberately no separate
-    /// "delete but let it come back" option: a course silently
-    /// resurrecting on the next import reads as a bug, not a feature
-    /// worth a second button.
+    /// removes the course and everything derived from it. There's
+    /// deliberately no "delete but let it come back": a course silently
+    /// resurrecting on the next import reads as a bug.
     func removeCourseAndExclude(_ courseId: String) throws {
-        try database.queue.write { db in
-            if let folderPath = try Course.fetchOne(db, key: courseId)?.folderPath {
-                try ExcludedFolder(folderPath: folderPath).insert(db, onConflict: .ignore)
-            }
-            // `card.materialId` is ON DELETE SET NULL, so cascading from
-            // the course alone would strand its cards instead of removing
-            // them -- deleted explicitly first, and by current deck
-            // membership rather than `materialId` so a hand-typed card
-            // (materialId is nil for those) doesn't survive the delete:
-            // its only link to this course is which deck it currently
-            // sits in, same as `courseDeletionImpact` above.
-            // Also every card made from this course's notes, deck or no
-            // deck: deleting a deck drops its deck rows, and those cards
-            // were otherwise left behind as permanent orphans once the
-            // notes cascaded away.
-            try db.execute(sql: """
-                DELETE FROM card WHERE id IN (
-                    SELECT cardId FROM deckCard WHERE deckId IN (SELECT id FROM deck WHERE courseId = ?)
-                ) OR materialId IN (SELECT id FROM material WHERE courseId = ?)
-                """, arguments: [courseId, courseId])
-            _ = try Course.deleteOne(db, key: courseId)
-        }
+        try database.queue.write { db in try LibraryActions.removeCourseAndExclude(courseId, db: db) }
         reload()
     }
 
     func addManualCourse(name: String, code: String?, semesterId: String? = nil) throws {
         try database.queue.write { db in
-            let course = Course(semesterId: semesterId, name: name, code: code)
-            try course.insert(db)
+            try LibraryActions.addManualCourse(name: name, code: code, semesterId: semesterId, db: db)
         }
         reload()
     }
 
-    /// The manual counterpart to the vault scanner's own private
-    /// `findOrCreateSemester`, for a freeform timeline typed by hand
-    /// ("Fall 2026", "2026-2027", "Quarter 1") rather than picked from a
-    /// fixed term+year dropdown. Slugified the same way the vault
-    /// importer's tag format looks ("Fall 2026" -> "fall-2026"), so typing
-    /// the exact name of a semester the vault already created reuses that
-    /// same row instead of racing it to create a duplicate; anything that
-    /// doesn't happen to match that shape still slugifies deterministically
-    /// and dedups against itself. New rows sort after every existing one --
-    /// there's no reliable way to place arbitrary text chronologically the
-    /// way a real term/year can be.
+    /// A freeform timeline typed by hand ("Fall 2026", "Quarter 1"),
+    /// reusing the vault's semester when the name matches one.
     @discardableResult
     func findOrCreateSemester(name: String) throws -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let slug = Self.slugify(trimmed)
-        let id = try database.queue.write { db -> String in
-            if let existing = try Semester.filter(Column("slug") == slug).fetchOne(db) {
-                return existing.id
-            }
-            let nextSortKey = (try Int.fetchOne(db, sql: "SELECT COALESCE(MAX(sortKey), 0) + 1 FROM semester")) ?? 1
-            let semester = Semester(name: trimmed, slug: slug, sortKey: nextSortKey)
-            try semester.insert(db)
-            return semester.id
-        }
+        let id = try database.queue.write { db in try LibraryActions.findOrCreateSemester(name: name, db: db) }
         reload()
         return id
-    }
-
-    /// Falls back to the lowercased text itself, not a fresh random UUID --
-    /// a timeline made entirely of characters outside a-z0-9 (any
-    /// non-Latin script, or pure punctuation) would otherwise slugify to
-    /// "", and a random per-call UUID there would mean typing the exact
-    /// same such name twice never dedupes, defeating the whole point of
-    /// keying this on a slug in the first place.
-    private static func slugify(_ text: String) -> String {
-        let lowered = text.lowercased().replacingOccurrences(
-            of: "[^a-z0-9]+", with: "-", options: .regularExpression
-        )
-        let trimmed = lowered.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return trimmed.isEmpty ? text.lowercased() : trimmed
     }
 
     /// Courses grouped by semester (newest first) then unfiled, matching
@@ -1887,95 +1080,31 @@ final class AppStore {
 
     // MARK: - Decks (modules/units)
 
-    /// Appends a hand-named deck to the end of a course's deck ordering.
-    /// Auto decks from the vault scanner all carry `sortIndex` 0 (it never
-    /// sets one), so `MAX + 1` reliably lands manual decks after every
-    /// parsed chapter rather than in front of them.
+    /// Appends a hand-named deck after every parsed one in the course.
     @discardableResult
     func createDeck(courseId: String, name: String) throws -> String {
-        let id = try database.queue.write { db -> String in
-            let next = try Int.fetchOne(db, sql:
-                "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deck WHERE courseId = ? AND deletedAt IS NULL",
-                arguments: [courseId]
-            ) ?? 0
-            let deck = Deck(courseId: courseId, name: name, chapter: nil, origin: "manual", sortIndex: next)
-            try deck.insert(db)
-            return deck.id
-        }
+        let id = try database.queue.write { db in try LibraryActions.createDeck(courseId: courseId, name: name, db: db) }
         reload()
         return id
     }
 
     func renameDeck(_ deckId: String, name: String) throws {
-        try database.queue.write { db in
-            guard var deck = try Deck.fetchOne(db, key: deckId) else { return }
-            deck.name = name
-            deck.updatedAt = Date()
-            try deck.save(db)
-        }
+        try database.queue.write { db in try LibraryActions.renameDeck(deckId, name: name, db: db) }
         reload()
     }
 
-    /// Active, non-deleted cards only -- what a deletion confirmation
-    /// should actually count, not the study-facing `deckCounts` map
-    /// (which also excludes suspended cards and would understate what's
-    /// about to be touched).
+    /// Live cards in the deck, suspended ones included -- what a deletion
+    /// confirmation should count.
     func deckCardCount(_ deckId: String) throws -> Int {
-        try database.queue.read { db in
-            try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM deckCard
-                JOIN card ON card.id = deckCard.cardId
-                WHERE deckCard.deckId = ? AND card.deletedAt IS NULL
-                """, arguments: [deckId]) ?? 0
-        }
+        try database.queue.read { db in try LibraryActions.deckCardCount(deckId, db: db) }
     }
 
-    /// Removes a deck from view. With `migrateCardsTo` given, every card
-    /// keeps existing -- only its deck membership moves. With `nil`, the
-    /// deck's own cards are soft-deleted (never a hard `DELETE`: `review`
-    /// rows cascade from `card`, and a hard delete would take real study
-    /// history down with a deck that was just reorganized away).
+    /// Removes a deck from view: its cards move to `migrateCardsTo`, or are
+    /// soft-deleted when that's nil (never hard-deleted, which would take
+    /// their study history with them).
     func deleteDeck(_ deckId: String, migrateCardsTo targetDeckId: String?) throws {
         try database.queue.write { db in
-            guard var deck = try Deck.fetchOne(db, key: deckId) else { return }
-            let now = Date()
-
-            if let targetDeckId, targetDeckId != deckId,
-               let target = try Deck.fetchOne(db, key: targetDeckId), target.deletedAt == nil {
-                // A plain `UPDATE deckCard SET deckId = ?` would abort the
-                // whole write the moment a card already sits in both
-                // decks (deckCard's primary key is (deckId, cardId)) --
-                // insert-or-ignore into the target first, then drop the
-                // source rows, so an already-shared card just loses its
-                // duplicate membership instead of failing the migration.
-                let base = try Int.fetchOne(db, sql:
-                    "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                    arguments: [targetDeckId]
-                ) ?? 0
-                try db.execute(sql: """
-                    INSERT OR IGNORE INTO deckCard (deckId, cardId, sortIndex)
-                    SELECT ?, cardId, ? + (ROW_NUMBER() OVER (ORDER BY sortIndex) - 1)
-                    FROM deckCard WHERE deckId = ?
-                    """, arguments: [targetDeckId, base, deckId])
-            } else {
-                // Only cards whose *sole* membership is this deck --
-                // guards against soft-deleting a card that drag-and-drop
-                // has already placed in another deck as well.
-                try db.execute(sql: """
-                    UPDATE card SET deletedAt = ?, updatedAt = ?
-                    WHERE id IN (SELECT cardId FROM deckCard WHERE deckId = ?)
-                      AND id NOT IN (SELECT cardId FROM deckCard WHERE deckId != ?)
-                    """, arguments: [now, now, deckId, deckId])
-            }
-
-            try db.execute(sql: "DELETE FROM deckCard WHERE deckId = ?", arguments: [deckId])
-            // Decks are soft-deleted, so the calendar's ON DELETE SET NULL
-            // never fires: an exam kept pointing at the deleted deck, with a
-            // Study button leading nowhere.
-            try db.execute(sql: "UPDATE calendarEvent SET deckId = NULL WHERE deckId = ?", arguments: [deckId])
-            deck.deletedAt = now
-            deck.updatedAt = now
-            try deck.save(db)
+            try LibraryActions.deleteDeck(deckId, migrateCardsTo: targetDeckId, db: db)
         }
         reload()
     }
@@ -2046,4 +1175,13 @@ final class AppStore {
         reload()
         return summary
     }
+}
+
+/// A flag GRASPCore's background loops can poll while the main actor sets
+/// it -- Skip on AI test questions.
+nonisolated final class SkipFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+    func set(_ newValue: Bool) { lock.lock(); flag = newValue; lock.unlock() }
 }
