@@ -112,17 +112,51 @@ struct FlashcardSession: View {
                 }
             }
         }
+        #if os(Windows)
+        .onAppear { KeyCommands.handler = { handle($0) } }
+        .onDisappear { KeyCommands.handler = nil }
+        #endif
     }
+
+    #if os(Windows)
+    /// The Mac's flashcard keys: Space flips, 1 / 2 answer once flipped, the
+    /// arrows step back and forward, E edits, S suspends, Esc ends. Ignored
+    /// while the edit sheet is open, so its text boxes get every key.
+    private func handle(_ key: KeyCommands.Key) -> Bool {
+        guard editing == nil else { return false }
+        guard index < queue.count else {
+            if key == .escape || key == .enter { finish(); return true }
+            return false
+        }
+        switch key {
+        case .space: isFlipped.toggle()
+        case .character("1") where isFlipped: submit(false)
+        case .character("2") where isFlipped: submit(true)
+        case .left: if index > 0 { index -= 1; isFlipped = false }
+        case .right: if index < queue.count - 1 { index += 1; isFlipped = false }
+        case .character("e"): editing = CardEditorTarget(card: queue[index], deckId: nil)
+        case .character("s"):
+            library.setStatus([queue[index].id], to: .suspended)
+            queue.remove(at: index)
+            isFlipped = false
+        case .escape:
+            timer.reset()
+            finish()
+        default: return false
+        }
+        return true
+    }
+    #endif
 
     private var controls: some View {
         VStack(spacing: 10) {
             if isFlipped {
                 HStack(spacing: 10) {
-                    VerdictButton(title: "Needs Review", tint: GRASPColor.accent) { submit(false) }
-                    VerdictButton(title: "I Know This", tint: GRASPColor.success) { submit(true) }
+                    VerdictButton(title: "Needs Review   1", tint: GRASPColor.accent) { submit(false) }
+                    VerdictButton(title: "I Know This   2", tint: GRASPColor.success) { submit(true) }
                 }
             } else {
-                VerdictButton(title: "Reveal Answer", tint: GRASPColor.textSecondary) { isFlipped = true }
+                VerdictButton(title: "Reveal Answer   Space", tint: GRASPColor.textSecondary) { isFlipped = true }
             }
             HStack(spacing: 16) {
                 QuietLink(title: "‹ Previous") {
@@ -429,7 +463,7 @@ struct QuestionView: View {
                 case .trueFalse:
                     TrueFalse(question: question, answer: answer, pick: pick)
                 case .written:
-                    WrittenAnswer(question: question, answer: $answer)
+                    WrittenAnswer(question: question, answer: $answer, submit: submit)
                 }
                 VerdictLine(question: question, answer: answer)
                 actions
@@ -608,12 +642,15 @@ private struct TrueFalse: View {
 private struct WrittenAnswer: View {
     let question: LearnEngine.RoundQuestion
     @Binding var answer: AnswerState
+    /// Enter submits, as on the Mac.
+    let submit: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
-            TextField("Type the answer", text: $answer.written)
+            TextField("Type the answer, then press Enter", text: $answer.written)
                 .frame(width: 420.0)
                 .disabled(answer.isAnswered)
+                .onSubmit(perform: submit)
             if answer.isAnswered, answer.verdict != .correct {
                 HStack(spacing: 6) {
                     Text("Answer").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)

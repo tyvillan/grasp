@@ -43,7 +43,7 @@ struct ProfilePicker: View {
                 panel {
                     Text("Enter \(unlocking.name)'s PIN").font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
                     HStack(spacing: 8) {
-                        SecureField("PIN", text: $pin).frame(width: 120.0)
+                        SecureField("PIN", text: $pin).frame(width: 120.0).onSubmit { tryUnlock(unlocking) }
                         Button("Unlock") { tryUnlock(unlocking) }.disabled(pin.count != 4).fixedSize()
                         Button("Cancel") { self.unlocking = nil; pin = "" }.fixedSize()
                     }

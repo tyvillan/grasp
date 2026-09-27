@@ -117,6 +117,9 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(GRASPColor.canvas)
         }
+        #if os(Windows)
+        .onAppear { KeyCommands.install() }
+        #endif
     }
 
     @ViewBuilder
