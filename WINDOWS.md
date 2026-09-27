@@ -78,7 +78,7 @@ scripts\windows\grasp.cmd test
 This runs the same 470+ tests the Mac passes. Some that read the Mac owner's
 real notes vault skip themselves on other machines. Send over any failures.
 
-## 5. Open the app (prototype)
+## 5. Open the app (development build)
 
 The Windows app lives in `Windows\`. It's built with
 [SwiftCrossUI](https://github.com/moreSwift/swift-cross-ui), which draws
@@ -111,15 +111,42 @@ scripts\windows\grasp.cmd app
 The app keeps its library in `%LOCALAPPDATA%\GRASP`, the same folder
 grasp-check reports.
 
+## 6. Install GRASP like an ordinary app
+
+```powershell
+scripts\windows\install.ps1
+```
+
+This builds the optimised app (ten minutes or more the first time) and
+installs it for you alone, in `%LOCALAPPDATA%\Programs\GRASP`, with a
+Start menu entry, a desktop shortcut and an entry in Settings > Apps >
+Installed apps that uninstalls it. No administrator rights are needed, and
+the Swift runtime is copied beside the app, so it keeps working if the
+developer tools change. Run it again after pulling changes to update.
+`-SkipBuild` reinstalls the last build; `-Uninstall` removes it. Your
+library in `%LOCALAPPDATA%\GRASP` is never touched either way.
+
+## 7. Local AI (optional)
+
+Overviews, AI test questions and the card tools (Refine, Fill Gaps) run on
+a local model through Ollama:
+
+```powershell
+winget install Ollama.Ollama
+ollama pull qwen3.5:9b
+```
+
+The model is about 6 GB and wants a graphics card with 8 GB of memory; on
+the processor alone it works, slowly. Ollama starts with Windows, and
+GRASP's Settings > Local AI shows whether it can see it.
+
 ## What doesn't work on Windows yet
 
 | Feature | Status |
 | --- | --- |
-| Reading PDFs | Planned, using Windows' own PDF reader (Windows.Data.Pdf) |
-| Text in photos (OCR) | Planned, using Windows' own OCR (Windows.Media.Ocr) |
-| Apple's on-device AI | Mac and iPhone only. On Windows, AI runs through Ollama |
-| The app | A prototype (step 5): import, study, row-reduction figures. Overviews, calendar, sign-in and sync come next |
+| Reading PDFs and text in photos | Not yet: notes imported on a Mac arrive with their PDF text through sync; imported here, PDFs and images are skipped |
+| Apple's on-device AI, widgets, Mac Calendar sync | Mac and iPhone only. On Windows, AI runs through Ollama |
 
-For AI features, install [Ollama for Windows](https://ollama.com/download)
-and pull a model, for example `ollama pull qwen3.5:9b`. The check reports
-whether it can see Ollama. It passes either way.
+Everything else the Mac app does -- the dashboard, calendar, study,
+Learn and Test, overviews, card editing and AI tools, search, profiles and
+sync -- works on Windows too.
