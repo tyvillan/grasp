@@ -119,7 +119,8 @@ struct ContentView: View {
         }
         #if os(Windows)
         .onAppear { KeyCommands.install() }
-        #endif    }
+        #endif
+    }
 
     @ViewBuilder
     private var detail: some View {
