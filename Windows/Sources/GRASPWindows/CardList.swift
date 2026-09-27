@@ -3,23 +3,33 @@ import GRASPCore
 import SwiftCrossUI
 
 /// A deck's cards, after the Mac's `DeckDetailView` list: a rail down each
-/// row tinted by status, and the front and back. Filters by status and by
-/// text; a click opens the card to edit, approve, suspend, move or delete.
+/// row tinted by status, and the front and back. Filters by status, by
+/// mastery and by text, and sorts like the Mac; a click opens the card to
+/// edit, approve, suspend, move or delete. "Select" picks several cards for
+/// one action -- the Mac's Cmd/Shift-click, which SwiftCrossUI can't see.
 struct CardList: View {
     let library: Library
     let scope: DeckScope
     @State var filter: CardFilter = .all
+    @State var mastery: MasteryFilter = .all
+    @State var sort: CardSort = .deckOrder
     @State var text = ""
     /// How many rows are drawn. SwiftCrossUI lays out every row up front,
     /// so a 300-card All Cards shows the first page and grows on request.
     @State var shown = CardList.pageSize
     @State var editing: CardEditorTarget?
+    /// nil when not selecting; otherwise the cards ticked so far.
+    @State var selection: Set<String>?
+    @State var confirmingBulkDelete = false
 
     static let pageSize = 25
 
     var body: some View {
         let cards = library.cards(inDecks: scope.deckIds)
-        let matching = cards.filter { filter.includes($0) && matches($0) }
+        let levels = library.learnLevels(inDecks: scope.deckIds)
+        let matching = sort.apply(cards.filter {
+            filter.includes($0) && mastery.includes($0, levels: levels) && matches($0)
+        })
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 SegmentedChoice(options: CardFilter.allCases, selection: filter,
@@ -28,12 +38,33 @@ struct CardList: View {
                     shown = Self.pageSize
                 }
                 TextField("Filter cards", text: $text)
-                    .frame(width: 200.0)
+                    .frame(width: 180.0)
                 Spacer()
+                Button(selection == nil ? "Select" : "Done Selecting") {
+                    selection = selection == nil ? [] : nil
+                    confirmingBulkDelete = false
+                }
+                .fixedSize()
                 Button("+ New Card") {
                     editing = CardEditorTarget(card: nil, deckId: scope.deckIds.first)
                 }
                 .fixedSize()
+            }
+            HStack(spacing: 10) {
+                // Only approved cards have a Learn level to filter on.
+                if cards.contains(where: { $0.status == .active }) {
+                    SegmentedChoice(options: MasteryFilter.allCases, selection: mastery, label: \.label) {
+                        mastery = $0
+                        shown = Self.pageSize
+                    }
+                }
+                Spacer()
+                Text("Sort").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()
+                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { sort = $0 ?? .deckOrder }))
+            }
+
+            if let selection {
+                selectionBar(selection, visible: matching)
             }
 
             if matching.isEmpty {
@@ -44,8 +75,14 @@ struct CardList: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(matching.prefix(shown)), id: \.id) { card in
-                        CardRowView(card: card) {
-                            editing = CardEditorTarget(card: card, deckId: nil)
+                        CardRowView(card: card, understood: levels[card.id] == .mastered,
+                                    selected: selection.map { $0.contains(card.id) }) {
+                            if var picked = selection {
+                                if picked.contains(card.id) { picked.remove(card.id) } else { picked.insert(card.id) }
+                                selection = picked
+                            } else {
+                                editing = CardEditorTarget(card: card, deckId: nil)
+                            }
                         }
                     }
                 }
@@ -65,12 +102,55 @@ struct CardList: View {
         .onChange(of: scope.id) {
             shown = Self.pageSize
             text = ""
+            selection = nil
         }
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
                 CardEditor(library: library, target: editing, deckChoices: deckChoices, moveTargets: moveTargets) { self.editing = nil }
             }
         }
+    }
+
+    /// The Mac's selection bar: how many are ticked, and what to do to them.
+    /// Acts on cards in the list's order, so moved cards keep it.
+    private func selectionBar(_ picked: Set<String>, visible: [Card]) -> some View {
+        let ordered = visible.map(\.id).filter(picked.contains)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("\(picked.count) selected").font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary).fixedSize()
+                QuietLink(title: "Select All \(visible.count)") { selection = Set(visible.map(\.id)) }
+                QuietLink(title: "Deselect All") { selection = [] }
+                Spacer()
+                if !picked.isEmpty {
+                    Button("Approve") { library.setStatus(ordered, to: .active); selection = [] }.fixedSize()
+                    Button("Suspend") { library.setStatus(ordered, to: .suspended); selection = [] }.fixedSize()
+                    if !moveTargets.isEmpty {
+                        Picker(of: moveTargets, selection: Binding(get: { nil }, set: { choice in
+                            if let id = choice?.id { library.moveCards(ordered, toDeck: id); selection = [] }
+                        }))
+                    }
+                    Button("Delete…") { confirmingBulkDelete = true }.fixedSize()
+                }
+            }
+            if confirmingBulkDelete && !picked.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Delete \(picked.count) card\(picked.count == 1 ? "" : "s")? Review history is kept, but they leave this deck.")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.rejected)
+                    Spacer()
+                    Button("Delete") {
+                        library.deleteCards(ordered)
+                        selection = []
+                        confirmingBulkDelete = false
+                    }
+                    .fixedSize()
+                    Button("Keep") { confirmingBulkDelete = false }.fixedSize()
+                }
+            }
+        }
+        .padding(12)
+        .background(GRASPColor.inset)
+        .cornerRadius(8)
     }
 
     private func matches(_ card: Card) -> Bool {
@@ -90,6 +170,50 @@ struct CardList: View {
     /// every deck is a target; moving a card into its own deck does nothing.
     private var moveTargets: [Choice] {
         deckChoices.filter { !(scope.deckIds.count == 1 && scope.deckIds[0] == $0.id) }
+    }
+}
+
+/// The Mac's mastery filter: understood means Learn level "mastered".
+enum MasteryFilter: CaseIterable, Equatable {
+    case all, needsReview, understood
+
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .needsReview: return "Needs Review"
+        case .understood: return "Understood"
+        }
+    }
+
+    func includes(_ card: Card, levels: [String: LearnEngine.Level]) -> Bool {
+        switch self {
+        case .all: return true
+        case .needsReview: return card.status == .active && levels[card.id] != .mastered
+        case .understood: return card.status == .active && levels[card.id] == .mastered
+        }
+    }
+}
+
+/// The Mac's sort options.
+enum CardSort: CaseIterable, Equatable, CustomStringConvertible {
+    case deckOrder, alphabetical, dateAdded, dueDate
+
+    var description: String {
+        switch self {
+        case .deckOrder: return "Deck order"
+        case .alphabetical: return "Alphabetical (A–Z)"
+        case .dateAdded: return "Date added"
+        case .dueDate: return "Due date"
+        }
+    }
+
+    func apply(_ cards: [Card]) -> [Card] {
+        switch self {
+        case .deckOrder: return cards
+        case .alphabetical: return cards.sorted { $0.front.localizedStandardCompare($1.front) == .orderedAscending }
+        case .dateAdded: return cards.sorted { $0.createdAt < $1.createdAt }
+        case .dueDate: return cards.sorted { $0.due < $1.due }
+        }
     }
 }
 
@@ -121,6 +245,9 @@ enum CardFilter: CaseIterable, Equatable {
 /// The actions live in the card's window instead, a click away.
 private struct CardRowView: View {
     let card: Card
+    let understood: Bool
+    /// nil when not selecting.
+    let selected: Bool?
     let open: () -> Void
 
     var body: some View {
@@ -129,6 +256,14 @@ private struct CardRowView: View {
                 // The Mac's rail: pending amber, suspended rose, approved a
                 // muted gold -- so a long list can be scanned for what
                 // still needs a look without reading a word.
+                if let selected {
+                    Text(selected ? "✓" : " ")
+                        .font(Font.system(size: 12, weight: .bold))
+                        .foregroundColor(GRASPColor.canvas)
+                        .frame(width: 18.0, height: 18.0)
+                        .background(selected ? GRASPColor.accent : GRASPColor.hairlineStrong)
+                        .cornerRadius(4)
+                }
                 Rectangle().fill(railTint).frame(width: 2.0, height: 34.0)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(card.front).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
@@ -150,7 +285,7 @@ private struct CardRowView: View {
         switch card.status {
         case .draft: return GRASPColor.accent
         case .suspended: return GRASPColor.rejected
-        case .active: return GRASPColor.accentMuted
+        case .active: return understood ? GRASPColor.success : GRASPColor.accentMuted
         }
     }
 
