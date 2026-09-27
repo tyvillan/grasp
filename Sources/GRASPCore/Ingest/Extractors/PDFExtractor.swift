@@ -13,9 +13,10 @@ public enum PDFExtractor {
         #if canImport(PDFKit)
         guard let document = PDFDocument(url: url) else { return nil }
         return document.string
+        #elseif os(Windows)
+        // Rendered and read by Windows' own OCR (see WindowsOCR).
+        return WindowsOCR.extractText(from: url)
         #else
-        // Windows: not yet -- Windows.Data.Pdf is the planned reader. nil
-        // reads as "couldn't extract", so the file is listed, not guessed at.
         return nil
         #endif
     }

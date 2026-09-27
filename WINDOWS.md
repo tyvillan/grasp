@@ -144,7 +144,6 @@ GRASP's Settings > Local AI shows whether it can see it.
 
 | Feature | Status |
 | --- | --- |
-| Reading PDFs and text in photos | Not yet: notes imported on a Mac arrive with their PDF text through sync; imported here, PDFs and images are skipped |
 | Apple's on-device AI, widgets, Mac Calendar sync | Mac and iPhone only. On Windows, AI runs through Ollama |
 
 Everything else the Mac app does -- the dashboard, calendar, study,
