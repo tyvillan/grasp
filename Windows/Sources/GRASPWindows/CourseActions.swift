@@ -355,7 +355,7 @@ extension Library {
     static func describe(_ summary: ImportSummary) -> String {
         if let error = summary.errors.first { return "Import failed: \(error)" }
         if summary.filesScanned == 0 {
-            return "Nothing to import: GRASP reads Markdown, Word (.docx), PowerPoint (.pptx) and Jupyter (.ipynb) files here."
+            return "Nothing to import: GRASP reads Markdown, PDF, Word (.docx), PowerPoint (.pptx), Jupyter (.ipynb), and PNG/JPEG image files."
         }
         var parts = ["\(summary.filesImportedOrUpdated) file\(summary.filesImportedOrUpdated == 1 ? "" : "s") added"]
         if summary.cardsCreated > 0 {

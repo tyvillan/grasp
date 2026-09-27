@@ -250,7 +250,7 @@ struct SettingsScreen: View {
             } else if let status = library.status {
                 Caption(status)
             }
-            Caption("GRASP only reads from this folder; it never writes to your notes. It looks for College\\<semester>\\<course> folders inside it. PDFs and images aren't read on Windows yet.")
+            Caption("GRASP only reads from this folder; it never writes to your notes. It looks for College\\<semester>\\<course> folders inside it. PDFs and images are read with Windows' own text recognition.")
         }
     }
 
