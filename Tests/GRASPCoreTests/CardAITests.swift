@@ -18,7 +18,10 @@ struct CardAITests {
         func generateAdditional(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> [GeneratedCard] {
             [proposal, GeneratedCard(front: existing[0].front, back: existing[0].back)]
         }
-        func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] { [] }
+        func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] {
+            Array([GeneratedTestQuestion(prompt: "Where is carbon fixed?", correctAnswer: "The stroma"),
+                   GeneratedTestQuestion(prompt: "What absorbs light?", correctAnswer: "Chlorophyll")].prefix(maxCount))
+        }
         func validateContext(front: String, back: String, noteContext: String, courseName: String) async -> ContextValidation {
             if front.contains("homework") { return ContextValidation(.reject) }
             if back.contains("vague") { return ContextValidation(.refine(newBack: "Absorbs light for photosynthesis")) }
@@ -87,6 +90,19 @@ struct CardAITests {
         #expect(await CardAI.refineCard(cards[2], using: ScriptedGenerator(), database: db) == .removed)
         #expect(await CardAI.refineCard(cards[1], using: ScriptedGenerator(), database: db) == .refined)
         #expect(await CardAI.refineCard("missing", using: ScriptedGenerator(), database: db) == .unavailable)
+    }
+
+    @Test("AI test questions are written questions without a card, capped at the budget")
+    func testQuestions() async throws {
+        let (db, deckId, _) = try await makeDeck()
+        let (questions, warning) = await CardAI.generateTestQuestions(
+            inDecks: [deckId], maxCount: 1, using: ScriptedGenerator(), database: db)
+        #expect(questions.count == 1)
+        #expect(questions.first?.cardId == nil)
+        #expect(questions.first?.type == .written)
+        #expect(warning == nil)
+        let none = await CardAI.generateTestQuestions(inDecks: [deckId], maxCount: 0, using: ScriptedGenerator(), database: db)
+        #expect(none.questions.isEmpty)
     }
 
     @Test("duplicate groups keep the card with history")

@@ -320,6 +320,76 @@ public enum CardAI {
         return createdCount
     }
 
+    // MARK: - Test questions
+
+    /// Questions each note contributes before the run moves on.
+    public static let testQuestionsPerNote = 2
+
+    /// Written questions the model writes from the notes behind these
+    /// decks, up to `maxCount` (see `Study.aiQuestionBudget`), for a test to
+    /// mix in with the card questions. Notes are taken in random order and
+    /// the run stops once the budget is met. `skipped` is polled between
+    /// notes: "Skip" starts the test with whatever is ready. Returns a
+    /// warning to show when the model couldn't be reached or wrote nothing.
+    public static func generateTestQuestions(
+        inDecks deckIds: [String], maxCount: Int, using generator: any CardGenerator,
+        database: GRASPDatabase, skipped: @escaping @Sendable () -> Bool = { false }
+    ) async -> (questions: [LearnEngine.RoundQuestion], warning: String?) {
+        guard maxCount > 0 else { return ([], nil) }
+        guard await generator.isAvailable else {
+            return ([], "AI test questions are on in Settings, but no local AI model is reachable right now. This test uses your cards only.")
+        }
+        let existingByMaterial: [String: [Card]]
+        do {
+            let ids = try await cardIds(inDecks: deckIds, database: database)
+            guard !ids.isEmpty else { return ([], nil) }
+            let cards = try await database.queue.read { db in
+                try Card
+                    .filter(ids.contains(Column("id")))
+                    .filter(Column("deletedAt") == nil)
+                    .filter(Column("materialId") != nil)
+                    .fetchAll(db)
+            }
+            // No note-backed cards: nothing to ground questions on, which
+            // isn't a failure worth a warning.
+            guard !cards.isEmpty else { return ([], nil) }
+            existingByMaterial = Dictionary(grouping: cards, by: { $0.materialId! })
+        } catch {
+            return ([], "AI test questions couldn't be written (the notes couldn't be read). This test uses your cards only.")
+        }
+
+        var results: [LearnEngine.RoundQuestion] = []
+        var attemptedAnyNote = false
+        let progress = AIProgress.current
+        let notes = existingByMaterial.shuffled()
+        progress?.expect(min(notes.count, (maxCount + testQuestionsPerNote - 1) / testQuestionsPerNote))
+        for (index, (materialId, existing)) in notes.enumerated() {
+            if Task.isCancelled || skipped() { break }
+            guard results.count < maxCount,
+                  let context = await noteText(materialId, database: database), !context.isEmpty
+            else { continue }
+            attemptedAnyNote = true
+            let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
+            progress?.begin("Writing questions from note \(index + 1)")
+            let proposed = await generator.generateTestQuestions(
+                existing: candidates, noteContext: context,
+                maxCount: min(testQuestionsPerNote, maxCount - results.count))
+            results += proposed.map {
+                LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer, type: .written)
+            }
+            // Notes came back thinner than expected: one more step to go.
+            if let progress, results.count < maxCount, index + 1 < notes.count,
+               progress.snapshot.completed + 1 >= progress.snapshot.expected {
+                progress.expect(1)
+            }
+            progress?.advance()
+        }
+        let warning: String? = (attemptedAnyNote && results.isEmpty && !Task.isCancelled && !skipped())
+            ? "AI test questions are on in Settings, but the model didn't return any usable questions for these notes. This test uses your cards only."
+            : nil
+        return (Array(results.prefix(maxCount)), warning)
+    }
+
     // MARK: - Duplicates
 
     public struct DuplicateGroup: Identifiable, Sendable {
