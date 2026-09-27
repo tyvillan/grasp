@@ -342,7 +342,8 @@ struct LessonView: View {
                 TakeawaysView(takeaways: overview.takeaways)
             }
             if overview.diagram != nil || overview.mermaidSource != nil {
-                DiagramSection(diagram: overview.diagram, source: overview.mermaidSource)
+                DiagramSection(diagram: overview.diagram, source: overview.mermaidSource,
+                               linkedNodes: overview.linkedNodes, onOpenCards: onOpenCards)
             }
         }
     }
@@ -472,12 +473,19 @@ private struct TakeawayRow: View {
 private struct DiagramSection: View {
     let diagram: LaidOutDiagram?
     let source: String?
+    let linkedNodes: [String: [String]]
+    let onOpenCards: ([String]) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("How it all fits together").font(LessonFont.h2).foregroundColor(GRASPColor.textPrimary)
             if let diagram {
-                ConceptMapView(diagram: diagram)
+                ConceptMapView(diagram: diagram, linkedNodes: linkedNodes, onOpenCards: onOpenCards)
+                if !linkedNodes.values.allSatisfy(\.isEmpty) {
+                    Text("Green boxes name one of your cards; click one to see it.")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
+                }
             } else if let source {
                 // Couldn't be parsed: the source is more use than nothing.
                 Text(source)

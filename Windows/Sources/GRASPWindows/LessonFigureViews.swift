@@ -467,6 +467,13 @@ private struct FlowStripView: View {
 /// Wider than the column scrolls sideways rather than shrinking the text.
 struct ConceptMapView: View {
     let diagram: LaidOutDiagram
+    /// Box label -> the cards it names (`RenderedOverview.linkedNodes`).
+    var linkedNodes: [String: [String]] = [:]
+    var onOpenCards: ([String]) -> Void = { _ in }
+
+    private func isLinked(_ node: LaidOutDiagram.PlacedNode) -> Bool {
+        !(linkedNodes[node.lines.joined(separator: " ")] ?? []).isEmpty
+    }
 
     var body: some View {
         let width = diagram.bounds.width
@@ -507,8 +514,13 @@ struct ConceptMapView: View {
             }
         }
         .frame(width: node.size.width, height: node.size.height)
-        .background(node.depth == 0 ? GRASPColor.accentSoft : GRASPColor.surfaceRaised)
+        .background(isLinked(node) ? GRASPColor.successSoft
+                    : node.depth == 0 ? GRASPColor.accentSoft : GRASPColor.surfaceRaised)
         .cornerRadius(radius)
+        // As on the Mac: a box naming a card opens it.
+        .onTapGesture {
+            if let ids = linkedNodes[node.lines.joined(separator: " ")], !ids.isEmpty { onOpenCards(ids) }
+        }
         .padding(.leading, Int((node.center.x - node.size.width / 2).rounded()))
         .padding(.top, Int((node.center.y - node.size.height / 2).rounded()))
     }
