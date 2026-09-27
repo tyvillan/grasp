@@ -40,12 +40,22 @@ struct DeckListView: View {
     /// with the first would be its own bug to keep in sync.
     static let allCardsId = "__all_cards__"
 
+    /// An exam's study page shares the same selection, one row per exam
+    /// that has a study guide: `examRowPrefix` + the exam's event id.
+    static let examRowPrefix = "__exam__:"
+    static func examRowId(_ examEventId: String) -> String { examRowPrefix + examEventId }
+    static func examEventId(fromRow id: String) -> String? {
+        id.hasPrefix(examRowPrefix) ? String(id.dropFirst(examRowPrefix.count)) : nil
+    }
+
     @Environment(AppStore.self) private var store
     let courseId: String
     @Binding var selectedDeckId: String?
     let onNewDeck: () -> Void
+    let onAddStudyGuide: () -> Void
     @AppStorage("deckSortOption") private var sortOption: DeckSortOption = .deckOrder
     @State private var decks: [Deck] = []
+    @State private var exams: [CalendarEvent] = []
     @State private var renamingDeck: Deck?
     @State private var deletingDeck: Deck?
     @State private var deletingDeckCardCount = 0
@@ -85,6 +95,10 @@ struct DeckListView: View {
             List(selection: $selectedDeckId) {
                 AllCardsRow(cardCount: allCardsCounts.cardCount, dueCount: allCardsCounts.dueCount)
                     .tag(Self.allCardsId)
+                ForEach(exams) { exam in
+                    ExamRow(exam: exam)
+                        .tag(Self.examRowId(exam.id))
+                }
 
                 ForEach(sortedDecks) { deck in
                     let counts = store.deckCounts[deck.id] ?? (0, 0)
@@ -155,6 +169,13 @@ struct DeckListView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Sort decks: \(sortOption.label)")
+            Button(action: onAddStudyGuide) {
+                Image(systemName: "graduationcap")
+                    .font(.system(size: 13))
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Add a study guide for an exam in this course")
             Button(action: onNewDeck) {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 15))
@@ -170,6 +191,7 @@ struct DeckListView: View {
 
     private func load() {
         decks = (try? store.decks(inCourse: courseId)) ?? []
+        exams = store.guidedExams(courseId: courseId)
     }
 
     private func beginDelete(_ deck: Deck) {
@@ -214,6 +236,31 @@ private struct AllCardsRow: View {
                 .monospacedDigit()
                 .foregroundStyle(GRASPColor.textTertiary)
                 .frame(minWidth: 26, alignment: .trailing)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// An exam with a study guide, pinned under All Cards: what to study for
+/// next, with how soon it is.
+private struct ExamRow: View {
+    let exam: CalendarEvent
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "graduationcap.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(GRASPColor.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(exam.title)
+                    .graspType(.rowTitle)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                Text("\(exam.startsAt.formatted(.dateTime.month(.abbreviated).day())) · \(exam.countdownText())")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
     }

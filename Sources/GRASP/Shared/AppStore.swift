@@ -753,9 +753,13 @@ final class AppStore {
     /// (`cards(inDecks:)`, `dueCards(inDecks:)`, etc.) are what make the
     /// `.course` case possible without a parallel set of course-wide
     /// models -- it's the same data, just queried across more decks.
+    ///
+    /// `.exam` is one exam's study set: the decks its study guides map
+    /// their parts to (see `StudyGuideActions.examDeckIds`).
     enum DeckScope: Hashable, Sendable {
         case deck(String)
         case course(String)
+        case exam(courseId: String, examEventId: String)
     }
 
     /// One group of two or more near-duplicate cards already sitting in a

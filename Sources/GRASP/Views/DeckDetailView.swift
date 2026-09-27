@@ -1005,6 +1005,9 @@ struct DeckDetailView: View {
             // Matches `DeckListView`'s pinned row verbatim -- the same
             // word everywhere it refers to this same aggregate.
             deckName = "All Cards"
+        case .exam(let id, let examEventId):
+            courseId = id
+            deckName = store.calendarEvent(examEventId)?.title ?? "Exam"
         }
         load()
     }
@@ -1013,13 +1016,13 @@ struct DeckDetailView: View {
         switch scope {
         case .deck(let id):
             scopeDeckIds = [id]
-        case .course(let id):
+        case .course, .exam:
             // Re-derived every load, not just once per `.task(id: scope)`
-            // -- a deck created or deleted in this course while "All
-            // Cards" is already open must be picked up on the very next
-            // `store.revision` change, the same way a card being added or
-            // removed already is.
-            scopeDeckIds = (try? store.decks(inCourse: id))?.map(\.id) ?? []
+            // -- a deck created or deleted in this course (or mapped to
+            // this exam) while it's already open must be picked up on the
+            // very next `store.revision` change, the same way a card being
+            // added or removed already is.
+            scopeDeckIds = store.deckIds(in: scope)
         }
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
@@ -1029,7 +1032,7 @@ struct DeckDetailView: View {
             switch scope {
             case .deck(let id):
                 siblingDecks = allDecksInCourse.filter { $0.id != id }
-            case .course:
+            case .course, .exam:
                 // No single "current deck" to exclude -- every deck in the
                 // course is a valid "Move to..." target from here.
                 siblingDecks = allDecksInCourse

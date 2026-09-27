@@ -305,13 +305,16 @@ struct HomeView: View {
         }
     }
 
-    /// Straight into the deck the exam is actually about -- its linked
-    /// deck when one is set, otherwise the course's "All Cards", which is
-    /// the honest answer when nobody has said which deck the test covers.
+    /// Straight into what the exam is actually about: its study page when
+    /// a study guide says which lectures it covers, else its linked deck,
+    /// else the course's "All Cards", which is the honest answer when
+    /// nobody has said which deck the test covers.
     private func study(_ item: AppStore.UpcomingEvent) {
         guard let courseId = item.event.courseId else { return }
         selectedCourseId = courseId
-        selectedDeckId = item.event.deckId ?? DeckListView.allCardsId
+        selectedDeckId = store.hasStudyGuide(examEventId: item.event.id)
+            ? DeckListView.examRowId(item.event.id)
+            : item.event.deckId ?? DeckListView.allCardsId
     }
 
     private var rail: some View {

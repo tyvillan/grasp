@@ -80,7 +80,8 @@ struct ContentView: View {
                         if !isDeckListCollapsed {
                             DeckListView(
                                 courseId: courseId, selectedDeckId: $selectedDeckId,
-                                onNewDeck: { showingNewDeck = true }
+                                onNewDeck: { showingNewDeck = true },
+                                onAddStudyGuide: { chooseAndImportGuide(for: courseId) }
                             )
                             .frame(width: 260)
                             .background(GRASPColor.surface)
@@ -89,7 +90,11 @@ struct ContentView: View {
                                 .fill(GRASPColor.hairlineStrong)
                                 .frame(width: 1)
                         }
-                        if let deckId = selectedDeckId {
+                        if let deckId = selectedDeckId,
+                           let examEventId = DeckListView.examEventId(fromRow: deckId) {
+                            ExamStudyView(courseId: courseId, examEventId: examEventId)
+                                .id(examEventId)
+                        } else if let deckId = selectedDeckId {
                             DeckDetailView(
                                 scope: deckId == DeckListView.allCardsId
                                     ? .course(courseId) : .deck(deckId),
@@ -241,7 +246,11 @@ struct ContentView: View {
             guard let courseId = activeCourseId else { return }
             if let deckId = selectedDeckId,
                deckId == DeckListView.allCardsId
-               || (try? store.deck(deckId)).flatMap({ $0?.courseId == courseId && $0?.deletedAt == nil }) == true {
+               || (try? store.deck(deckId)).flatMap({ $0?.courseId == courseId && $0?.deletedAt == nil }) == true
+               // An exam's study page in this course (opened from Home or
+               // the calendar, which set the course and the row together).
+               || DeckListView.examEventId(fromRow: deckId)
+                    .flatMap({ store.calendarEvent($0)?.courseId == courseId }) == true {
                 return
             }
             // "All Cards" -- the master category pinned above every real
@@ -251,8 +260,32 @@ struct ContentView: View {
             // wrong for a course you just clicked into.
             selectedDeckId = DeckListView.allCardsId
         }
-        .onAppear(perform: openWidgetLink)
+        .onAppear {
+            openWidgetLink()
+            openLaunchScreen()
+        }
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
+    }
+
+    /// `GRASP_OPEN_COURSE` (a course's name) and `GRASP_OPEN_DECK` (a
+    /// deck's name, "All Cards", or "exam" for the course's next exam with a
+    /// study guide) open that screen on launch -- for screenshots and QA
+    /// where clicking through isn't possible, like `GRASP_SKIP_PICKER`. Off
+    /// unless set, so a normal launch never sees it.
+    private func openLaunchScreen() {
+        let env = ProcessInfo.processInfo.environment
+        guard let name = env["GRASP_OPEN_COURSE"],
+              let course = store.coursesBySemester.values.joined().first(where: { $0.name == name })
+        else { return }
+        switch env["GRASP_OPEN_DECK"] {
+        case nil, "All Cards":
+            selectedDeckId = DeckListView.allCardsId
+        case "exam":
+            selectedDeckId = store.guidedExams(courseId: course.id).first.map { DeckListView.examRowId($0.id) }
+        case let deckName?:
+            selectedDeckId = ((try? store.decks(inCourse: course.id)) ?? []).first { $0.name == deckName }?.id
+        }
+        selectedCourseId = course.id
     }
 
     /// A widget tap: Home, the calendar, or straight to a deck.
@@ -301,6 +334,21 @@ struct ContentView: View {
     /// A native open panel with both files and folders enabled in one
     /// picker -- exactly "a folder or any specific files" in a single
     /// selection, rather than two separate flows for the two cases.
+    /// A study guide lands on its exam's page: the importer links it to the
+    /// exam it names (or the next one), and that exam's row opens.
+    private func chooseAndImportGuide(for courseId: String) {
+        let urls = ImportPanel.pickFilesOrFolders(message: "Choose a study guide for an exam in this course")
+        guard !urls.isEmpty else { return }
+        Task {
+            let summary = await store.importStudyGuides(urls, intoCourse: courseId)
+            if summary.studyGuidesImported == 0 {
+                showImportResult(ImportResultMessage(summary: summary))
+            } else if let exam = store.guidedExams(courseId: courseId).first {
+                selectedDeckId = DeckListView.examRowId(exam.id)
+            }
+        }
+    }
+
     private func chooseAndImport(for courseId: String) {
         let urls = ImportPanel.pickFilesOrFolders(
             message: "Choose files or a folder to add to this course"

@@ -20,12 +20,7 @@ struct DeckScreen: View {
     @State private var creatingCard = false
     @State private var aiMessage: String?
 
-    private var courseId: String? {
-        switch route.scope {
-        case .deck(let id): return (try? store.deck(id))??.courseId
-        case .course(let id): return id
-        }
-    }
+    private var courseId: String? { store.courseId(of: route.scope) }
 
     /// The AI job running on this course, if any -- owned by the store, so
     /// it keeps going (with its Stop button) when this screen closes.
@@ -36,12 +31,7 @@ struct DeckScreen: View {
         return nil
     }
 
-    private var deckIds: [String] {
-        switch route.scope {
-        case .deck(let id): return [id]
-        case .course(let id): return (try? store.decks(inCourse: id))?.map(\.id) ?? []
-        }
-    }
+    private var deckIds: [String] { store.deckIds(in: route.scope) }
 
     private var activeCount: Int { cards.filter { $0.status == .active }.count }
     private var draftCount: Int { cards.filter { $0.status == .draft }.count }

@@ -311,7 +311,9 @@ struct CalendarView: View {
     private func study(_ event: CalendarEvent) {
         guard let courseId = event.courseId else { return }
         selectedCourseId = courseId
-        selectedDeckId = event.deckId ?? DeckListView.allCardsId
+        selectedDeckId = store.hasStudyGuide(examEventId: event.id)
+            ? DeckListView.examRowId(event.id)
+            : event.deckId ?? DeckListView.allCardsId
     }
 }
 

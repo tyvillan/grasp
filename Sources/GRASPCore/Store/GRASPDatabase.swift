@@ -34,7 +34,16 @@ public final class GRASPDatabase: Sendable {
 
     /// `~/Library/Application Support/GRASP` -- shared by every profile;
     /// `ProfileStore` lays out each profile's own database underneath it.
+    ///
+    /// `GRASP_SUPPORT_DIR` replaces it, as it does for the Windows app: a
+    /// development build pointed at a copy of the library can't touch the
+    /// real one. Never set outside development.
     public static func supportDirectory() throws -> URL {
+        if let override = ProcessInfo.processInfo.environment["GRASP_SUPPORT_DIR"], !override.isEmpty {
+            let url = URL(fileURLWithPath: override, isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true

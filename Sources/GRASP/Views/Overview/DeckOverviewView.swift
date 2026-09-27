@@ -19,12 +19,7 @@ struct DeckOverviewView: View {
     private var jobKey: String { store.overviewJobKey(courseId: courseId) }
     private var activity: AIActivity? { store.aiJob(jobKey)?.activity }
     private var isWriting: Bool { activity != nil }
-    private var courseId: String? {
-        switch scope {
-        case .deck(let id): return (try? store.deck(id))??.courseId
-        case .course(let id): return id
-        }
-    }
+    private var courseId: String? { store.courseId(of: scope) }
     @State private var showingConfirmation = false
     @State private var pendingTargets: [String] = []
     /// Set when a run ends with notes it couldn't write. Every AI action in
@@ -51,12 +46,7 @@ struct DeckOverviewView: View {
         var retry: [String]
     }
 
-    private var deckIds: [String] {
-        switch scope {
-        case .deck(let id): return [id]
-        case .course(let courseId): return (try? store.decks(inCourse: courseId))?.map(\.id) ?? []
-        }
-    }
+    private var deckIds: [String] { store.deckIds(in: scope) }
 
     var body: some View {
         VStack(spacing: 0) {
