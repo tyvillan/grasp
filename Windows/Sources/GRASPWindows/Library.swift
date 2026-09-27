@@ -61,7 +61,8 @@ final class Library {
     private(set) var coursesBySemester: [String?: [Course]] = [:]
     /// The result of the last import, or why it failed.
     var status: String?
-    private(set) var isImporting = false
+    /// Set while any import runs (the notes folder, or files into a course).
+    var isImporting = false
     /// Sign-in and sync. Set up after the library loads, since it reloads
     /// the library when another device's changes arrive.
     private(set) var account: Account!

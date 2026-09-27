@@ -294,6 +294,7 @@ struct CourseView: View {
     let course: Course
     @Binding var selectedDeckId: String?
     @State var organizing: OrganizeSheet?
+    @Environment(\.chooseFile) var chooseFile
 
     var body: some View {
         let decks = library.decks(inCourse: course.id)
@@ -312,6 +313,16 @@ struct CourseView: View {
                     // Archiving needs no questions: it's undone from Settings.
                     if case .archive(let course) = sheet {
                         library.setArchived(course.id, true)
+                    } else if case .addFiles(let course) = sheet {
+                        Task {
+                            guard let url = await chooseFile(
+                                title: "Choose a file or folder to add to \(course.name)",
+                                defaultButtonLabel: "Add",
+                                allowSelectingFiles: true,
+                                allowSelectingDirectories: true
+                            ) else { return }
+                            await library.importFiles([url], intoCourse: course.id)
+                        }
                     } else {
                         organizing = sheet
                     }
@@ -364,6 +375,8 @@ struct DeckColumn: View {
                 Menu("•••") {
                     Button("New Deck…") { organize(.newDeck(courseId: course.id)) }
                     Button("Edit Course…") { organize(.editCourse(course)) }
+                    Button("Dates for This Course…") { organize(.dates(course)) }
+                    Button("Add Files…") { organize(.addFiles(course)) }
                     Button("Archive Course") { organize(.archive(course)) }
                     Button("Delete Course…") { organize(.deleteCourse(course)) }
                 }

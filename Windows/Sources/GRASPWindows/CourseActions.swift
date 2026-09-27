@@ -7,6 +7,9 @@ enum OrganizeSheet {
     case editCourse(Course)
     /// Done at once, not a sheet; the course reappears from Settings.
     case archive(Course)
+    /// A file dialog, not a sheet.
+    case addFiles(Course)
+    case dates(Course)
     case newCourse
     case deleteCourse(Course)
     case newDeck(courseId: String)
@@ -28,8 +31,10 @@ struct OrganizeSheetView: View {
         switch sheet {
         case .editCourse(let course):
             CourseEditor(library: library, course: course, close: close)
-        case .archive:
+        case .archive, .addFiles:
             EmptyView()
+        case .dates(let course):
+            CourseDatesSheet(library: library, course: course, close: close)
         case .newCourse:
             CourseEditor(library: library, course: nil, onCreated: onCreated, close: close)
         case .deleteCourse(let course):
@@ -324,6 +329,120 @@ private struct DeckDeleteConfirmation: View {
         }
         .padding(24)
         .frame(width: 440.0)
+        .background(GRASPColor.canvas)
+    }
+}
+
+// MARK: - Dates and files
+
+extension Library {
+    /// Adds chosen files or folders straight into a course, as the Mac's
+    /// "Add Files" does, and says what happened in the sidebar.
+    func importFiles(_ urls: [URL], intoCourse courseId: String) async {
+        guard !isImporting else { return }
+        isImporting = true
+        defer { isImporting = false }
+        do {
+            let summary = try await VaultScanner(database: database).importPaths(urls, intoCourse: courseId)
+            status = Self.describe(summary)
+        } catch {
+            status = "Import failed: \(error.localizedDescription)"
+        }
+        overviewsChanged()
+    }
+
+    /// The Mac's import result, in one line.
+    static func describe(_ summary: ImportSummary) -> String {
+        if let error = summary.errors.first { return "Import failed: \(error)" }
+        if summary.filesScanned == 0 {
+            return "Nothing to import: GRASP reads Markdown, Word (.docx), PowerPoint (.pptx) and Jupyter (.ipynb) files here."
+        }
+        var parts = ["\(summary.filesImportedOrUpdated) file\(summary.filesImportedOrUpdated == 1 ? "" : "s") added"]
+        if summary.cardsCreated > 0 {
+            parts.append("\(summary.cardsCreated) draft card\(summary.cardsCreated == 1 ? "" : "s") created")
+        }
+        if summary.duplicatesSkipped > 0 {
+            parts.append("\(summary.duplicatesSkipped) duplicate\(summary.duplicatesSkipped == 1 ? "" : "s") skipped")
+        }
+        if summary.filesUnchanged > 0 { parts.append("\(summary.filesUnchanged) already up to date") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Every calendar event for a course, soonest first -- two years either
+    /// side of today, which is every date a course plausibly has.
+    func events(forCourse courseId: String) -> [CalendarEvent] {
+        let now = Date()
+        return calendarEvents(from: now.addingTimeInterval(-730 * 86_400), to: now.addingTimeInterval(730 * 86_400))
+            .filter { $0.courseId == courseId && $0.parentEventId == nil }
+            .sorted { $0.startsAt < $1.startsAt }
+    }
+}
+
+/// "Dates for This Course", after the Mac's `ExamsSheet`: the course's
+/// exams, quizzes, deadlines and study blocks, each opening the event
+/// editor, and Add Date. The editor opens in place, since a sheet can't
+/// open another on Windows.
+struct CourseDatesSheet: View {
+    let library: Library
+    let course: Course
+    let close: () -> Void
+    @State var editing: EventEditorTarget?
+
+    var body: some View {
+        if let editing {
+            EventEditor(library: library, target: editing) { self.editing = nil }
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
+        let events = library.events(forCourse: course.id)
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Dates for \(course.name)")
+                .font(Font.system(size: 18, weight: .semibold))
+                .foregroundColor(GRASPColor.textPrimary)
+            if events.isEmpty {
+                Text("No exams, deadlines, or study blocks set for this course yet.")
+                    .font(GRASPFont.body)
+                    .foregroundColor(GRASPColor.textSecondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(events, id: \.id) { event in
+                            HStack(spacing: 10) {
+                                Rectangle().fill(event.kind.tint).frame(width: 3.0, height: 30.0)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(event.displayTitle).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                                    Text(CalendarFormat.string(event.startsAt, template: "EEEMMMdyyyy") + (event.timeText.map { " · " + $0 } ?? ""))
+                                        .font(GRASPFont.meta)
+                                        .foregroundColor(event.startsAt < Date() ? GRASPColor.textTertiary : GRASPColor.textSecondary)
+                                }
+                                Spacer()
+                                Text(event.kind.label.uppercased()).font(GRASPFont.badge).foregroundColor(event.kind.tint)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(GRASPColor.surface)
+                            .cornerRadius(6)
+                            .onTapGesture { editing = EventEditorTarget(event: event, isNew: false) }
+                        }
+                    }
+                }
+                .frame(height: 260.0)
+            }
+            HStack(spacing: 8) {
+                Button("+ Add Date") {
+                    let start = Calendar.current.startOfDay(for: Date().addingTimeInterval(14 * 86_400))
+                    editing = EventEditorTarget(event: CalendarEvent(courseId: course.id, title: "", startsAt: start), isNew: true)
+                }
+                .fixedSize()
+                Spacer()
+                Button("Done") { close() }.fixedSize()
+            }
+        }
+        .padding(24)
+        .frame(width: 460.0)
         .background(GRASPColor.canvas)
     }
 }
