@@ -75,12 +75,17 @@ struct FlashcardSession: View {
     @State var understood = 0
     @State var toReview = 0
     @State var editing: CardEditorTarget?
+    @State var timer: FocusTimerModel
 
     init(library: Library, deckName: String, cards: [Card], finish: @escaping () -> Void) {
         self.library = library
         self.deckName = deckName
         self.finish = finish
         _queue = State(wrappedValue: cards)
+        let settings = library.settings
+        _timer = State(wrappedValue: FocusTimerModel(workMinutes: settings.focusWorkMinutes,
+                                                     breakMinutes: settings.focusBreakMinutes,
+                                                     cardTarget: settings.focusCardTarget))
     }
 
     var body: some View {
@@ -88,7 +93,8 @@ struct FlashcardSession: View {
             StudyHeader(deckName: deckName, mode: "Flashcards",
                         counter: "\(min(index, queue.count)) / \(queue.count)",
                         fraction: queue.isEmpty ? 1 : Double(index) / Double(queue.count),
-                        close: finish)
+                        close: { timer.reset(); finish() })
+            FocusTimerBar(model: timer, settings: library.settings)
             if index < queue.count {
                 FlashcardFace(card: queue[index], isFlipped: isFlipped) { isFlipped.toggle() }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -157,8 +163,11 @@ struct FlashcardSession: View {
         guard index < queue.count else { return }
         library.mark(queue[index].id, understood: knewIt)
         if knewIt { understood += 1 } else { toReview += 1 }
+        timer.countCard()
         index += 1
         isFlipped = false
+        // The deck's done: the timer stops with it rather than running on.
+        if index >= queue.count { timer.pause() }
     }
 
     /// After an edit, show the card as it now reads.

@@ -5,7 +5,8 @@ import SwiftCrossUI
 /// A test, after the Mac's `TestFlowView`: choose how many questions and
 /// which kinds, answer them one by one, then see the score and every
 /// question with its answer. Missed questions from cards go back into the
-/// flashcard queue when the test is finished.
+/// flashcard queue when the test is finished. With "AI test questions" on
+/// in Settings, the local model adds written questions from the notes.
 struct TestSession: View {
     let library: Library
     let deckName: String
@@ -16,18 +17,19 @@ struct TestSession: View {
 
     enum Phase {
         case setup
-        case running(attemptId: String, questions: [LearnEngine.RoundQuestion])
+        case running(attemptId: String, questions: [LearnEngine.RoundQuestion], warning: String?)
         case results(attemptId: String, graded: [GradedQuestion])
     }
 
     var body: some View {
         switch phase {
         case .setup:
-            TestSetup(library: library, deckName: deckName, deckIds: deckIds, cancel: finish) { attemptId, questions in
-                phase = .running(attemptId: attemptId, questions: questions)
+            TestSetup(library: library, deckName: deckName, deckIds: deckIds, cancel: finish) { attemptId, questions, warning in
+                phase = .running(attemptId: attemptId, questions: questions, warning: warning)
             }
-        case .running(let attemptId, let questions):
-            TestRun(library: library, deckName: deckName, attemptId: attemptId, questions: questions, close: finish) { graded in
+        case .running(let attemptId, let questions, let warning):
+            TestRun(library: library, deckName: deckName, attemptId: attemptId, questions: questions,
+                    warning: warning, close: finish) { graded in
                 library.finishTest(attemptId: attemptId)
                 phase = .results(attemptId: attemptId, graded: graded)
             }
@@ -44,6 +46,18 @@ struct GradedQuestion {
     var isCorrect: Bool
 }
 
+/// "Skip" while AI questions are being written: read from the writing task.
+nonisolated final class SkipFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
+}
+
+struct SkipBox {
+    var flag = SkipFlag()
+}
+
 // MARK: - Setup
 
 private struct TestSetup: View {
@@ -51,7 +65,7 @@ private struct TestSetup: View {
     let deckName: String
     let deckIds: [String]
     let cancel: () -> Void
-    let start: (String, [LearnEngine.RoundQuestion]) -> Void
+    let start: (String, [LearnEngine.RoundQuestion], String?) -> Void
 
     @State var questionCount = 20
     @State var multipleChoice = true
@@ -60,8 +74,14 @@ private struct TestSetup: View {
     @State var shuffle = true
     @State var excludeKnown = false
     @State var noQuestions = false
+    /// While the model writes questions: what it's doing, and how far along.
+    @State var writing: String?
+    @State var writingFraction = 0.0
+    /// A struct around the flag: SwiftCrossUI state must not be a plain class.
+    @State var skip = SkipBox()
 
     private var anyType: Bool { multipleChoice || written || trueFalse }
+    private var usesAI: Bool { library.settings.aiTestQuestions && written }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -89,6 +109,12 @@ private struct TestSetup: View {
                         Pill(title: "Only cards I haven't marked as known", isOn: excludeKnown) { excludeKnown.toggle() }
                     }
                 }
+                if usesAI {
+                    Text("AI test questions are on (Settings): about \(Study.aiQuestionBudget(for: questionCount)) of these will be written questions the local model writes from your notes.")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if !anyType {
                     Text("Pick at least one question type.").font(GRASPFont.meta).foregroundColor(GRASPColor.rejected)
                 } else if noQuestions {
@@ -98,16 +124,30 @@ private struct TestSetup: View {
                         .font(GRASPFont.meta)
                         .foregroundColor(GRASPColor.rejected)
                 }
+                if let writing {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Text(writing).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
+                            Spacer()
+                            Button("Skip") { skip.flag.set() }.fixedSize()
+                        }
+                        ProgressBar(fraction: writingFraction)
+                    }
+                    .padding(12)
+                    .background(GRASPColor.accentSoft)
+                    .cornerRadius(8)
+                }
                 HStack(spacing: 8) {
                     Spacer()
-                    Button("Cancel") { cancel() }.fixedSize()
-                    Button("Start Test") { begin() }.disabled(!anyType).fixedSize()
+                    Button("Cancel") { cancel() }.disabled(writing != nil).fixedSize()
+                    Button("Start Test") { begin() }.disabled(!anyType || writing != nil).fixedSize()
                 }
             }
             .frame(maxWidth: 560.0)
             .padding(32)
             Spacer()
-        }    }
+        }
+    }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -121,11 +161,39 @@ private struct TestSetup: View {
             questionCount: questionCount, allowMultipleChoice: multipleChoice, allowWritten: written,
             allowTrueFalse: trueFalse, shuffle: shuffle, excludeMastered: excludeKnown
         )
-        guard let (attemptId, questions) = library.startTest(inDecks: deckIds, config: config) else {
+        noQuestions = false
+        guard usesAI else {
+            launch(config, aiQuestions: [], warning: nil)
+            return
+        }
+        writing = "Writing questions from your notes…"
+        writingFraction = 0
+        let flag = SkipFlag()
+        skip = SkipBox(flag: flag)
+        let budget = Study.aiQuestionBudget(for: questionCount)
+        Task {
+            let generator = await CardGenerators.select()
+            let progress = AIProgress { snapshot in
+                Task { @MainActor in
+                    writingFraction = snapshot.fraction
+                    if let step = snapshot.step { writing = step }
+                }
+            }
+            let (questions, warning) = await AIProgress.$current.withValue(progress) {
+                await CardAI.generateTestQuestions(inDecks: deckIds, maxCount: budget, using: generator,
+                                                   database: library.database, skipped: { flag.isSet })
+            }
+            writing = nil
+            launch(config, aiQuestions: questions, warning: warning)
+        }
+    }
+
+    private func launch(_ config: TestBuilder.Config, aiQuestions: [LearnEngine.RoundQuestion], warning: String?) {
+        guard let (attemptId, questions) = library.startTest(inDecks: deckIds, config: config, aiQuestions: aiQuestions) else {
             noQuestions = true
             return
         }
-        start(attemptId, questions)
+        start(attemptId, questions, warning)
     }
 }
 
@@ -156,12 +224,14 @@ private struct TestRun: View {
     let deckName: String
     let attemptId: String
     let questions: [LearnEngine.RoundQuestion]
+    let warning: String?
     let close: () -> Void
     let done: ([GradedQuestion]) -> Void
 
     @State var index = 0
     @State var answer = AnswerState()
     @State var graded: [GradedQuestion] = []
+    @State var warningDismissed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -170,6 +240,19 @@ private struct TestRun: View {
                             + "\(min(index + 1, questions.count)) / \(questions.count)",
                         fraction: Double(index) / Double(max(1, questions.count)),
                         close: close)
+            if let warning, !warningDismissed {
+                HStack(spacing: 10) {
+                    Text(warning)
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    QuietLink(title: "Dismiss") { warningDismissed = true }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(GRASPColor.accentSoft)
+            }
             if index < questions.count {
                 QuestionView(
                     question: questions[index], answer: $answer, submitsOnChoice: true,

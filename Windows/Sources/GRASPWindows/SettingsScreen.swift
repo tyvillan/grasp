@@ -203,6 +203,18 @@ struct SettingsScreen: View {
                 Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
+                        Text("AI test questions")
+                            .font(GRASPFont.rowTitle)
+                            .foregroundColor(GRASPColor.textPrimary)
+                        Caption("Tests mix in written questions the model writes from your notes -- about a third of the questions, up to 10. Starting a test takes a little longer; you can skip the wait.")
+                    }
+                    Spacer()
+                    SegmentedChoice(options: [false, true], selection: library.settings.aiTestQuestions,
+                                    label: { $0 ? "On" : "Off" }) { library.settings.aiTestQuestions = $0 }
+                }
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Check all cards against their notes")
                             .font(GRASPFont.rowTitle)
                             .foregroundColor(GRASPColor.textPrimary)

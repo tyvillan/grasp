@@ -292,10 +292,12 @@ final class Library {
     @ObservationIgnored private var levelsCache: (key: String, value: [String: LearnEngine.Level])?
 
     /// Writes the attempt; nil when every card was filtered out.
-    func startTest(inDecks deckIds: [String], config: TestBuilder.Config)
+    func startTest(inDecks deckIds: [String], config: TestBuilder.Config, aiQuestions: [LearnEngine.RoundQuestion] = [])
         -> (attemptId: String, questions: [LearnEngine.RoundQuestion])? {
         var rng = SystemRandomNumberGenerator()
-        let result = try? database.queue.write { try Study.startTest(deckIds: deckIds, config: config, using: &rng, db: $0) }
+        let result = try? database.queue.write {
+            try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions, using: &rng, db: $0)
+        }
         guard let result, !result.questions.isEmpty else { return nil }
         return result
     }
