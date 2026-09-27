@@ -411,6 +411,23 @@ public enum CardAI {
         }
     }
 
+    /// Duplicate groups within each course, across every course -- catches
+    /// the same material imported under two course folders' decks. A card's
+    /// course is its note's, else its deck's.
+    public static func duplicateGroupsAcrossAllCourses(db: Database) throws -> [DuplicateGroup] {
+        let cards = try Card.filter(Column("deletedAt") == nil).fetchAll(db)
+        let courseOfMaterial = try Material.fetchAll(db).reduce(into: [String: String]()) { $0[$1.id] = $1.courseId }
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT deckCard.cardId AS cardId, deck.courseId AS courseId
+            FROM deckCard JOIN deck ON deck.id = deckCard.deckId
+            """)
+        let courseOfCard = rows.reduce(into: [String: String]()) { map, row in map[row["cardId"]] = row["courseId"] }
+        let byCourse = Dictionary(grouping: cards) { card in
+            card.materialId.flatMap { courseOfMaterial[$0] } ?? courseOfCard[card.id] ?? ""
+        }
+        return byCourse.values.flatMap { duplicateGroups($0) }
+    }
+
     /// Higher wins: review history first (deleting it loses study data),
     /// then a hand-edited card, then active over draft over suspended, then
     /// the fuller definition, then the older row.

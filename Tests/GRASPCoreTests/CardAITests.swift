@@ -105,6 +105,27 @@ struct CardAITests {
         #expect(none.questions.isEmpty)
     }
 
+    @Test("the library-wide scan groups duplicates within a course, not across courses")
+    func duplicatesAcrossCourses() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            for courseName in ["Biology", "Chemistry"] {
+                let course = Course(semesterId: nil, name: courseName)
+                try course.insert(conn)
+                for index in 0..<2 {
+                    let deck = Deck(courseId: course.id, name: "Deck \(index)")
+                    try deck.insert(conn)
+                    let card = Card(materialId: nil, front: "Mitochondria", back: "Makes ATP", origin: .parser, status: .draft)
+                    try card.insert(conn)
+                    try DeckCard(deckId: deck.id, cardId: card.id, sortIndex: 0).insert(conn)
+                }
+            }
+        }
+        let groups = try await db.queue.read { try CardAI.duplicateGroupsAcrossAllCourses(db: $0) }
+        #expect(groups.count == 2)
+        #expect(groups.allSatisfy { $0.cards.count == 2 })
+    }
+
     @Test("duplicate groups keep the card with history")
     func duplicates() {
         var studied = Card(materialId: nil, front: "Mitochondria", back: "Makes ATP", origin: .parser, status: .active)
