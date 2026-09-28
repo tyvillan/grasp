@@ -214,6 +214,19 @@ struct DeckOverviewView: View {
     }
 
     @ViewBuilder
+    /// What a downloaded overview is called: the deck, the course, or the
+    /// exam it was opened from.
+    private var scopeTitle: String {
+        switch scope {
+        case .deck(let id):
+            return ((try? store.deck(id)) ?? nil)?.name ?? "Overview"
+        case .course(let id):
+            return store.coursesBySemester.values.joined().first { $0.id == id }?.name ?? "Overview"
+        case .exam(_, let examEventId):
+            return store.calendarEvent(examEventId)?.title ?? "Overview"
+        }
+    }
+
     private func footer(_ overview: DeckOverview) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if overview.handTypedCardCount > 0 {
@@ -221,6 +234,12 @@ struct DeckOverviewView: View {
                      + "\(overview.handTypedCardCount == 1 ? " in this deck was" : "s in this deck were") "
                      + "typed by hand and aren't covered here.")
             }
+            ExportMenu(title: "Download Overview") {
+                OverviewExport.document(entries: overview.entries, title: scopeTitle)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .padding(.bottom, 6)
             let writable = overview.writable
             if !writable.isEmpty, isGeneratorAvailable {
                 Button("Write \(writable.count) more overview\(writable.count == 1 ? "" : "s")…") {

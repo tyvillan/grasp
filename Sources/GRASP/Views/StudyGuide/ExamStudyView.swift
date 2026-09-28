@@ -43,6 +43,17 @@ struct ExamStudyView: View {
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textSecondary)
                 }
+                if let page, !page.parts.isEmpty {
+                    Menu {
+                        ExportMenu(title: "Study Guide with Answer Key") { exportDocument(answerKey: true) }
+                        ExportMenu(title: "Practice Sheet, No Answers") { exportDocument(answerKey: false) }
+                    } label: {
+                        Label("Download", systemImage: "square.and.arrow.down")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Save this exam's guide as a PDF, Word document or Markdown file")
+                }
                 Button("Add Study Guide…", action: addGuide)
                     .buttonStyle(GRASPQuietButton())
                     .disabled(importing)
@@ -77,6 +88,12 @@ struct ExamStudyView: View {
     private func load() {
         page = store.examPage(examEventId: examEventId)
         decks = (try? store.decks(inCourse: courseId)) ?? []
+    }
+
+    private func exportDocument(answerKey: Bool) -> ExportDocument? {
+        guard let page else { return nil }
+        let names = Dictionary(decks.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return StudyGuideExport.document(page: page, deckNames: names, answerKey: answerKey)
     }
 
     private func addGuide() {

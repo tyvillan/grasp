@@ -127,6 +127,11 @@ struct OverviewSectionsView: View {
                 Spacer(minLength: 8)
                 Menu {
                     Button("Copy Lesson") { copyToPasteboard() }
+                    #if os(macOS)
+                    ExportMenu(title: "Download Lesson") {
+                        OverviewExport.document(entries: [overview], title: overview.title)
+                    }
+                    #endif
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 13))
