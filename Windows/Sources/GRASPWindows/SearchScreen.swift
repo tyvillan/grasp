@@ -145,6 +145,7 @@ private struct NoteHit: View {
 struct NoteReader: View {
     let library: Library
     let materialId: String
+    var closeLabel = "Close"
     let close: () -> Void
 
     var body: some View {
@@ -155,7 +156,7 @@ struct NoteReader: View {
                     .font(Font.system(size: 18, weight: .semibold))
                     .foregroundColor(GRASPColor.textPrimary)
                 Spacer()
-                Button("Close") { close() }.fixedSize()
+                Button(closeLabel) { close() }.fixedSize()
             }
             ScrollView {
                 Text(note?.text ?? "This note's text isn't in the library.")

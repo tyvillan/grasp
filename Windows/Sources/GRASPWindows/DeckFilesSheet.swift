@@ -7,11 +7,17 @@ extension Library {
         (try? database.queue.read { try DeckFiles.list(inDecks: deckIds, db: $0) }) ?? ([], 0)
     }
 
-    /// Where a note lives on this PC: under the notes folder chosen in
-    /// Settings, or its own full path. nil when there's no notes folder yet.
+    /// Where a note lives on this PC. A note imported on the Mac carries its
+    /// Mac path; if that's in iCloud, it's found under iCloud for Windows.
     func fileURL(for material: Material) -> URL? {
-        DeckFiles.url(for: material, vaultRoot: settings.notesFolder.map { URL(fileURLWithPath: $0, isDirectory: true) })
+        if let url = ICloudPath.url(forMacPath: material.relativePath, iCloudDrive: Self.iCloudDrive),
+           FileManager.default.fileExists(atPath: Self.iCloudDrive.path) {
+            return url
+        }
+        return DeckFiles.url(for: material, vaultRoot: settings.notesFolder.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
+
+    static let iCloudDrive = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("iCloudDrive")
 }
 
 /// "Files in this deck", after the Mac's `DeckFilesSheet`: every note a
@@ -25,6 +31,17 @@ struct DeckFilesSheet: View {
     @State var reading: NoteTarget?
 
     var body: some View {
+        // In place rather than as its own sheet: WinUI crashes when a sheet
+        // opens another sheet.
+        if let reading {
+            NoteReader(library: library, materialId: reading.materialId, closeLabel: "Back") { self.reading = nil }
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder
+    private var list: some View {
         let result = library.deckFiles(inDecks: scope.deckIds)
         let files = filtered(result.files)
         VStack(alignment: .leading, spacing: 12) {
@@ -75,11 +92,6 @@ struct DeckFilesSheet: View {
         .padding(24)
         .frame(width: 640.0)
         .background(GRASPColor.canvas)
-        .sheet(isPresented: Binding(get: { reading != nil }, set: { if !$0 { reading = nil } })) {
-            if let reading {
-                NoteReader(library: library, materialId: reading.materialId) { self.reading = nil }
-            }
-        }
     }
 
     private func filtered(_ files: [DeckFiles.File]) -> [DeckFiles.File] {

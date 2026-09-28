@@ -83,25 +83,52 @@ struct OverviewPane: View {
         model != nil && library.overviewJob(forCourse: courseId).map(\.isFinished) != false
     }
 
+    /// The Mac's layout: the column and the "On this page" rail are centred
+    /// together, so a wide window's spare space splits evenly either side.
+    /// The rail only appears when it fits beside a full-measure column.
     private func lessonPage(_ overview: DeckOverview, index: Int) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                LessonView(overview: overview.entries[index], onOpenCards: onOpenCards)
-                if index + 1 < overview.entries.count {
-                    HStack(spacing: 8) {
-                        Spacer()
-                        Button("Next lesson: \(overview.entries[index + 1].title)") { lessonIndex = index + 1 }
-                            .fixedSize()
-                    }
-                } else {
-                    footer(overview)
+        GeometryReader { proxy in
+            let width = proxy.size.width.isFinite && proxy.size.width > 0 ? proxy.size.width : Self.measure + 56
+            let unit = Self.measure + Self.railGap + Self.railWidth
+            let showsRail = width >= unit + 64
+            let leading = showsRail ? max(32, (width - unit) / 2) : max(24, (width - Self.measure) / 2)
+            let column = min(Self.measure, width - 48)
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    lessonColumn(overview, index: index)
+                        .frame(width: column, alignment: .leading)
+                        .padding(.leading, Int(leading))
+                        .padding(.trailing, Int(showsRail ? Self.railGap : max(24, width - leading - column)))
+                        .padding(.vertical, 28)
+                }
+                .frame(width: showsRail ? leading + column + Self.railGap : width)
+                if showsRail {
+                    LessonContents(entries: overview.entries, current: index) { lessonIndex = $0 }
+                        .frame(width: Self.railWidth)
+                        .padding(.top, 32)
+                    Spacer()
                 }
             }
-            .frame(maxWidth: Self.measure)
-            .padding(.horizontal, 28)
-            .padding(.vertical, 28)
         }
     }
+
+    private func lessonColumn(_ overview: DeckOverview, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LessonView(overview: overview.entries[index], onOpenCards: onOpenCards)
+            if index + 1 < overview.entries.count {
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button("Next lesson: \(overview.entries[index + 1].title)") { lessonIndex = index + 1 }
+                        .fixedSize()
+                }
+            } else {
+                footer(overview)
+            }
+        }
+    }
+
+    static let railWidth = 200.0
+    static let railGap = 48.0
 
     /// Which lesson, as a drop-down of their titles, and a step either way.
     private func lessonBar(_ entries: [RenderedOverview], index: Int) -> some View {
@@ -219,6 +246,54 @@ struct OverviewPane: View {
 struct MissingNote {
     let materialId: String
     let title: String
+}
+
+/// The Mac's "On this page" rail. The headings are claims, so reading down
+/// them is a summary of the lesson. SwiftCrossUI has no scroll-to, so the
+/// headings don't jump; the other lessons are links that switch to them.
+private struct LessonContents: View {
+    let entries: [RenderedOverview]
+    let current: Int
+    let select: (Int) -> Void
+
+    var body: some View {
+        let lesson = entries[current]
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("On this page")
+                ForEach(lesson.sections, id: \.id) { section in
+                    Text(LessonText.clean(section.heading))
+                        .font(Font.system(size: 12))
+                        .foregroundColor(GRASPColor.textSecondary)
+                        .lineLimit(2)
+                }
+                if !lesson.takeaways.isEmpty {
+                    railLine("Key takeaways")
+                }
+                if lesson.diagram != nil || lesson.mermaidSource != nil {
+                    railLine("How it all fits together")
+                }
+                if entries.count > 1 {
+                    SectionLabel("Lessons").padding(.top, 18)
+                    ForEach(Array(entries.enumerated()), id: \.offset) { item in
+                        Text("\(item.offset + 1). \(LessonText.clean(item.element.title))")
+                            .font(Font.system(size: 12, weight: item.offset == current ? .semibold : .regular))
+                            .foregroundColor(item.offset == current ? GRASPColor.accent : GRASPColor.textSecondary)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .onTapGesture { if item.offset != current { select(item.offset) } }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func railLine(_ text: String) -> some View {
+        Text(text)
+            .font(Font.system(size: 12))
+            .foregroundColor(GRASPColor.textTertiary)
+    }
 }
 
 /// "Write overviews for 5 notes?" with what it costs, before a run that
