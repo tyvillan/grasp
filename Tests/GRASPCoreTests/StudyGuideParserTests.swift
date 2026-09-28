@@ -181,4 +181,50 @@ struct StudyGuideParserTests {
         let json = try StudyGuideCoding.encode(guide)
         #expect(StudyGuideCoding.decode(json) == guide)
     }
+
+    @Test("OCR's letter o for zero and its broken quotes are repaired")
+    func repairsOCR() {
+        #expect(StudyGuideParser.cleanOCR("combinations: (o boats, 50 tons), (5, 48), (20, o).")
+                == "combinations: (0 boats, 50 tons), (5, 48), (20, 0).")
+        #expect(StudyGuideParser.cleanOCR("would get $20o but") == "would get $200 but")
+        // Real words keep their o's.
+        #expect(StudyGuideParser.cleanOCR("go to (or from) a store, or not") == "go to (or from) a store, or not")
+        #expect(StudyGuideParser.cleanOCR("freedom to drive‚¿‹c)Safety first‚¿¿")
+                == "freedom to drive” (c) Safety first”")
+    }
+
+    @Test("lettered choices go on their own lines with whole quotes; a lone (b) doesn't")
+    func tidiesChoices() {
+        let question = #"Which is positive? (a) "Taxes cut demand." (b) Kids deserve to drive” (c) Safety matters”"#
+        #expect(StudyGuideParser.tidyChoices(question) == """
+            Which is positive?
+            (a) “Taxes cut demand.”
+            (b) “Kids deserve to drive”
+            (c) “Safety matters”
+            """)
+        #expect(StudyGuideParser.tidyChoices("Why is (b) wrong?") == "Why is (b) wrong?")
+    }
+
+    @Test("an example that reads a table OCR dropped is marked as needing its page")
+    func marksFigures() {
+        let pages = ["""
+            Part 2 • Demand and Marginal Personal Worth (7 questions)
+            Price
+            $6
+            $5
+            Smoothies per week
+            2
+            4
+            • Example 4 - At $3 a smoothie, what are his total worth and his consumer surplus?
+            He buys 4, so total worth is $18 and surplus is $6.
+            • Example 5 - At $4 he spends $12, and at $3 he also spends $12. What is the fourth worth?
+            $3, the price at which he just takes it.
+            • Example 6 - Mia would sell an amp for $5 and Leo would pay $12. What is the total gain?
+            $7, whatever price they settle on.
+            • Example 7 - Use the table. How many units trade if trading is costless?
+            Four: each is worth more to the buyer.
+            """]
+        let examples = StudyGuideParser.parse(pages: pages).parts[0].examples
+        #expect(examples.map { $0.usesFigure == true } == [true, true, false, true])
+    }
 }

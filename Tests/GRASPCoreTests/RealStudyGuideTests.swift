@@ -68,4 +68,31 @@ struct RealStudyGuideTests {
             #expect(StudyGuideMatcher.samePart(a, b), "\(a.title) / \(b.title)")
         }
     }
+
+    @Test("read together, the two guides show each shared problem once, with no OCR slips")
+    func together() throws {
+        let professor = StudyGuideParser.parse(pages: try Fixtures.pages(Fixtures.professorFile))
+        let student = StudyGuideParser.parse(pages: try Fixtures.pages(Fixtures.studentFile))
+        #expect(professor.parts.flatMap(\.examples).filter { $0.usesFigure == true }.compactMap(\.label)
+                == ["Example 4", "Example 5", "Example 12", "Example 14"])
+        #expect(student.parts.flatMap(\.examples).allSatisfy { $0.usesFigure != true })
+        let all = (professor.parts + student.parts).flatMap(\.examples)
+        let text = all.map { $0.question + " " + ($0.answer ?? "") }.joined(separator: "\n")
+        #expect(!text.contains("(o "))
+        #expect(!text.contains(", o)"))
+        #expect(!text.contains("$20o"))
+        #expect(professor.parts[0].examples[2].question.components(separatedBy: "\n").count == 4)
+
+        // The student reworks five of the professor's problems: the wedding,
+        // the island, the driving-age claims, the smoothies, the amp.
+        var duplicates: [String] = []
+        for (p, s) in zip(professor.parts, student.parts) {
+            for a in p.examples {
+                for b in s.examples where StudyGuideActions.isSameProblem(a, b) {
+                    duplicates.append(a.label ?? "")
+                }
+            }
+        }
+        #expect(duplicates == ["Example 1", "Example 2", "Example 3", "Example 4", "Example 11"])
+    }
 }

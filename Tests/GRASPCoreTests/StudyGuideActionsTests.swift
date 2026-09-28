@@ -230,4 +230,71 @@ struct StudyGuideActionsTests {
             #expect(SyncSchema.table(named: name) != nil)
         }
     }
+
+    @Test("the exam page shows a problem both guides have once, in the version that stands alone")
+    func examPageDropsDuplicates() throws {
+        let library = try makeLibrary()
+        let professor = [Self.guidePages[0], """
+            Part 1 • The Economic Way of Thinking (6 questions)
+            Price
+            $6
+            $5
+            Smoothies per week
+            2
+            4
+            • Example 1 - At $3 a smoothie, what are his total worth, spending and consumer surplus?
+            Total worth is $6 + $5 + $4 + $3 = $18, spending $12, surplus $6.
+            • Example 2 - Priya's gas costs $45, she gives up $100 of work and her $70 dress is sunk. What is the full cost?
+            $145: the dress is sunk.
+            """]
+        let student = """
+            PART 1 - THE ECONOMIC WAY OF THINKING
+            Example: A smoothie shop charges $3. You would pay $6, $5, $4, $3 and $2 for each. What is your consumer surplus?
+            Answer: $18 - $12 = $6
+            Example: A wedding costs $45 in gas and $100 of missed work; the $70 dress is already bought. What is the full cost?
+            Answer: $145
+            Example: A theater cuts tickets from $15 to $10 and sales go from 40 to 70. Elastic?
+            Answer: Yes, 1.36.
+            """
+        _ = try importGuide(library, title: "Microeconomics Exam 1 Review Professor", pages: professor)
+        _ = try importGuide(library, title: "ECO 2023 - Exam 1 Study Guide", pages: [student])
+        let page = try #require(try library.db.queue.read {
+            try StudyGuideActions.examPage(examEventId: library.midterm1, db: $0)
+        })
+        let questions = page.parts[0].examples.map(\.example.question)
+        #expect(questions.count == 3)
+        // The smoothie problem needs a table in the professor's guide, so
+        // the student's, which lists the worths, takes its place.
+        #expect(questions[0].hasPrefix("A smoothie shop"))
+        #expect(questions[1].hasPrefix("Priya's"))
+        #expect(questions[2].hasPrefix("A theater"))
+    }
+
+    @Test("a guide read by an older parser is read again, even when its file hasn't changed")
+    func rereadsStaleGuides() async throws {
+        let library = try makeLibrary()
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grasp-guide-stale-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("ECO 2023 - Exam 1 Study Guide.md")
+        try (Self.studentGuide + "\n" + String(repeating: "More review text for the exam. ", count: 10))
+            .write(to: file, atomically: false, encoding: .utf8)
+        let scanner = VaultScanner(database: library.db)
+        _ = try await scanner.importPaths([file], intoCourse: library.course)
+        let unchanged = try await scanner.importPaths([file], intoCourse: library.course)
+        #expect(unchanged.studyGuidesImported == 0)
+
+        try await library.db.queue.write { conn in
+            try conn.execute(sql: "UPDATE studyGuide SET bodySchemaVersion = 1")
+        }
+        let before = try await library.db.queue.read { try StudyGuideActions.staleGuideFiles(db: $0) }
+        #expect(before.map(\.path) == [file.path])
+        let reread = try await scanner.importPaths([file], intoCourse: library.course)
+        #expect(reread.studyGuidesImported == 1)
+        let (stale, guides) = try await library.db.queue.read { conn in
+            (try StudyGuideActions.staleGuideFiles(db: conn), try StudyGuide.fetchCount(conn))
+        }
+        #expect(stale.isEmpty)
+        #expect(guides == 1)
+    }
 }

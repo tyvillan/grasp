@@ -277,10 +277,22 @@ private struct PartSection: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            if !part.examples.isEmpty {
+            // Problems to try first; then the guide's illustrations, which
+            // ask nothing, so they don't read as questions missing answers.
+            let practice = part.examples.filter { $0.example.isPractice }
+            let illustrations = part.examples.filter { !$0.example.isPractice }
+            if !practice.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("Practice")
-                    ForEach(part.examples) { item in
+                    ForEach(practice) { item in
+                        PracticeProblem(item: item, onOpenPage: onOpenPage)
+                    }
+                }
+            }
+            if !illustrations.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionLabel("Examples")
+                    ForEach(illustrations) { item in
                         PracticeProblem(item: item, onOpenPage: onOpenPage)
                     }
                 }
@@ -451,6 +463,14 @@ private struct PracticeProblem: View {
                         .buttonStyle(.link)
                         .help("Open the guide at this page, for its tables and figures")
                 }
+            }
+            if example.usesFigure == true, let page = example.page {
+                Button { onOpenPage(item.guideId, page) } label: {
+                    Label("Uses a table or figure from page \(page). Open it alongside.",
+                          systemImage: "tablecells")
+                        .graspType(.body)
+                }
+                .buttonStyle(.link)
             }
             Text(example.question)
                 .graspType(.prose)

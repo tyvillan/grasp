@@ -270,7 +270,8 @@ public actor VaultScanner {
 
         // Idempotency: unchanged content at the same path needs no work.
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-           existing.contentHash == contentHash, existing.deletedAt == nil {
+           existing.contentHash == contentHash, existing.deletedAt == nil,
+           !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
             summary.filesUnchanged += 1
             return
         }
@@ -320,7 +321,8 @@ public actor VaultScanner {
         let relativePath = fileURL.path
 
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-           existing.contentHash == contentHash, existing.deletedAt == nil {
+           existing.contentHash == contentHash, existing.deletedAt == nil,
+           !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
             summary.filesUnchanged += 1
             return
         }
@@ -431,7 +433,8 @@ public actor VaultScanner {
                 let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
                 let relativePath = fileURL.path
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-                   existing.contentHash == contentHash, existing.deletedAt == nil {
+                   existing.contentHash == contentHash, existing.deletedAt == nil,
+                   !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
                     summary.filesUnchanged += 1
                     return
                 }
@@ -445,7 +448,8 @@ public actor VaultScanner {
                 let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
                 let relativePath = fileURL.path
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
-                   existing.contentHash == contentHash, existing.deletedAt == nil {
+                   existing.contentHash == contentHash, existing.deletedAt == nil,
+                   !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
                     summary.filesUnchanged += 1
                     return
                 }

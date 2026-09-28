@@ -254,8 +254,18 @@ public enum StudyGuideActions {
                                         rating: ratings["\(source.guideId)#\(skillId)"]))
                 }
                 for (i, example) in part.examples.enumerated() {
-                    examples.append(PageExample(id: "\(source.guideId)#p\(source.partIndex)e\(i)",
-                                                guideId: source.guideId, example: example))
+                    let item = PageExample(id: "\(source.guideId)#p\(source.partIndex)e\(i)",
+                                           guideId: source.guideId, example: example)
+                    // A student's guide often reworks the professor's own
+                    // examples: show each problem once, in the version
+                    // that's easier to use, where the first one stood.
+                    if let at = examples.firstIndex(where: {
+                        $0.guideId != source.guideId && isSameProblem($0.example, example)
+                    }) {
+                        if preference(example) > preference(examples[at].example) { examples[at] = item }
+                    } else {
+                        examples.append(item)
+                    }
                 }
             }
             let part = entry.part
@@ -270,6 +280,59 @@ public enum StudyGuideActions {
 
         return ExamPage(exam: exam, guides: guides, questionCount: questionCount, format: format,
                         notes: notes, parts: parts, unreadGuides: unread)
+    }
+
+    /// Two guides' versions of one problem: most of the same numbers (the
+    /// wedding's $45, $100 and $70), or, for one without many numbers, most
+    /// of the same words (the driving-age claims). Different problems on one
+    /// topic share a few numbers ($3 smoothies) but not most of them.
+    static func isSameProblem(_ a: StudyGuideDocument.Example, _ b: StudyGuideDocument.Example) -> Bool {
+        func text(_ e: StudyGuideDocument.Example) -> String {
+            ([e.question] + e.steps + [e.answer ?? ""]).joined(separator: " ")
+        }
+        func numbers(_ text: String) -> Set<String> {
+            let regex = try! NSRegularExpression(pattern: #"\d+(?:[.,]\d+)?"#)
+            let ns = text as NSString
+            return Set(regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+                .map { ns.substring(with: $0.range).replacingOccurrences(of: ",", with: "") })
+        }
+        func jaccard(_ x: Set<String>, _ y: Set<String>) -> Double {
+            let union = x.union(y).count
+            return union == 0 ? 0 : Double(x.intersection(y).count) / Double(union)
+        }
+        let (ta, tb) = (text(a), text(b))
+        let (na, nb) = (numbers(ta), numbers(tb))
+        if na.count >= 3, nb.count >= 3, jaccard(na, nb) >= 0.6 { return true }
+        return jaccard(StudyGuideParser.contentWords(ta), StudyGuideParser.contentWords(tb)) >= 0.35
+    }
+
+    /// Which of two versions to keep: one you can do from the text alone,
+    /// then one with an answer to check, then one with worked steps.
+    static func preference(_ e: StudyGuideDocument.Example) -> Int {
+        (e.usesFigure == true ? 0 : 4) + (e.isPractice ? 2 : 0) + (e.steps.isEmpty ? 0 : 1)
+    }
+
+    /// Whether a guide was read by an older parser than this one, so its
+    /// file should be read again even though it hasn't changed.
+    public static func isStale(materialId: String, db: Database) throws -> Bool {
+        try StudyGuide
+            .filter(Column("materialId") == materialId)
+            .filter(Column("bodySchemaVersion") < StudyGuideDocument.schemaVersion)
+            .fetchCount(db) > 0
+    }
+
+    /// Guides read by an older parser whose files are still where they were
+    /// imported from: what a launch reads again.
+    public static func staleGuideFiles(db: Database) throws -> [(courseId: String, path: String)] {
+        let guides = try StudyGuide
+            .filter(Column("bodySchemaVersion") < StudyGuideDocument.schemaVersion)
+            .fetchAll(db)
+        return try guides.compactMap { guide in
+            guard let materialId = guide.materialId,
+                  let material = try Material.fetchOne(db, key: materialId), material.deletedAt == nil
+            else { return nil }
+            return (guide.courseId, material.relativePath)
+        }
     }
 
     /// Text fields merged; the first guide's title, number and count win.

@@ -65,9 +65,20 @@ public enum StudyGuideParser {
         return result
     }
 
-    /// OCR reads a closing curly quote as a run like "‚¿¿" or "‚¿‹".
+    /// Repairs what OCR gets wrong in a screenshot guide:
+    /// - a closing curly quote comes out as a run like "‚¿¿" or "‚¿‹", and
+    ///   one before a lettered choice has swallowed its space and
+    ///   parenthesis ("drive‚¿‹c)Safety");
+    /// - a zero among numbers comes out as the letter o: "(o boats, 50
+    ///   tons)", "(20, o)", "$20o". A lone o touching a digit, a "(" or a
+    ///   ", " is never a word.
     static func cleanOCR(_ text: String) -> String {
-        text.replacingOccurrences(of: #"[‚¿‹›]{2,}"#, with: "”", options: .regularExpression)
+        var text = text.replacingOccurrences(of: #"[‚¿‹›]{2,}"#, with: "”", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"”\s*([a-e])\)\s*"#, with: "” ($1) ", options: .regularExpression)
+        for pattern in [#"(?<=\d)[oO](?=[\s,.;:)\]]|$)"#, #"(?<=\(|, |,)[oO](?=[\s,)])"#] {
+            text = text.replacingOccurrences(of: pattern, with: "0", options: .regularExpression)
+        }
+        return text
     }
 
     // MARK: - Patterns
@@ -207,6 +218,9 @@ public enum StudyGuideParser {
         var paragraph: [String] = []
         /// What a following bullet or lowercase continuation belongs to.
         var attach: Attach = .none
+        /// Table cells dropped since the last thing kept: the next example
+        /// may be the question that reads that table.
+        var debris: [String] = []
 
         enum Attach { case none, term, formula, paragraph }
 
@@ -271,8 +285,12 @@ public enum StudyGuideParser {
             let isProse = paragraph.count == 1
                 ? total >= 6 && StudyGuideParser.endsSentence(text)
                 : Double(total) / Double(paragraph.count) >= 8
-            guard isProse else { return }
+            guard isProse else {
+                debris.append(text)
+                return
+            }
             addNote(text)
+            debris = []
         }
 
         mutating func step() {
@@ -308,6 +326,7 @@ public enum StudyGuideParser {
                 ))
                 partIndex = document.parts.count - 1
                 attach = .none
+                debris = []
                 index += 1
                 return
             }
@@ -317,6 +336,7 @@ public enum StudyGuideParser {
                 index += 1
                 let items = readList()
                 edit { $0.skills += items }
+                debris = []
                 return
             }
             if !line.bullet, startsWithAny(line.text, trapHeaders), words(line.text) <= 10 {
@@ -324,12 +344,18 @@ public enum StudyGuideParser {
                 index += 1
                 let items = readList()
                 edit { $0.traps += items }
+                debris = []
                 return
             }
 
             if match(exampleStart, line.text) != nil {
                 flushParagraph()
-                let example = readExample()
+                var example = readExample()
+                let previous = partIndex.flatMap { document.parts[$0].examples.last }
+                if StudyGuideParser.usesFigure(example, debris: debris, previous: previous) {
+                    example.usesFigure = true
+                }
+                debris = []
                 if partIndex != nil { edit { $0.examples.append(example) } }
                 attach = .none
                 return
@@ -573,9 +599,9 @@ public enum StudyGuideParser {
         guard let questionEnd else {
             return .init(label: label, question: joinLines(body).joined(separator: "\n"), page: page)
         }
-        let question = joinLines(Array(body[...questionEnd]))
+        let question = tidyChoices(joinLines(Array(body[...questionEnd]))
             .map { stripLabel($0, "question:") }
-            .joined(separator: "\n")
+            .joined(separator: "\n"))
         let rest = Array(body[(questionEnd + 1)...])
         guard !rest.isEmpty else {
             return .init(label: label, question: question, page: page)
@@ -606,6 +632,106 @@ public enum StudyGuideParser {
             label: label, question: question, steps: groupSteps(steps),
             answer: answerText.isEmpty ? nil : answerText, page: page
         )
+    }
+
+    static let choiceMarker = try! NSRegularExpression(pattern: #"\(([a-e])\)\s*"#)
+
+    /// "Which is positive? (a) "X." (b) Y” (c) Z”" -- a multiple-choice
+    /// question the page ran together -- with each choice on its own line
+    /// and its quotes whole again (OCR drops opening quotes). Only when the
+    /// choices start at (a) and go on to (b): "(b)" alone is a reference,
+    /// not a list.
+    static func tidyChoices(_ question: String) -> String {
+        let ns = question as NSString
+        let markers = choiceMarker.matches(in: question, range: NSRange(location: 0, length: ns.length))
+        let letters = markers.map { ns.substring(with: $0.range(at: 1)) }
+        guard letters.count >= 2, letters[0] == "a", letters[1] == "b" else { return question }
+        var lines = [ns.substring(to: markers[0].range.location).trimmingCharacters(in: .whitespaces)]
+        for (i, marker) in markers.enumerated() {
+            let start = marker.range.location + marker.range.length
+            let end = i + 1 < markers.count ? markers[i + 1].range.location : ns.length
+            var choice = ns.substring(with: NSRange(location: start, length: end - start))
+                .trimmingCharacters(in: .whitespaces)
+            if choice.hasPrefix("\"") { choice = "“" + choice.dropFirst() }
+            if choice.hasSuffix("\"") { choice = choice.dropLast() + "”" }
+            if choice.hasSuffix("”"), !choice.hasPrefix("“") { choice = "“" + choice }
+            if choice.hasPrefix("“"), !choice.contains("”") { choice += "”" }
+            lines.append("(\(letters[i])) " + choice)
+        }
+        return lines.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    // MARK: - Tables and figures
+
+    static let figureReference = try! NSRegularExpression(
+        pattern: #"\b(?:the|this|that)\s+(?:table|figure|graph|chart|schedule|diagram)\b|\b(?:each|every)\s+(?:row|column)\b"#,
+        options: [.caseInsensitive]
+    )
+    static let thirdPerson = try! NSRegularExpression(
+        pattern: #"\b(?:he|his|him|she|her)\b"#, options: [.caseInsensitive]
+    )
+    /// Capitalized words that start sentences without naming anyone.
+    static let sentenceStarters: Set<String> = [
+        "at", "what", "the", "a", "an", "if", "how", "is", "are", "does", "do", "did", "which", "who",
+        "why", "when", "where", "in", "on", "for", "with", "use", "back", "suppose", "imagine", "now",
+        "then", "after", "before", "each", "he", "his", "she", "her", "it", "this", "that", "there",
+        "one", "two", "three", "four", "five", "find", "compute", "say", "show", "explain",
+    ]
+
+    /// Whether a question names someone ("Priya's gas costs..."), so its
+    /// "she" is its own and not the previous example's.
+    static func namesSomeone(_ text: String) -> Bool {
+        text.split(whereSeparator: { !$0.isLetter && $0 != "'" }).contains { word in
+            guard let first = word.first, first.isUppercase, word.count >= 3 else { return false }
+            let bare = word.lowercased().replacingOccurrences(of: "'s", with: "")
+            return !sentenceStarters.contains(bare)
+        }
+    }
+
+    /// Whether an example needs its page open, because OCR couldn't carry
+    /// what it reads. Any of:
+    /// - it says so: "Use the table", "Add across each row";
+    /// - it comes straight after table cells that were dropped, and shares
+    ///   a word with them ("Smoothies per week" above "At $3 a smoothie,
+    ///   what are his...");
+    /// - it goes on about the same unnamed "he" as the example before it
+    ///   on the page, which needed its figure ("At $4 he spends $12").
+    static func usesFigure(_ example: StudyGuideDocument.Example, debris: [String],
+                           previous: StudyGuideDocument.Example?) -> Bool {
+        let all = ([example.question] + example.steps + [example.answer ?? ""]).joined(separator: " ")
+        if match(figureReference, all) != nil { return true }
+        // Cells, not stray headings: at least two of the dropped lines are
+        // bare numbers ("$6", "2").
+        let cells = debris.flatMap { $0.split(separator: "\n") }
+            .filter { $0.range(of: #"^\$?\d[\d.,%]*$"#, options: .regularExpression) != nil }
+        if cells.count >= 2,
+           !contentWords(debris.joined(separator: " ")).isDisjoint(with: contentWords(example.question)) {
+            return true
+        }
+        if let previous, previous.usesFigure == true, previous.page == example.page,
+           match(thirdPerson, example.question) != nil, !namesSomeone(example.question) {
+            return true
+        }
+        return false
+    }
+
+    static let commonWords: Set<String> = [
+        "that", "this", "with", "from", "have", "what", "your", "than", "they", "them", "their",
+        "then", "there", "were", "will", "would", "when", "which", "more", "most", "each", "only",
+        "into", "also", "over", "same", "about", "just", "after", "before", "other", "these",
+        "those", "while", "does", "much", "many", "total",
+    ]
+
+    /// Lowercased words of four letters or more, a plural's "s" dropped,
+    /// common words left out: enough to tell whether two passages are
+    /// about the same thing.
+    static func contentWords(_ text: String) -> Set<String> {
+        var result = Set<String>()
+        for word in text.lowercased().split(whereSeparator: { !$0.isLetter }) where word.count >= 4 {
+            let stem = word.hasSuffix("s") && !word.hasSuffix("ss") ? String(word.dropLast()) : String(word)
+            if !commonWords.contains(stem) { result.insert(stem) }
+        }
+        return result
     }
 
     /// "Step 2: Find spending." with the line of working under it is one step.

@@ -100,6 +100,19 @@ extension AppStore {
         return summary
     }
 
+    /// Reads again any guide an older parser read, from its file, so a
+    /// parser fix reaches guides already imported. Quiet: runs at launch,
+    /// keeps each guide's exam and hand-picked decks.
+    func refreshStaleStudyGuides() async {
+        guard let stale = try? await database.queue.read({ db in try StudyGuideActions.staleGuideFiles(db: db) })
+        else { return }
+        let byCourse = Dictionary(grouping: stale.filter { FileManager.default.fileExists(atPath: $0.path) },
+                                  by: \.courseId)
+        for (courseId, files) in byCourse {
+            await importStudyGuides(files.map { URL(fileURLWithPath: $0.path) }, intoCourse: courseId)
+        }
+    }
+
     func setGuideExam(guideId: String, examEventId: String?) {
         try? database.queue.write { db in
             try StudyGuideActions.setExam(guideId: guideId, examEventId: examEventId, db: db)

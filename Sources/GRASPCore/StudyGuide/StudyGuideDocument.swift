@@ -14,7 +14,11 @@ import Foundation
 /// Stored as JSON on `StudyGuide.bodyJSON`, versioned by
 /// `StudyGuideDocument.schemaVersion`.
 public struct StudyGuideDocument: Codable, Sendable, Equatable {
-    public static let schemaVersion = 1
+    /// Bumped when the parser changes what it reads out of a guide, so a
+    /// guide read by an older one is read again from its file
+    /// (`StudyGuideActions.isStale`). 2: OCR zeros and quotes repaired,
+    /// lettered choices on their own lines, `usesFigure`.
+    public static let schemaVersion = 2
 
     /// The heading at the top of the guide, when it has one.
     public var title: String?
@@ -92,14 +96,19 @@ public struct StudyGuideDocument: Codable, Sendable, Equatable {
         /// 1-based page of the source PDF, for the tables and figures the
         /// text can't carry.
         public var page: Int?
+        /// True when the question can't be done from its text alone: it
+        /// reads a table or figure that OCR couldn't carry ("Use the
+        /// table"), so the page has to be open beside it.
+        public var usesFigure: Bool?
 
         public init(label: String? = nil, question: String, steps: [String] = [],
-                    answer: String? = nil, page: Int? = nil) {
+                    answer: String? = nil, page: Int? = nil, usesFigure: Bool? = nil) {
             self.label = label
             self.question = question
             self.steps = steps
             self.answer = answer
             self.page = page
+            self.usesFigure = usesFigure
         }
 
         /// Something to try before looking: it asks a question and has an

@@ -86,8 +86,8 @@ if arguments.first == "guide", arguments.count == 2 {
         for item in part.remember { print("  remember: \(item.prefix(90))") }
         for note in part.notes { print("  note: \(note.replacingOccurrences(of: "\n", with: " / ").prefix(90))") }
         for example in part.examples {
-            print("  \(example.isPractice ? "practice" : "illustration") \(example.label ?? "Example") p\(example.page ?? 0)")
-            print("    Q: \(example.question.replacingOccurrences(of: "\n", with: " / ").prefix(140))")
+            print("  \(example.isPractice ? "practice" : "illustration") \(example.label ?? "Example") p\(example.page ?? 0)\(example.usesFigure == true ? " [needs page]" : "")")
+            print("    Q: \(example.question.replacingOccurrences(of: "\n", with: " / ").prefix(400))")
             for step in example.steps { print("    step: \(step.prefix(90))") }
             if let answer = example.answer { print("    A: \(answer.replacingOccurrences(of: "\n", with: " / ").prefix(140))") }
         }

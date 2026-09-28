@@ -264,6 +264,7 @@ struct ContentView: View {
             openWidgetLink()
             openLaunchScreen()
         }
+        .task { await store.refreshStaleStudyGuides() }
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
     }
 
