@@ -26,10 +26,4 @@ public enum ICloudPath {
         }
         return nil
     }
-
-    /// `macPath` under `iCloudDrive` (iCloud for Windows' folder), or nil.
-    public static func url(forMacPath macPath: String, iCloudDrive: URL) -> URL? {
-        guard let components = componentsInICloudDrive(macPath: macPath) else { return nil }
-        return components.reduce(iCloudDrive) { $0.appendingPathComponent($1) }
-    }
 }

@@ -31,12 +31,4 @@ struct ICloudPathTests {
         #expect(ICloudPath.componentsInICloudDrive(macPath: "College/a.md") == nil)
         #expect(ICloudPath.componentsInICloudDrive(macPath: "/Users/tyler/Library/Mobile Documents/com~apple~CloudDocs") == nil)
     }
-
-    @Test("the URL is built under the given iCloud Drive folder")
-    func url() {
-        let root = URL(fileURLWithPath: "/root/iCloudDrive", isDirectory: true)
-        let url = ICloudPath.url(forMacPath: "/Users/t/Desktop/a b.pdf", iCloudDrive: root)
-        #expect(url?.lastPathComponent == "a b.pdf")
-        #expect(url?.deletingLastPathComponent().lastPathComponent == "Desktop")
-    }
 }

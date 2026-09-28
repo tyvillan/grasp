@@ -54,8 +54,13 @@ public struct ImportSummary: Sendable, Equatable {
 /// review history on its cards survives.
 public actor VaultScanner {
     private let database: GRASPDatabase
+    private let paths: VaultPathMap
 
-    public init(database: GRASPDatabase) {
+    /// The path stored as a file's or folder's identity.
+    private nonisolated func key(_ url: URL) -> String { paths.stored(forLocal: url.path) }
+
+    public init(database: GRASPDatabase, paths: VaultPathMap = .identity) {
+        self.paths = paths
         self.database = database
     }
 
@@ -111,7 +116,7 @@ public actor VaultScanner {
             }
         }
         try database.queue.write { db in
-            try Self.sweepMissingFiles(under: collegeRoot.path, db: db)
+            try Self.sweepMissingFiles(under: key(collegeRoot), db: db, paths: paths)
             summary.semesterCount = try Semester.fetchCount(db)
             summary.courseCount = try Course.fetchCount(db)
         }
@@ -130,11 +135,18 @@ public actor VaultScanner {
     ///
     /// A file iCloud has evicted to a placeholder is still there as far as
     /// this is concerned.
-    static func sweepMissingFiles(under root: String, db: Database) throws {
+    static func sweepMissingFiles(under root: String, db: Database, paths: VaultPathMap = .identity) throws {
         let prefix = root.hasSuffix("/") ? root : root + "/"
         let fm = FileManager.default
-        func isPresent(_ path: String) -> Bool {
+        func isPresent(_ stored: String) -> Bool {
+            let path = paths.local(forStored: stored)
             if fm.fileExists(atPath: path) { return true }
+            // Through iCloud for Windows, a folder that hasn't synced to
+            // this PC yet isn't evidence the Mac's notes in it are gone.
+            if !paths.isIdentity,
+               !fm.fileExists(atPath: URL(fileURLWithPath: path).deletingLastPathComponent().path) {
+                return true
+            }
             let url = URL(fileURLWithPath: path)
             let stub = url.deletingLastPathComponent()
                 .appendingPathComponent(".\(url.lastPathComponent).icloud").path
@@ -202,7 +214,7 @@ public actor VaultScanner {
         // archiving a course: archiving still reuses the existing row on
         // rescan, but a course whose folder is excluded is never touched
         // at all, so it's also safe to have hard-deleted it beforehand.
-        guard !excludedFolders.contains(courseDir.path) else { return }
+        guard !excludedFolders.contains(key(courseDir)) else { return }
 
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -234,13 +246,13 @@ public actor VaultScanner {
                 try database.queue.write { db in
                     if kind == .markdown {
                         try importNote(
-                            fileURL, courseName: courseName, courseFolderPath: courseDir.path,
+                            fileURL, courseName: courseName, courseFolderPath: key(courseDir),
                             fallbackSemesterFolderName: fallbackSemesterFolderName,
                             resolvedCourseId: &fileCourseId, db: db, summary: &fileSummary
                         )
                     } else {
                         try importBinaryMaterial(
-                            fileURL, kind: kind, courseName: courseName, courseFolderPath: courseDir.path,
+                            fileURL, kind: kind, courseName: courseName, courseFolderPath: key(courseDir),
                             fallbackSemesterFolderName: fallbackSemesterFolderName,
                             resolvedCourseId: &fileCourseId, db: db, summary: &fileSummary
                         )
@@ -266,7 +278,7 @@ public actor VaultScanner {
     ) throws {
         let raw = try String(contentsOf: fileURL, encoding: .utf8)
         let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
-        let relativePath = fileURL.path
+        let relativePath = key(fileURL)
 
         // Idempotency: unchanged content at the same path needs no work.
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
@@ -318,7 +330,7 @@ public actor VaultScanner {
     ) throws {
         let data = try Data(contentsOf: fileURL)
         let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let relativePath = fileURL.path
+        let relativePath = key(fileURL)
 
         if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
            existing.contentHash == contentHash, existing.deletedAt == nil,
@@ -386,7 +398,7 @@ public actor VaultScanner {
     /// file within it, or a parent folder that contains it all un-exclude
     /// it the same way.
     private func liftExclusions(matching url: URL, db: Database) throws {
-        let path = url.path
+        let path = key(url)
         for excluded in try ExcludedFolder.fetchAll(db) {
             let folderPath = excluded.folderPath
             if folderPath == path || path.hasPrefix(folderPath + "/") || folderPath.hasPrefix(path + "/") {
@@ -431,7 +443,7 @@ public actor VaultScanner {
             if kind == .markdown {
                 let raw = try String(contentsOf: fileURL, encoding: .utf8)
                 let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
-                let relativePath = fileURL.path
+                let relativePath = key(fileURL)
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
                    existing.contentHash == contentHash, existing.deletedAt == nil,
                    !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
@@ -446,7 +458,7 @@ public actor VaultScanner {
             } else {
                 let data = try Data(contentsOf: fileURL)
                 let contentHash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                let relativePath = fileURL.path
+                let relativePath = key(fileURL)
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
                    existing.contentHash == contentHash, existing.deletedAt == nil,
                    !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
