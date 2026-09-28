@@ -100,6 +100,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 - `print` output doesn't reach `GRASPWindows.log` promptly (stdout is fully buffered there); write to stderr for debugging.
 
 **GRASPCore data**
+- **Paths are identity.** `Material.relativePath`, `Course.folderPath` and `ExcludedFolder.folderPath` are full paths, and Tyler's are Mac iCloud paths. Imports here go through `VaultScanner(database:paths:)` with `Library.vaultPaths()`, a `VaultPathMap` that stores the Mac path for anything under `%USERPROFILE%\iCloudDrive` (app containers like `iCloud~md~obsidian` lose their `Documents` folder on Windows) and maps back to open files. Never import iCloud files with a bare `VaultScanner(database:)`, or every note duplicates. The sweep won't retire a Mac note whose folder hasn't synced to this PC.
 - `RowOperation.target`/`source` are **1-based**, as written (R₁); subtract 1 for array indices.
 
 ## The Windows app today (`Windows/Sources/GRASPWindows/`)

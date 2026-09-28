@@ -10,10 +10,9 @@ extension Library {
     /// Where a note lives on this PC. A note imported on the Mac carries its
     /// Mac path; if that's in iCloud, it's found under iCloud for Windows.
     func fileURL(for material: Material) -> URL? {
-        if let url = ICloudPath.url(forMacPath: material.relativePath, iCloudDrive: Self.iCloudDrive),
-           FileManager.default.fileExists(atPath: Self.iCloudDrive.path) {
-            return url
-        }
+        let paths = vaultPaths()
+        let local = paths.local(forStored: material.relativePath)
+        if local != material.relativePath { return URL(fileURLWithPath: local) }
         return DeckFiles.url(for: material, vaultRoot: settings.notesFolder.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 

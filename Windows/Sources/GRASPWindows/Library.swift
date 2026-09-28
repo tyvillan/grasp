@@ -210,12 +210,28 @@ final class Library {
 
     // MARK: - Importing
 
+    /// iCloud files are stored under the Mac's paths, so importing here and
+    /// on the Mac updates the same notes. Identity until the library holds
+    /// a Mac path or when iCloud for Windows isn't set up.
+    func vaultPaths() -> VaultPathMap {
+        if let cachedVaultPaths { return cachedVaultPaths }
+        var map = VaultPathMap.identity
+        if FileManager.default.fileExists(atPath: Self.iCloudDrive.path),
+           let home = (try? database.queue.read { try VaultPathMap.macHome(in: $0) }) ?? nil {
+            map = VaultPathMap(macHome: home, iCloudDrive: Self.iCloudDrive.path)
+            cachedVaultPaths = map
+        }
+        return map
+    }
+
+    @ObservationIgnored private var cachedVaultPaths: VaultPathMap?
+
     /// Imports a notes folder laid out as `College/<semester>/<course>/`.
     func importVault(at root: URL) async {
         isImporting = true
         defer { isImporting = false }
         do {
-            let summary = try await VaultScanner(database: database).scan(vaultRoot: root)
+            let summary = try await VaultScanner(database: database, paths: vaultPaths()).scan(vaultRoot: root)
             if summary.courseCount == 0 {
                 status = "No courses found. GRASP looks for College\\<semester>\\<course> folders inside \(root.lastPathComponent)."
             } else {

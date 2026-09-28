@@ -343,7 +343,7 @@ extension Library {
         isImporting = true
         defer { isImporting = false }
         do {
-            let summary = try await VaultScanner(database: database).importPaths(urls, intoCourse: courseId)
+            let summary = try await VaultScanner(database: database, paths: vaultPaths()).importPaths(urls, intoCourse: courseId)
             status = Self.describe(summary)
         } catch {
             status = "Import failed: \(error.localizedDescription)"
