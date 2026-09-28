@@ -160,6 +160,17 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
    - ~~Google sign-in~~ **Done:** PKCE through `SupabaseAuth.oauthStart` / `completeOAuth`, back via `grasp://auth-callback` (already allowed in Supabase for the Mac). Tyler still has to try it for real.
    - ~~an installer~~ **Done:** `scripts\windows\install.ps1` (per-user, no admin). A signed MSIX would need a certificate.
 
+## From the Mac session: study guides (read before touching GRASPCore)
+
+The Mac added study guides, which attach to an exam. Tyler's first real ones are for ECO 2023 Midterm 1 (Sep 29). New shared code, all with tests:
+
+- **Schema:** migration `v9_study_guide` adds `studyGuide`, `studyGuidePartDeck` and `skillRating`, all synced (appended to `SyncSchema.tables` after `calendarEvent`). A new migration goes after it with a new name. Never edit or reorder v9. `SyncSchema.installTriggers` now skips tables that don't exist yet, so a migration that adds a synced table just calls it again.
+- **Code:** `Sources/GRASPCore/StudyGuide/`: `StudyGuideDocument`, `StudyGuideParser` (rules-based), `StudyGuideMatcher` (links a guide to an exam and its parts to lecture decks), `StudyGuideModels`, `StudyGuideActions` (import, rematch, set exam/decks, rate a skill, delete, `examPage`, `examDeckIds`).
+- **Import:** `VaultScanner` treats a file titled like a study guide ("study guide", "exam N review"…) as not study-worthy: no parser cards, no General deck. Instead it calls `StudyGuideActions.importGuide`.
+- **Extractors:** `PDFExtractor.extractPages(from:)` returns one entry per page (the parser uses page numbers). On Windows it wraps `WindowsOCR`'s whole-document text as a single page, so guides read there have no page numbers. Per-page output from the PowerShell script would fix it. `Ingest/Extractors/TextRecognition.swift` is the shared Vision helper (Apple only).
+- **Porting:** the Mac's exam page is `Sources/GRASP/Views/StudyGuide/ExamStudyView.swift` (parts, question counts, skills rated can-do-cold / shaky / can't-yet, traps, practice problems with the answer hidden until tapped, and Flashcards/Learn/Test over the exam's decks via `DeckScope.exam`). No rush. A Windows build without this core code skips guide rows when it syncs, and those rows don't come back after updating until a guide changes again.
+- **Coming on the Mac:** weakest-skills-first, tests weighted by question count, traps as true/false questions, and an AI fallback parser. Clickable key terms may be reused on the exam page.
+
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.
