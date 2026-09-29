@@ -15,6 +15,16 @@ nonisolated enum ExternalLink {
         shellExecute(url.withUnsafeFileSystemRepresentation { $0.map { String(cString: $0) } } ?? url.path, parameters: nil)
     }
 
+    /// Opens a PDF at a page in Edge or Chrome, which honour `#page=` (a
+    /// default PDF app opened by ShellExecute gets no page). Otherwise the
+    /// file just opens.
+    static func openFile(_ url: URL, page: Int) {
+        guard url.pathExtension.lowercased() == "pdf", let browser = DocumentExport.browserPath else {
+            return openFile(url)
+        }
+        shellExecute(browser, parameters: "\"\(url.absoluteString)#page=\(page)\"")
+    }
+
     /// Opens File Explorer with the file selected (the Mac's "Show in Finder").
     static func showInExplorer(_ url: URL) {
         let path = url.withUnsafeFileSystemRepresentation { $0.map { String(cString: $0) } } ?? url.path

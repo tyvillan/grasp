@@ -9,6 +9,8 @@ enum OrganizeSheet {
     case archive(Course)
     /// A file dialog, not a sheet.
     case addFiles(Course)
+    /// A file dialog too.
+    case addStudyGuide(Course)
     case dates(Course)
     case newCourse
     case deleteCourse(Course)
@@ -31,7 +33,7 @@ struct OrganizeSheetView: View {
         switch sheet {
         case .editCourse(let course):
             CourseEditor(library: library, course: course, close: close)
-        case .archive, .addFiles:
+        case .archive, .addFiles, .addStudyGuide:
             EmptyView()
         case .dates(let course):
             CourseDatesSheet(library: library, course: course, close: close)

@@ -191,7 +191,7 @@ struct HomeView: View {
                         event: event,
                         courseName: event.courseId.flatMap { library.courseName($0) }
                     ) {
-                        if let courseId = event.courseId { onStudy(courseId, event.deckId) }
+                        if let courseId = event.courseId { onStudy(courseId, library.studyTarget(for: event)) }
                     }
                 }
             }

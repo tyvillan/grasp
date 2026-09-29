@@ -24,9 +24,12 @@ struct DeckScope: Hashable {
     let total: Int
     let due: Int
     let drafts: Int
+    /// Set for All Cards and an exam, whose ids aren't a deck's.
+    var courseId: String?
 
     init(deck: DeckRow) {
         id = deck.id
+        courseId = deck.courseId
         title = deck.name
         courseName = deck.courseName
         deckIds = [deck.id]
@@ -37,12 +40,32 @@ struct DeckScope: Hashable {
 
     init(allCardsIn decks: [DeckRow], courseId: String, courseName: String) {
         id = "all:\(courseId)"
+        self.courseId = courseId
         title = "All Cards"
         self.courseName = courseName
         deckIds = decks.map(\.id)
         total = decks.reduce(0) { $0 + $1.total }
         due = decks.reduce(0) { $0 + $1.due }
         drafts = decks.reduce(0) { $0 + $1.drafts }
+    }
+
+    /// The decks an exam's study guides cover, for "Study for this exam".
+    init(exam: CalendarEvent, decks: [DeckRow], courseId: String, courseName: String) {
+        id = Self.examId(exam.id)
+        self.courseId = courseId
+        title = exam.title
+        self.courseName = courseName
+        deckIds = decks.map(\.id)
+        total = decks.reduce(0) { $0 + $1.total }
+        due = decks.reduce(0) { $0 + $1.due }
+        drafts = decks.reduce(0) { $0 + $1.drafts }
+    }
+
+    /// An exam's row in the deck column shares the deck selection.
+    static func examId(_ examEventId: String) -> String { "exam:\(examEventId)" }
+    static func examEventId(fromId id: String?) -> String? {
+        guard let id, id.hasPrefix("exam:") else { return nil }
+        return String(id.dropFirst(5))
     }
 }
 
@@ -288,6 +311,8 @@ final class Library {
     }
 
     @ObservationIgnored private var dashboardCache: (key: String, value: [Dashboard.DeckSummary])?
+    @ObservationIgnored var guidedExamsCache: (key: String, value: [CalendarEvent])?
+    @ObservationIgnored var examPageCache: (key: String, value: StudyGuideActions.ExamPage?)?
 
     /// Home's "Continue" opens a deck straight into flashcards: the deck
     /// page takes this on arrival.
