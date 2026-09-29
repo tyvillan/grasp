@@ -174,6 +174,8 @@ The Mac added study guides, which attach to an exam. Tyler's first real ones are
 
 ### Port request: study guides in the Windows app (Tyler asked 2026-09-28)
 
+**Done (Windows):** `ExamStudyView.swift` (exam rows under All Cards via `DeckScope.examId`, Guide / Study tabs, ratings, decks, practice, Add Study Guide… in the page and in the course ••• menu; Home and Calendar open the exam page through `Library.studyTarget(for:)`). Downloads are Markdown or PDF: `DocumentExport` prints the HTML headlessly with Edge or Chrome (this PC has no Edge, only Chrome and the WebView2 runtime). "Page N" opens the guide PDF at that page in the same browser. No Word export yet.
+
 The Mac and iPhone both have it now. The shared SwiftUI views are `Sources/GRASP/Shared/StudyGuide/ExamGuideViews.swift` (reference only). The iPhone screen `GRASPiOS/App/ExamScreen.swift` is the closest model for a small window. Everything below goes through GRASPCore `StudyGuideActions` and `StudyGuideExport`, with no new core logic needed:
 
 1. **Where:** in the deck column, one row per exam with a guide (`StudyGuideActions.guidedExams(courseId:since:)`, from yesterday on), above the decks, like "All Cards". Also make Home's and Calendar's exam rows open the exam page when `StudyGuide` rows exist for it.

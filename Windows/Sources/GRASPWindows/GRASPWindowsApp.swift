@@ -298,8 +298,10 @@ struct CourseView: View {
 
     var body: some View {
         let decks = library.decks(inCourse: course.id)
+        let exams = library.guidedExams(courseId: course.id)
         let allCards = DeckScope(allCardsIn: decks, courseId: course.id, courseName: course.name)
         let selectedRow = decks.first { $0.id == selectedDeckId }
+        let selectedExam = DeckScope.examEventId(fromId: selectedDeckId).flatMap { id in exams.first { $0.id == id } }
         let selected = selectedRow.map(DeckScope.init(deck:)) ?? allCards
 
         HStack(spacing: 0) {
@@ -307,12 +309,15 @@ struct CourseView: View {
                 course: course,
                 decks: decks,
                 allCards: allCards,
-                selectedId: selected.id,
+                exams: exams,
+                selectedId: selectedExam.map { DeckScope.examId($0.id) } ?? selected.id,
                 select: { selectedDeckId = $0 },
                 organize: { sheet in
                     // Archiving needs no questions: it's undone from Settings.
                     if case .archive(let course) = sheet {
                         library.setArchived(course.id, true)
+                    } else if case .addStudyGuide(let course) = sheet {
+                        addStudyGuide(to: course)
                     } else if case .addFiles(let course) = sheet {
                         Task {
                             guard let url = await chooseFile(
@@ -332,7 +337,10 @@ struct CourseView: View {
             .frame(maxHeight: .infinity)
             .background(GRASPColor.surface)
             Rectangle().fill(GRASPColor.hairlineStrong).frame(width: 1.0)
-            if decks.isEmpty {
+            if let selectedExam {
+                ExamStudyView(library: library, course: course, exam: selectedExam) { organizing = $0 }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if decks.isEmpty {
                 VStack(spacing: 8) {
                     Text(course.name).font(GRASPFont.title).foregroundColor(GRASPColor.textPrimary)
                     Text("No decks yet. Import this course's notes, or add a deck from the ••• menu.")
@@ -354,6 +362,27 @@ struct CourseView: View {
             }
         }
     }
+
+    /// The Mac's graduation-cap button: a guide file into the course, which
+    /// links itself to the exam its date matches, then that exam's page.
+    private func addStudyGuide(to course: Course) {
+        Task {
+            guard let url = await chooseFile(
+                title: "Choose a study guide for an exam in \(course.name)",
+                defaultButtonLabel: "Add",
+                allowSelectingFiles: true,
+                allowSelectingDirectories: false
+            ) else { return }
+            let read = await library.importStudyGuides([url], intoCourse: course.id)
+            if read == 0 {
+                library.status = "That file didn't read as a study guide. Guides are recognised by name, like \"Exam 1 Study Guide\" or \"Midterm Review\"."
+            } else if let exam = library.guidedExams(courseId: course.id).first {
+                selectedDeckId = DeckScope.examId(exam.id)
+            } else {
+                library.status = "Guide added. Give it an exam in Dates for This Course… to see its study page."
+            }
+        }
+    }
 }
 
 /// The course's decks, laid out like the Mac's `DeckListView`: name on the
@@ -362,6 +391,7 @@ struct DeckColumn: View {
     let course: Course
     let decks: [DeckRow]
     let allCards: DeckScope
+    let exams: [CalendarEvent]
     let selectedId: String
     /// Called with a deck id, or nil for "All Cards".
     let select: (String?) -> Void
@@ -377,6 +407,7 @@ struct DeckColumn: View {
                     Button("Edit Course…") { organize(.editCourse(course)) }
                     Button("Dates for This Course…") { organize(.dates(course)) }
                     Button("Add Files…") { organize(.addFiles(course)) }
+                    Button("Add Study Guide…") { organize(.addStudyGuide(course)) }
                     Button("Archive Course") { organize(.archive(course)) }
                     Button("Delete Course…") { organize(.deleteCourse(course)) }
                 }
@@ -392,6 +423,11 @@ struct DeckColumn: View {
                         name: "All Cards", isAllCards: true, cards: allCards.total, due: allCards.due,
                         isSelected: selectedId == allCards.id
                     ) { select(nil) }
+                    ForEach(exams, id: \.id) { exam in
+                        ExamColumnRow(exam: exam, isSelected: selectedId == DeckScope.examId(exam.id)) {
+                            select(DeckScope.examId(exam.id))
+                        }
+                    }
                     ForEach(decks, id: \.id) { deck in
                         DeckColumnRow(
                             name: deck.name, isAllCards: false, cards: deck.total, due: deck.due,

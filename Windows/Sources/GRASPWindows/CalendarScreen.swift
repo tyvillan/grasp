@@ -131,7 +131,7 @@ struct CalendarScreen: View {
 
     private func study(_ event: CalendarEvent) {
         guard let courseId = event.courseId else { return }
-        onStudy(courseId, event.deckId)
+        onStudy(courseId, library.studyTarget(for: event))
     }
 
     // MARK: - Header

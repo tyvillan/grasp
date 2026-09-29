@@ -5,7 +5,7 @@ import SwiftCrossUI
 extension Library {
     /// The course a deck page belongs to.
     func courseId(of scope: DeckScope) -> String? {
-        if scope.id.hasPrefix("all:") { return String(scope.id.dropFirst(4)) }
+        if let courseId = scope.courseId { return courseId }
         return decks.first { $0.id == scope.id }?.courseId
     }
 

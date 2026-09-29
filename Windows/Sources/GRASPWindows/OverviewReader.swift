@@ -75,7 +75,7 @@ struct OverviewPane: View {
     /// The course this deck (or All Cards) belongs to: one overview run per
     /// course at a time.
     private var courseId: String? {
-        if scope.id.hasPrefix("all:") { return String(scope.id.dropFirst(4)) }
+        if let courseId = scope.courseId { return courseId }
         return library.decks.first { $0.id == scope.id }?.courseId
     }
 
