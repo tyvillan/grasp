@@ -3,14 +3,16 @@ import GRASPCore
 
 /// One Quizlet-style Learn round: multiple choice / true-false / written
 /// questions, escalating with each card's own ladder level. A miss doesn't
-/// drop the card -- it's requeued a few slots further back in this same
-/// round's live queue, so it comes back before the round ends. Answering
-/// is select-then-submit, not tap-to-grade: choosing an option only
-/// highlights it (tap again to deselect, or pick a different one) until
-/// Submit locks it in and reveals correctness. A round-progress bar and a
-/// deck-wide mastery bar both track live, and each round ends at a
-/// checkpoint -- a summary with the choice to keep going or stop, rather
-/// than silently starting another round or ending the session outright.
+/// drop the card mid-round -- it's set aside and, once every card has been
+/// asked once, retested in a short review pass at the end (missing a card
+/// early in the round no longer costs it extra reps before the round is
+/// even done). Answering is select-then-submit, not tap-to-grade: choosing
+/// an option only highlights it (tap again to deselect, or pick a
+/// different one) until Submit locks it in and reveals correctness. A
+/// round-progress bar and a deck-wide mastery bar both track live, and
+/// each round ends at a checkpoint -- a summary with the choice to keep
+/// going or stop, rather than silently starting another round or ending
+/// the session outright.
 struct LearnRoundView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -18,8 +20,16 @@ struct LearnRoundView: View {
     let deckName: String
 
     @State private var queue: [LearnEngine.RoundQuestion] = []
+    /// Missed during the main pass; asked again, once each, once `queue`
+    /// runs out.
+    @State private var missedQueue: [LearnEngine.RoundQuestion] = []
+    @State private var isReviewingMisses = false
     @State private var roundTotal = 0
-    @State private var completedCardIds: Set<String> = []
+    @State private var mainAnswered = 0
+    /// Fixed the moment the review pass starts, so its own "N of M" doesn't
+    /// shrink as `missedQueue` is worked through.
+    @State private var reviewTotal = 0
+    @State private var reviewAnswered = 0
     @State private var roundCorrect = 0
     @State private var roundIncorrect = 0
     @State private var deckMastery: (mastered: Int, total: Int) = (0, 0)
@@ -42,8 +52,8 @@ struct LearnRoundView: View {
                 .frame(maxHeight: .infinity)
             } else if isAtCheckpoint {
                 checkpointView
-            } else if !queue.isEmpty {
-                questionView(queue[0])
+            } else if !currentQueue.isEmpty {
+                questionView(currentQueue[0])
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -58,11 +68,10 @@ struct LearnRoundView: View {
     /// They're deliberately drawn at different weights and tints so they
     /// aren't mistaken for the same measurement stacked twice.
     ///
-    /// `queue.count + completedCardIds.count` is invariant across a round:
-    /// a miss requeues (removes one, reinserts one) and a correct answer
-    /// only removes -- so completed-so-far divided by that sum is exactly
-    /// how far through the round's original cards this is, reaching 1.0
-    /// precisely when the round ends.
+    /// The main pass and the review pass each have their own fixed total
+    /// and their own answered count, so a card missed during the main pass
+    /// doesn't grow the total mid-pass -- it's added to `missedQueue`
+    /// instead and shows up once the review pass starts.
     private var header: some View {
         VStack(spacing: 14) {
             HStack(spacing: 12) {
@@ -93,7 +102,9 @@ struct LearnRoundView: View {
                 Spacer(minLength: 12)
 
                 if !isEmpty && !isAtCheckpoint {
-                    Text("Question \(min(completedCardIds.count + 1, roundTotal)) of \(roundTotal)")
+                    Text(isReviewingMisses
+                         ? "Reviewing missed \(min(reviewAnswered + 1, reviewTotal)) of \(reviewTotal)"
+                         : "Question \(min(mainAnswered + 1, roundTotal)) of \(roundTotal)")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textSecondary)
                         .monospacedDigit()
@@ -102,9 +113,16 @@ struct LearnRoundView: View {
 
             if !isEmpty {
                 VStack(spacing: 8) {
+                    if isReviewingMisses {
+                        Text("Reviewing what you missed")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     ProgressBar(
-                        value: completedCardIds.count, total: roundTotal,
-                        checkpoints: roundTotal, height: 7
+                        value: isReviewingMisses ? reviewAnswered : mainAnswered,
+                        total: isReviewingMisses ? reviewTotal : roundTotal,
+                        checkpoints: isReviewingMisses ? reviewTotal : roundTotal, height: 7
                     )
                     HStack(spacing: 8) {
                         ProgressBar(
@@ -188,8 +206,12 @@ struct LearnRoundView: View {
 
     private func startRound() {
         queue = (try? store.learnRound(deckIds: deckIds)) ?? []
+        missedQueue = []
+        isReviewingMisses = false
         roundTotal = queue.count
-        completedCardIds = []
+        mainAnswered = 0
+        reviewTotal = 0
+        reviewAnswered = 0
         roundCorrect = 0
         roundIncorrect = 0
         isAtCheckpoint = false
@@ -197,6 +219,10 @@ struct LearnRoundView: View {
         resetAnswerState()
         refreshMastery()
     }
+
+    /// Whichever pass is live: the main run-through, or the review of what
+    /// it missed.
+    private var currentQueue: [LearnEngine.RoundQuestion] { isReviewingMisses ? missedQueue : queue }
 
     private func refreshMastery() {
         deckMastery = (try? store.deckMastery(deckIds: deckIds)) ?? (0, 0)
@@ -245,7 +271,8 @@ struct LearnRoundView: View {
     @ViewBuilder
     private func actionButton(_ question: LearnEngine.RoundQuestion) -> some View {
         if isAnswered {
-            Button(queue.count == 1 ? "Finish round" : "Next question") {
+            Button(currentQueue.count == 1 && (isReviewingMisses || missedQueue.isEmpty)
+                   ? "Finish round" : "Next question") {
                 advance(question, wasCorrect: lastAnswerCorrect)
             }
             .buttonStyle(GRASPProminentButton())
@@ -479,16 +506,30 @@ struct LearnRoundView: View {
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         refreshMastery()
 
-        queue.removeFirst()
-        if wasCorrect {
-            completedCardIds.insert(cardId)
+        if isReviewingMisses {
+            missedQueue.removeFirst()
+            reviewAnswered += 1
         } else {
-            // Requeue a few slots back so it resurfaces before the round
-            // ends, rather than dropping it entirely on a miss.
-            let insertAt = min(2, queue.count)
-            queue.insert(question, at: insertAt)
+            queue.removeFirst()
+            mainAnswered += 1
+            // Set aside for the review pass rather than requeued here --
+            // every card gets asked once before any of them get asked
+            // twice, the way Quizlet retests what you missed at the end
+            // instead of resurfacing it mid-round.
+            if !wasCorrect { missedQueue.append(question) }
         }
         resetAnswerState()
-        if queue.isEmpty { isAtCheckpoint = true }
+
+        if !isReviewingMisses, queue.isEmpty {
+            if missedQueue.isEmpty {
+                isAtCheckpoint = true
+            } else {
+                isReviewingMisses = true
+                reviewTotal = missedQueue.count
+                reviewAnswered = 0
+            }
+        } else if isReviewingMisses, missedQueue.isEmpty {
+            isAtCheckpoint = true
+        }
     }
 }
