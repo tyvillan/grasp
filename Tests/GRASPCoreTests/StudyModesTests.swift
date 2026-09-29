@@ -59,7 +59,7 @@ struct StudyModesTests {
         #expect(level != .new)
     }
 
-    @Test("a test writes one item per question, scores on finish, and re-schedules misses")
+    @Test("a test writes one item per question, scores on finish, rewards hits and leaves misses untouched")
     func testFlow() async throws {
         let (db, deckId, _) = try await makeDeck()
         let config = TestBuilder.Config(questionCount: 5, allowMultipleChoice: true, allowWritten: true,
@@ -69,6 +69,9 @@ struct StudyModesTests {
         }
         #expect(questions.count == 5)
         #expect(try await db.queue.read { try TestItem.filter(Column("attemptId") == attemptId).fetchCount($0) } == 5)
+        let dueBefore = try await db.queue.read { db in
+            try questions.compactMap(\.cardId).map { try #require(try Card.fetchOne(db, key: $0)).due }
+        }
 
         try await db.queue.write { db in
             for index in questions.indices {
@@ -78,14 +81,32 @@ struct StudyModesTests {
         let score = try await db.queue.write { try Study.finishTest(attemptId: attemptId, db: $0) }
         #expect(score.correct == 3)
         #expect(score.total == 5)
-        let misses = try await db.queue.read { try Review.filter(Column("source") == "test").fetchCount($0) }
-        #expect(misses == questions.suffix(2).filter { $0.cardId != nil }.count)
+        // Only the three hits are graded (Good, a reward); the two misses
+        // get no review row at all, so their existing schedule is untouched.
+        let rewarded = try await db.queue.read { try Review.filter(Column("source") == "test").fetchCount($0) }
+        #expect(rewarded == questions.prefix(3).filter { $0.cardId != nil }.count)
+        let dueAfter = try await db.queue.read { db in
+            try questions.compactMap(\.cardId).map { try #require(try Card.fetchOne(db, key: $0)).due }
+        }
+        for (index, cardId) in questions.compactMap(\.cardId).enumerated() {
+            _ = cardId
+            if index < 3 {
+                #expect(dueAfter[index] > dueBefore[index])
+            } else {
+                #expect(dueAfter[index] == dueBefore[index])
+            }
+        }
 
         try await db.queue.write {
             try Study.overrideTestItemCorrect(attemptId: attemptId, ordinal: 4, cardId: questions[4].cardId, db: $0)
         }
         let attempt = try #require(try await db.queue.read { try TestAttempt.fetchOne($0, key: attemptId) })
         #expect(attempt.scoreNumerator == 4)
+        // The override rewards it now, since finishing never graded it.
+        if let cardId = questions[4].cardId {
+            let dueNow = try await db.queue.read { db in try #require(try Card.fetchOne(db, key: cardId)).due }
+            #expect(dueNow > dueBefore[4])
+        }
     }
 
     @Test("a test with every card excluded writes nothing")

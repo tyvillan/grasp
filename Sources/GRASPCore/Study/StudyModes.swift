@@ -132,8 +132,13 @@ extension Study {
         try item.save(db)
     }
 
-    /// Scores the attempt, then schedules every missed card for review
-    /// again -- a missed test question is as clear a lapse as an "Again".
+    /// Scores the attempt, then rewards every card you got right with a
+    /// Good grade in FSRS, the same credit a correct flashcard review
+    /// earns -- its next review moves further out. A card you missed keeps
+    /// its schedule exactly as it was: a test tells you what to go work on,
+    /// it doesn't tighten a card's schedule for answering wrong. (Learn
+    /// mode already works the same way in the other direction -- a miss
+    /// there only drops the card's ladder level, never FSRS.)
     @discardableResult
     public static func finishTest(attemptId: String, now: Date = Date(), db: Database) throws -> (correct: Int, total: Int) {
         let items = try TestItem.filter(Column("attemptId") == attemptId).fetchAll(db)
@@ -144,15 +149,16 @@ extension Study {
             attempt.scoreDenominator = items.count
             try attempt.save(db)
         }
-        for cardId in items.filter({ $0.isCorrect == false }).compactMap(\.cardId) {
-            try grade(cardId, grade: .again, source: "test", now: now, db: db)
+        for cardId in items.filter({ $0.isCorrect == true }).compactMap(\.cardId) {
+            try grade(cardId, grade: .good, source: "test", now: now, db: db)
         }
         return (correct, items.count)
     }
 
     /// "I was right": marks a graded-wrong answer correct. On a finished
-    /// attempt that also bumps the score and re-grades the card Good, since
-    /// finishing already scheduled it as a miss.
+    /// attempt that also bumps the score and rewards the card with a Good
+    /// grade -- finishing never touched it, since a miss isn't graded at
+    /// all, so this is the only place a corrected answer gets its credit.
     public static func overrideTestItemCorrect(attemptId: String, ordinal: Int, cardId: String?,
                                                now: Date = Date(), db: Database) throws {
         guard var item = try TestItem

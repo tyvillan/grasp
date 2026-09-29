@@ -3,10 +3,13 @@ import Foundation
 import GRDB
 @testable import GRASPCore
 
-/// Exercises the test lifecycle (build questions -> record answers ->
-/// score -> feed misses back into FSRS) against real vault content in an
-/// in-memory database, mirroring what AppStore.startTest/submitTestAnswer/
-/// finishTest do.
+/// Exercises the test lifecycle (build questions -> record answers -> score
+/// -> finish) against real vault content in an in-memory database, calling
+/// the same `Study` functions `AppStore.startTest`/`submitTestAnswer`/
+/// `finishTest` do -- rather than reimplementing their FSRS steps here,
+/// which is what let this suite drift out of sync with a real behavior
+/// change (finishing now rewards hits with Good instead of punishing
+/// misses with Again).
 @Suite("TestLifecycleIntegration", .enabled(if: VaultFixture.vaultExists, "needs the real notes vault on the Mac"))
 struct TestLifecycleIntegrationTests {
     private static let vaultRoot = URL(fileURLWithPath:
@@ -26,7 +29,20 @@ struct TestLifecycleIntegrationTests {
         return (db, deckId)
     }
 
-    @Test("a test built from a real deck produces graded, scoreable questions")
+    private struct Snapshot: Equatable {
+        let due: Date
+        let reps: Int
+        let state: Int
+    }
+
+    private static func snapshots(_ cardIds: [String], db: GRASPDatabase) async throws -> [String: Snapshot] {
+        try await db.queue.read { conn in
+            try Dictionary(uniqueKeysWithValues: Card.filter(cardIds.contains(Column("id"))).fetchAll(conn)
+                .map { ($0.id, Snapshot(due: $0.due, reps: $0.reps, state: $0.schedulerState)) })
+        }
+    }
+
+    @Test("a test built from a real deck rewards every hit and leaves every miss untouched")
     func testLifecycleScoresCorrectly() async throws {
         let (db, deckId) = try await Self.seededGeologyDeck()
 
@@ -39,6 +55,7 @@ struct TestLifecycleIntegrationTests {
         let config = TestBuilder.Config(questionCount: 10)
         let questions = TestBuilder.build(from: cards, config: config, using: &rng)
         #expect(questions.count == 10)
+        let cardIds = questions.compactMap(\.cardId)
 
         let attemptId = try await db.queue.write { conn -> String in
             let attempt = TestAttempt(deckId: deckId, configJSON: "{}", startedAt: Date())
@@ -53,68 +70,37 @@ struct TestLifecycleIntegrationTests {
             return attempt.id
         }
 
+        let before = try await Self.snapshots(cardIds, db: db)
+
         // Answer the first half correctly, the second half wrong.
-        for (index, question) in questions.enumerated() {
-            let isCorrect = index < questions.count / 2
-            try await db.queue.write { conn in
-                guard var item = try TestItem
-                    .filter(Column("attemptId") == attemptId)
-                    .filter(Column("ordinal") == index)
-                    .fetchOne(conn)
-                else { return }
-                item.givenAnswer = isCorrect ? question.correctAnswer : "wrong"
-                item.isCorrect = isCorrect
-                try item.save(conn)
+        try await db.queue.write { conn in
+            for (index, question) in questions.enumerated() {
+                let isCorrect = index < questions.count / 2
+                try Study.submitTestAnswer(attemptId: attemptId, ordinal: index,
+                                           given: isCorrect ? question.correctAnswer : "wrong",
+                                           isCorrect: isCorrect, db: conn)
             }
         }
 
-        let (correct, total) = try await db.queue.write { conn -> (Int, Int) in
-            let items = try TestItem.filter(Column("attemptId") == attemptId).fetchAll(conn)
-            let correctCount = items.filter { $0.isCorrect == true }.count
-            var attempt = try #require(try TestAttempt.fetchOne(conn, key: attemptId))
-            attempt.finishedAt = Date()
-            attempt.scoreNumerator = correctCount
-            attempt.scoreDenominator = items.count
-            try attempt.save(conn)
-            return (correctCount, items.count)
-        }
+        let (correct, total) = try await db.queue.write { try Study.finishTest(attemptId: attemptId, db: $0) }
         #expect(correct == 5)
         #expect(total == 10)
 
-        // Feed misses back into FSRS, exactly as AppStore.finishTest does.
-        let missedCardIds = try await db.queue.read { conn in
-            try TestItem
-                .filter(Column("attemptId") == attemptId)
-                .filter(Column("isCorrect") == false)
-                .fetchAll(conn)
-                .compactMap(\.cardId)
-        }
-        #expect(missedCardIds.count == 5)
-        for cardId in missedCardIds {
-            try await db.queue.write { conn in
-                guard var card = try Card.fetchOne(conn, key: cardId) else { return }
-                let snapshot = FSRS.Snapshot(
-                    stability: card.stability, difficulty: card.difficulty, reps: card.reps,
-                    lapses: card.lapses, state: FSRS.CardState(rawValue: card.schedulerState) ?? .new,
-                    lastReview: card.lastReview
-                )
-                let result = FSRS.schedule(snapshot, grade: .again, now: Date())
-                card.due = result.due
-                card.stability = result.stability
-                card.reps = result.reps
-                card.schedulerState = result.state.rawValue
-                try card.save(conn)
+        let after = try await Self.snapshots(cardIds, db: db)
+        for (index, question) in questions.enumerated() {
+            guard let cardId = question.cardId, let was = before[cardId], let now = after[cardId] else { continue }
+            if index < questions.count / 2 {
+                // Rewarded: graded Good, so its schedule moved forward.
+                #expect(now.reps == was.reps + 1)
+                #expect(now.due > was.due)
+            } else {
+                // A miss gets no grade at all -- exactly as it was before.
+                #expect(now == was)
             }
         }
-
-        let regradedCards = try await db.queue.read { conn in
-            try Card.filter(missedCardIds.contains(Column("id"))).fetchAll(conn)
-        }
-        #expect(regradedCards.allSatisfy { $0.reps == 1 })
-        #expect(regradedCards.allSatisfy { $0.schedulerState == FSRS.CardState.learning.rawValue })
     }
 
-    @Test("a card-less AI-generated test item grades by ordinal and is skipped by FSRS feedback")
+    @Test("a card-less AI-generated test item is skipped when rewarding hits")
     func aiGeneratedItemGradesWithoutACard() async throws {
         let (db, deckId) = try await Self.seededGeologyDeck()
 
@@ -139,36 +125,23 @@ struct TestLifecycleIntegrationTests {
             return attempt.id
         }
 
-        // Miss both, ordinal-keyed exactly like `AppStore.submitTestAnswer`.
-        for ordinal in [0, 1] {
-            try await db.queue.write { conn in
-                guard var item = try TestItem
-                    .filter(Column("attemptId") == attemptId)
-                    .filter(Column("ordinal") == ordinal)
-                    .fetchOne(conn)
-                else { return }
-                item.givenAnswer = "wrong"
-                item.isCorrect = false
-                try item.save(conn)
-            }
+        // Both right, ordinal-keyed exactly like `AppStore.submitTestAnswer`.
+        try await db.queue.write { conn in
+            try Study.submitTestAnswer(attemptId: attemptId, ordinal: 0, given: realCard.back, isCorrect: true, db: conn)
+            try Study.submitTestAnswer(attemptId: attemptId, ordinal: 1, given: "An AI-authored answer",
+                                       isCorrect: true, db: conn)
         }
 
-        let (correct, total) = try await db.queue.read { conn -> (Int, Int) in
-            let items = try TestItem.filter(Column("attemptId") == attemptId).fetchAll(conn)
-            return (items.filter { $0.isCorrect == true }.count, items.count)
-        }
-        #expect(correct == 0)
-        #expect(total == 2) // the AI item counts toward the score even with no backing card
+        let (correct, total) = try await db.queue.write { try Study.finishTest(attemptId: attemptId, db: $0) }
+        #expect(correct == 2) // the AI item counts toward the score even with no backing card
+        #expect(total == 2)
 
-        // Exactly `AppStore.gradeMissedTestItems`'s own logic: `.compactMap`
-        // over `cardId` naturally drops the AI item, no special-casing.
-        let missedCardIds = try await db.queue.read { conn in
-            try TestItem
-                .filter(Column("attemptId") == attemptId)
-                .filter(Column("isCorrect") == false)
-                .fetchAll(conn)
-                .compactMap(\.cardId)
-        }
-        #expect(missedCardIds == [realCard.id])
+        // The AI item has no card to reward -- `compactMap` over `cardId`
+        // naturally drops it, no special-casing -- so only the real card
+        // gets a review row.
+        let rewarded = try await db.queue.read { try Review.filter(Column("source") == "test").fetchCount($0) }
+        #expect(rewarded == 1)
+        let regraded = try await db.queue.read { try #require(try Card.fetchOne($0, key: realCard.id)) }
+        #expect(regraded.reps == realCard.reps + 1)
     }
 }

@@ -38,9 +38,10 @@ struct GradedQuestion: Identifiable {
 /// The custom-test flow: a config sheet, then a running test over its own
 /// fixed question set (no requeue-on-miss here, unlike Learn -- a test
 /// measures where you stand), then a results screen showing every miss
-/// beside the correct answer. Every miss also gets fed back into FSRS as
-/// an "Again" grade (`AppStore.finishTest`), so a test session also
-/// tightens the flashcard schedule.
+/// beside the correct answer. Every card you got right also gets fed back
+/// into FSRS as a Good grade (`AppStore.finishTest`), so a clean test
+/// session pushes those cards' schedules out; a miss isn't graded at all,
+/// so getting one wrong never tightens a card's schedule.
 struct TestSetupSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -458,8 +459,8 @@ struct TestRunView: View {
 
     /// The attempt isn't finished yet at this point, so this only needs to
     /// flip the just-saved `TestItem` row -- `AppStore.finishTest` will
-    /// score correctly off it later, and there's no FSRS "Again" grade to
-    /// undo yet either (that only happens at finish time).
+    /// score correctly and grade it Good off this row once it runs, since
+    /// a miss never gets graded in the first place.
     private func override(_ question: LearnEngine.RoundQuestion) {
         lastCorrect = true
         wasOverridden = true
@@ -532,9 +533,12 @@ struct TestResultsView: View {
                 .padding(.top, 14)
                 .animation(.default, value: correct)
 
-                Text("Missed questions from your cards were added back to your flashcard queue.")
+                Text("Cards you got right just earned a longer flashcard interval. A miss here doesn't "
+                     + "change anything -- it just tells you where to focus.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
                     .padding(.top, 12)
             }
             .padding(.horizontal, 24)
@@ -608,9 +612,9 @@ struct TestResultsView: View {
     /// Flips this one item locally (so the score/progress bar above update
     /// immediately) and persists the same change -- see
     /// `AppStore.overrideTestItemCorrect` for how it corrects the stored
-    /// score and, best-effort, the FSRS grade already applied for this
-    /// miss when `finishTest` ran (which it always has, by the time this
-    /// screen is showing).
+    /// score and grades the card Good, since `finishTest` (which has
+    /// already run, by the time this screen is showing) never graded a
+    /// miss for it to undo.
     private func override(_ item: GradedQuestion) {
         guard let index = graded.firstIndex(where: { $0.id == item.id }) else { return }
         graded[index].isCorrect = true

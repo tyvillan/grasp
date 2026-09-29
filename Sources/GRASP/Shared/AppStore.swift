@@ -781,8 +781,9 @@ final class AppStore {
         }
     }
 
-    /// Scores a test and feeds every miss back into FSRS as an "Again", so
-    /// a test also tightens the flashcard schedule, not just reports a score.
+    /// Scores a test and rewards every card you got right with a Good
+    /// grade in FSRS, so a test also credits what you knew -- a miss isn't
+    /// punished, so it doesn't also tighten the flashcard schedule.
     func finishTest(attemptId: String) throws -> (correct: Int, total: Int) {
         let result = try database.queue.write { db in try Study.finishTest(attemptId: attemptId, db: db) }
         reload()
@@ -790,9 +791,9 @@ final class AppStore {
     }
 
     /// "I was right" on a written answer fuzzy matching marked wrong. On a
-    /// finished attempt this also corrects the score and re-grades the card
-    /// Good against the Again `finishTest` gave it -- a best-effort
-    /// correction, since FSRS state isn't reversible. Idempotent.
+    /// finished attempt this also corrects the score and grades the card
+    /// Good -- `finishTest` never graded it (a miss gets no grade), so this
+    /// is where it earns credit now that it's marked right. Idempotent.
     func overrideTestItemCorrect(attemptId: String, ordinal: Int, cardId: String?) throws {
         try database.queue.write { db in
             try Study.overrideTestItemCorrect(attemptId: attemptId, ordinal: ordinal, cardId: cardId, db: db)
