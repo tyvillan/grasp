@@ -95,7 +95,7 @@ struct ImportScreen: View {
             defer { isImporting = false }
             do {
                 let targetCourse = try resolveCourse()
-                let copies = try copyIntoLibrary(picked, courseId: targetCourse)
+                let copies = try Self.copyIntoLibrary(picked, courseId: targetCourse)
                 let summary = await store.importFiles(copies, intoCourse: targetCourse)
                 result = describe(summary)
             } catch {
@@ -116,8 +116,10 @@ struct ImportScreen: View {
         return created.id
     }
 
-    /// Copies each picked file or folder into `Documents/Imported/<course>/`.
-    private func copyIntoLibrary(_ urls: [URL], courseId: String) throws -> [URL] {
+    /// Copies each picked file or folder into `Documents/Imported/<course>/`,
+    /// so the import can read it after the picker's access ends. Also used
+    /// for study guides (`ExamScreen`).
+    static func copyIntoLibrary(_ urls: [URL], courseId: String) throws -> [URL] {
         let fm = FileManager.default
         let folder = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Imported", isDirectory: true)

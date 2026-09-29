@@ -169,8 +169,28 @@ The Mac added study guides, which attach to an exam. Tyler's first real ones are
 - **Code:** `Sources/GRASPCore/StudyGuide/`: `StudyGuideDocument`, `StudyGuideParser` (rules-based), `StudyGuideMatcher` (links a guide to an exam and its parts to lecture decks), `StudyGuideModels`, `StudyGuideActions` (import, rematch, set exam/decks, rate a skill, delete, `examPage`, `examDeckIds`).
 - **Import:** `VaultScanner` treats a file titled like a study guide ("study guide", "exam N review"…) as not study-worthy: no parser cards, no General deck. Instead it calls `StudyGuideActions.importGuide`.
 - **Extractors:** `PDFExtractor.extractPages(from:)` returns one entry per page (the parser uses page numbers). On Windows it wraps `WindowsOCR`'s whole-document text as a single page, so guides read there have no page numbers. Per-page output from the PowerShell script would fix it. `Ingest/Extractors/TextRecognition.swift` is the shared Vision helper (Apple only).
-- **Porting:** the Mac's exam page is `Sources/GRASP/Views/StudyGuide/ExamStudyView.swift` (parts, question counts, skills rated can-do-cold / shaky / can't-yet, traps, practice problems with the answer hidden until tapped, and Flashcards/Learn/Test over the exam's decks via `DeckScope.exam`). No rush. A Windows build without this core code skips guide rows when it syncs, and those rows don't come back after updating until a guide changes again.
-- **Coming on the Mac:** weakest-skills-first, tests weighted by question count, traps as true/false questions, and an AI fallback parser. Clickable key terms may be reused on the exam page.
+- **Sync:** migration `v10_sync_pulled_tables` adds `syncState.pulledTables`. `SyncEngine.pull` pulls from the start once whenever that list lacks a table in `SyncSchema.tables`, so rows an older build skipped (study guides, for any device updated after they were written) arrive on the next sync. Nothing to do on Windows beyond building it. It also covers any future synced table.
+- **Downloads:** `Sources/GRASPCore/Export/` builds an `ExportDocument` from an exam page (`StudyGuideExport`) or overviews (`OverviewExport`) and writes Markdown or print HTML (`html(fontScale:)`). The Mac turns the HTML into PDF and Word, and the iPhone into PDF.
+
+### Port request: study guides in the Windows app (Tyler asked 2026-09-28)
+
+The Mac and iPhone both have it now. The shared SwiftUI views are `Sources/GRASP/Shared/StudyGuide/ExamGuideViews.swift` (reference only). The iPhone screen `GRASPiOS/App/ExamScreen.swift` is the closest model for a small window. Everything below goes through GRASPCore `StudyGuideActions` and `StudyGuideExport`, with no new core logic needed:
+
+1. **Where:** in the deck column, one row per exam with a guide (`StudyGuideActions.guidedExams(courseId:since:)`, from yesterday on), above the decks, like "All Cards". Also make Home's and Calendar's exam rows open the exam page when `StudyGuide` rows exist for it.
+2. **The exam page:** title, date and countdown (`CalendarEvent.countdownText()`), format (`ExamPage.format`), "About this exam" notes (collapsed), and the guides by name. Then each `PagePart` in order:
+   - number, title, "N of 40 questions" with a bar (`weight(of:)`);
+   - its lecture decks with a menu to change them (`setDecks`);
+   - skills with three rating chips, Can do / Shaky / Can't yet (`rate`, tap again to clear);
+   - traps, key terms, formulas, Remember, notes;
+   - **Practice**: question, with Show Answer revealing the steps and answer. When `usesFigure` is true, show "Uses a table or figure from page N" above it, since OCR couldn't read the table.
+   - **Examples**: illustrations, which have no answer.
+3. **Study for this exam:** Flashcards / Learn / Test over `StudyGuideActions.examDeckIds`, reusing the deck study screens with those deck ids.
+4. **Add Study Guide…:** the file dialog, then `VaultScanner.importPaths` into the course, then `setExam` for the new guide. Guides are recognized by file name (`StudyGuideMatcher.isStudyGuide`).
+5. **Download:** "with answer key" and "practice sheet", as Markdown (`markdown()`) and, if you can, PDF from `html()` (WebView2's PrintToPdf would do it).
+
+Coming on the Mac: weakest-skills-first, tests weighted by question count, traps as true/false questions, an AI fallback parser, formulas as numbered steps, built-in economics visuals and plain-English notes beside key terms.
+
+Tyler's two real guides are already in his synced library, so after a sync the Windows DB has them to test with (ECO 2023 Midterm 1, Microeconomic Principles). Mark any core change `[needs Mac check]` as usual.
 
 ## When you finish a chunk
 

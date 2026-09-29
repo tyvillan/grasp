@@ -113,9 +113,17 @@ public struct ExportDocument: Sendable, Equatable {
 
     /// A whole page, styled for print: black on white, a serif body, room
     /// in the margins. Web fonts are left out -- a PDF made offline has to
-    /// look the same. Sizes are set small: AppKit's HTML reader, which the
-    /// Mac's PDF and Word come from, draws CSS points about a third larger.
-    public func html() -> String {
+    /// look the same.
+    ///
+    /// `fontScale` multiplies every size. WebKit (the iPhone's PDF) draws
+    /// CSS points as written; AppKit's HTML reader, which the Mac's PDF and
+    /// Word come from, draws them about a third larger, so the Mac passes
+    /// `appKitFontScale`.
+    public func html(fontScale: Double = 1) -> String {
+        func pt(_ size: Double) -> String {
+            let scaled = (size * fontScale * 10).rounded() / 10
+            return (scaled == scaled.rounded() ? String(Int(scaled)) : String(scaled)) + "pt"
+        }
         var body: [String] = ["<h1>\(Self.inline(title))</h1>"]
         if let subtitle { body.append("<p class=\"subtitle\">\(Self.inline(subtitle))</p>") }
         for (index, block) in blocks.enumerated() {
@@ -171,34 +179,37 @@ public struct ExportDocument: Sendable, Equatable {
             <!DOCTYPE html>
             <html><head><meta charset="utf-8"><title>\(Self.escape(title))</title>
             <style>
-            body { font-family: "Iowan Old Style", Georgia, "Times New Roman", serif; font-size: 9pt;
+            body { font-family: "Iowan Old Style", Georgia, "Times New Roman", serif; font-size: \(pt(11.5));
                    line-height: 1.45; color: #1a1a1a; background: #ffffff; }
-            h1 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 17pt; margin: 0 0 4pt; }
-            h2 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 13pt; margin: 22pt 0 6pt;
+            h1 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: \(pt(22)); margin: 0 0 4pt; }
+            h2 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: \(pt(16)); margin: 22pt 0 6pt;
                  border-bottom: 1px solid #cccccc; padding-bottom: 3pt; }
-            h3 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10.5pt; margin: 16pt 0 4pt; }
-            h4 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9pt; margin: 12pt 0 3pt; }
+            h3 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: \(pt(13)); margin: 16pt 0 4pt; }
+            h4 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: \(pt(11.5)); margin: 12pt 0 3pt; }
             p { margin: 0 0 7pt; }
-            .subtitle { color: #555555; font-size: 9pt; margin-bottom: 14pt; }
-            .note { color: #555555; font-size: 8pt; font-style: italic; }
-            .label { color: #555555; font-size: 8pt; }
+            .subtitle { color: #555555; font-size: \(pt(11)); margin-bottom: 14pt; }
+            .note { color: #555555; font-size: \(pt(10)); font-style: italic; }
+            .label { color: #555555; font-size: \(pt(10)); }
             .callout { border-left: 3px solid #999999; padding: 2pt 0 2pt 10pt; margin: 8pt 0 10pt; }
             .callout .label { font-weight: bold; margin-bottom: 2pt; }
             .problem, .answer { margin: 0 0 12pt; }
             table { border-collapse: collapse; margin: 6pt 0 10pt; }
-            td { border: 1px solid #bbbbbb; padding: 3pt 8pt; text-align: right; font-family: Menlo, monospace; font-size: 8pt; }
+            td { border: 1px solid #bbbbbb; padding: 3pt 8pt; text-align: right; font-family: Menlo, monospace; font-size: \(pt(10)); }
             td.bar { border-left: 2px solid #333333; }
-            pre, code { font-family: Menlo, monospace; font-size: 7.5pt; }
+            pre, code { font-family: Menlo, monospace; font-size: \(pt(9.5)); }
             pre { background: #f4f4f4; padding: 6pt 8pt; white-space: pre-wrap; }
             ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
             li { margin-bottom: 3pt; }
-            .gap { font-size: 5pt; margin: 0; }
+            .gap { font-size: \(pt(6)); margin: 0; }
             hr { border: none; border-top: 1px solid #999999; margin: 18pt 0; }
             </style></head><body>
             \(body.joined(separator: "\n"))
             </body></html>
             """
     }
+
+    /// What the Mac passes to `html(fontScale:)`.
+    public static let appKitFontScale = 0.78
 
     static func escape(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;")

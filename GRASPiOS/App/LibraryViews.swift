@@ -126,9 +126,13 @@ struct CourseView: View {
     @Environment(AppStore.self) private var store
     let course: Course
     @State private var openedDeck: DeckRoute?
+    @State private var openedExam: String?
+    @State private var choosingGuide = false
+    @State private var guideMessage: String?
 
     var body: some View {
         let decks = (try? store.decks(inCourse: course.id)) ?? []
+        let exams = store.guidedExams(courseId: course.id)
         List {
             Section {
                 NavigationLink {
@@ -139,6 +143,30 @@ struct CourseView: View {
                                 let c = store.deckCounts[d.id] ?? (0, 0)
                                 return (t.0 + c.cardCount, t.1 + c.dueCount)
                             })
+                }
+            }
+            .graspSection()
+            Section {
+                ForEach(exams) { exam in
+                    NavigationLink {
+                        ExamScreen(courseId: course.id, examEventId: exam.id)
+                    } label: {
+                        ExamRow(exam: exam)
+                    }
+                }
+                Button {
+                    choosingGuide = true
+                } label: {
+                    Label("Add Study Guide…", systemImage: "doc.badge.plus")
+                        .graspType(.body)
+                }
+            } header: {
+                Text("Study guides")
+            } footer: {
+                if let guideMessage {
+                    Text(guideMessage)
+                } else if exams.isEmpty {
+                    Text("A study guide attaches to the exam it's for, by the date or \"Exam 1\" in it.")
                 }
             }
             .graspSection()
@@ -157,12 +185,38 @@ struct CourseView: View {
         .graspList()
         .navigationTitle(course.name)
         .navigationDestination(item: $openedDeck) { DeckScreen(route: $0) }
+        .navigationDestination(item: $openedExam) { ExamScreen(courseId: course.id, examEventId: $0) }
+        .fileImporter(isPresented: $choosingGuide, allowedContentTypes: ExamScreen.guideTypes,
+                      allowsMultipleSelection: true) { outcome in
+            if case .success(let urls) = outcome { addGuides(urls) }
+        }
         .onAppear {
-            guard openedDeck == nil, let name = DebugLaunch.deck else { return }
-            if name == "All Cards" {
+            guard openedDeck == nil, openedExam == nil, let name = DebugLaunch.deck else { return }
+            if name == "exam" {
+                openedExam = store.guidedExams(courseId: course.id).first?.id
+            } else if name == "All Cards" {
                 openedDeck = DeckRoute(scope: .course(course.id), name: name)
             } else if let deck = ((try? store.decks(inCourse: course.id)) ?? []).first(where: { $0.name == name }) {
                 openedDeck = DeckRoute(scope: .deck(deck.id), name: deck.name)
+            }
+        }
+    }
+}
+
+extension CourseView {
+    /// Guides picked here link to whichever exam they name (by date, then
+    /// "Exam N"), the same matching the Mac's vault import does.
+    private func addGuides(_ picked: [URL]) {
+        guideMessage = "Reading guide…"
+        Task {
+            do {
+                let copies = try ImportScreen.copyIntoLibrary(picked, courseId: course.id)
+                let summary = await store.importStudyGuides(copies, intoCourse: course.id)
+                guideMessage = summary.studyGuidesImported == 0
+                    ? "That file didn't read as a study guide. Guides are recognized by name, like \"Exam 1 Study Guide\"."
+                    : nil
+            } catch {
+                guideMessage = "Couldn't add the guide: \(error.localizedDescription)"
             }
         }
     }

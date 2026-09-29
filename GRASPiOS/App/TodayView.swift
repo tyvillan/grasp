@@ -112,6 +112,28 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionLabel("Coming up")
                 ForEach(exams) { upcoming in
+                    examRow(upcoming)
+                }
+            }
+        }
+    }
+
+    /// An exam with a study guide opens its page; the rest are just dates.
+    @ViewBuilder
+    private func examRow(_ upcoming: AppStore.UpcomingEvent) -> some View {
+        if let courseId = upcoming.event.courseId, store.hasStudyGuide(examEventId: upcoming.event.id) {
+            NavigationLink {
+                ExamScreen(courseId: courseId, examEventId: upcoming.event.id)
+            } label: {
+                examLine(upcoming, hasGuide: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            examLine(upcoming, hasGuide: false)
+        }
+    }
+
+    private func examLine(_ upcoming: AppStore.UpcomingEvent, hasGuide: Bool) -> some View {
                     HStack(spacing: 12) {
                         Image(systemName: upcoming.event.kind == .quiz ? "questionmark.circle" : "graduationcap")
                             .foregroundStyle(GRASPColor.accent)
@@ -126,10 +148,13 @@ struct TodayView: View {
                         Text(daysAway(upcoming.event.startsAt))
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.accent)
+                        if hasGuide {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
                     }
-                }
-            }
-        }
+                    .contentShape(Rectangle())
     }
 
     @ViewBuilder

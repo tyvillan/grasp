@@ -73,7 +73,7 @@ enum DocumentExporter {
 
     static func attributed(_ document: ExportDocument) throws -> NSAttributedString {
         try NSAttributedString(
-            data: Data(document.html().utf8),
+            data: Data(document.html(fontScale: ExportDocument.appKitFontScale).utf8),
             options: [.documentType: NSAttributedString.DocumentType.html,
                       .characterEncoding: String.Encoding.utf8.rawValue],
             documentAttributes: nil

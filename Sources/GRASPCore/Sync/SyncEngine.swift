@@ -253,11 +253,20 @@ public struct SyncEngine: Sendable {
 
     // MARK: - Pull
 
+    /// Every synced table's name, as `syncState.pulledTables` stores them.
+    static var tableList: String { SyncSchema.tables.map(\.name).joined(separator: ",") }
+
     private func pull(using transport: some SyncTransport) async throws -> Int {
-        let (cursor, deviceId) = try await database.queue.read { db in
+        let (storedCursor, deviceId, pulledTables) = try await database.queue.read { db in
             (try String.fetchOne(db, sql: "SELECT pullCursor FROM syncState WHERE id = 1"),
-             try String.fetchOne(db, sql: "SELECT deviceId FROM syncState WHERE id = 1") ?? "")
+             try String.fetchOne(db, sql: "SELECT deviceId FROM syncState WHERE id = 1") ?? "",
+             try String.fetchOne(db, sql: "SELECT pulledTables FROM syncState WHERE id = 1"))
         }
+        // A table this device hasn't pulled from the start -- new in this
+        // build -- means rows an older build skipped may sit behind the
+        // cursor: pull everything once. Re-applying the rest is harmless.
+        let pulled = Set((pulledTables ?? "").split(separator: ",").map(String.init))
+        let cursor = SyncSchema.tables.allSatisfy { pulled.contains($0.name) } ? storedCursor : nil
         var incoming: [SyncRecord] = []
         let since = cursor.map(Self.withOverlap)
         var offset = 0
@@ -268,9 +277,16 @@ public struct SyncEngine: Sendable {
             if page.count < Self.pullPageSize { break }
             offset += page.count
         }
-        guard !incoming.isEmpty else { return 0 }
-        let newCursor = incoming.compactMap(\.updatedAt).max() ?? cursor
-        return try await apply(incoming, deviceId: deviceId, newCursor: newCursor)
+        let newCursor = incoming.compactMap(\.updatedAt).max() ?? storedCursor
+        let applied = incoming.isEmpty ? 0 : try await apply(incoming, deviceId: deviceId, newCursor: newCursor)
+        // Only after the pull succeeded: a failed one tries again in full.
+        if pulledTables != Self.tableList {
+            try await database.queue.write { db in
+                try db.execute(sql: "UPDATE syncState SET pulledTables = ? WHERE id = 1",
+                               arguments: [Self.tableList])
+            }
+        }
+        return applied
     }
 
     /// Pulls re-read the last minute before the cursor. Rows committed

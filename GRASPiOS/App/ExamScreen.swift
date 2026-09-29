@@ -1,0 +1,148 @@
+import SwiftUI
+import UniformTypeIdentifiers
+import GRASPCore
+
+/// One exam's study page on the iPhone: its guides read together, part by
+/// part (the same `ExamGuideContent` the Mac shows), and a way into
+/// flashcards, Learn and tests over only the lecture decks the exam covers.
+struct ExamScreen: View {
+    @Environment(AppStore.self) private var store
+    let courseId: String
+    let examEventId: String
+
+    @State private var page: StudyGuideActions.ExamPage?
+    @State private var decks: [Deck] = []
+    @State private var openPage: PDFPageTarget?
+    @State private var choosingFiles = false
+    @State private var importing = false
+    @State private var message: String?
+
+    var body: some View {
+        ScrollView {
+            if let page {
+                VStack(alignment: .leading, spacing: 20) {
+                    studyButton(page)
+                    if importing {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Reading guide…").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                        }
+                    }
+                    if let message {
+                        Text(message).graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                    }
+                    ExamGuideContent(page: page, decks: decks) { openPage = $0 }
+                }
+                .padding(16)
+            } else {
+                ContentUnavailableView("Exam not found", systemImage: "calendar.badge.exclamationmark")
+                    .padding(.top, 80)
+            }
+        }
+        .background(GRASPColor.canvas)
+        .navigationTitle(page?.exam.title ?? "Exam")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { choosingFiles = true } label: {
+                        Label("Add Study Guide…", systemImage: "doc.badge.plus")
+                    }
+                    .disabled(importing)
+                    if let page, !page.parts.isEmpty {
+                        ExportMenu(title: "Download with Answer Key") { document(answerKey: true) }
+                        ExportMenu(title: "Download Practice Sheet") { document(answerKey: false) }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(item: $openPage) { GuidePageSheet(target: $0) }
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: Self.guideTypes,
+                      allowsMultipleSelection: true) { outcome in
+            if case .success(let urls) = outcome { addGuides(urls) }
+        }
+        .task(id: examEventId) { load() }
+        .onChange(of: store.revision) { load() }
+    }
+
+    static let guideTypes: [UTType] = [.pdf, .png, .jpeg, .plainText, UTType(filenameExtension: "md") ?? .plainText]
+
+    @ViewBuilder
+    private func studyButton(_ page: StudyGuideActions.ExamPage) -> some View {
+        if page.deckIds.isEmpty {
+            Text("None of this exam's parts is matched to a lecture deck yet. Pick decks for a part below.")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        } else {
+            NavigationLink {
+                DeckScreen(route: DeckRoute(scope: .exam(courseId: courseId, examEventId: examEventId),
+                                            name: page.exam.title))
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "graduationcap.fill").font(.system(size: 18))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Study for this exam").graspType(.rowTitle)
+                        Text(decks.filter { page.deckIds.contains($0.id) }.map(\.name).joined(separator: ", "))
+                            .graspType(.meta)
+                            .lineLimit(1)
+                            .opacity(0.85)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(14)
+                .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func load() {
+        page = store.examPage(examEventId: examEventId)
+        decks = (try? store.decks(inCourse: courseId)) ?? []
+    }
+
+    private func document(answerKey: Bool) -> ExportDocument? {
+        guard let page else { return nil }
+        let names = Dictionary(decks.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return StudyGuideExport.document(page: page, deckNames: names, answerKey: answerKey)
+    }
+
+    private func addGuides(_ picked: [URL]) {
+        importing = true
+        message = nil
+        Task {
+            defer { importing = false }
+            do {
+                let copies = try ImportScreen.copyIntoLibrary(picked, courseId: courseId)
+                let summary = await store.importStudyGuides(copies, intoCourse: courseId, examEventId: examEventId)
+                if summary.studyGuidesImported == 0 {
+                    message = "That file didn't read as a study guide. Guides are recognized by name, "
+                        + "like \"Exam 1 Study Guide\" or \"Midterm Review\"."
+                }
+            } catch {
+                message = "Couldn't add the guide: \(error.localizedDescription)"
+            }
+            load()
+        }
+    }
+}
+
+/// A course's exams that have study guides, for `CourseView`.
+struct ExamRow: View {
+    let exam: CalendarEvent
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "graduationcap").foregroundStyle(GRASPColor.accent).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(exam.title).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
+                Text("\(exam.startsAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(exam.countdownText())")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+            }
+        }
+    }
+}

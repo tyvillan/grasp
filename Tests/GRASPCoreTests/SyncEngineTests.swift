@@ -159,6 +159,33 @@ struct SyncEngineTests {
         #expect(inDeck == 0)
     }
 
+    @Test("a device that gains a synced table pulls from the start once, then carries on from its cursor")
+    func newTablePullsEverythingOnce() async throws {
+        let server = MemoryServer()
+        let mac = try Device()
+        try seedLibrary(mac)
+        try mac.engine.enable(accountUserId: "user-1", uploadExisting: true)
+        try await mac.engine.sync(using: server)
+
+        let phone = try Device()
+        try phone.engine.enable(accountUserId: "user-1", uploadExisting: false)
+        #expect(try await phone.engine.sync(using: server).pulled == 5)
+        #expect(try await phone.engine.sync(using: server).pulled == 0)
+
+        // An older build's phone: it has pulled past the rows, but its list
+        // lacks a table this build syncs (studyGuide, when it arrived).
+        try await phone.db.queue.write { db in
+            try db.execute(sql: "UPDATE syncState SET pulledTables = 'semester,course' WHERE id = 1")
+        }
+        let again = try await phone.engine.sync(using: server)
+        #expect(again.pulled == 5)
+        #expect(try await phone.engine.sync(using: server).pulled == 0)
+        let recorded = try await phone.db.queue.read { db in
+            try String.fetchOne(db, sql: "SELECT pulledTables FROM syncState WHERE id = 1")
+        }
+        #expect(recorded == SyncEngine.tableList)
+    }
+
     @Test("a local edit not yet pushed wins over an older one pulled from elsewhere")
     func pendingLocalEditWins() async throws {
         let server = MemoryServer()

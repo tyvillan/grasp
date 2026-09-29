@@ -56,7 +56,18 @@ struct VaultPathMapTests {
 
     @Test("an import through iCloud for Windows updates the Mac's notes instead of duplicating them")
     func scanMatchesMacRows() async throws {
-        let drive = FileManager.default.temporaryDirectory
+        // On a Mac the temp folder is /var/..., a link to /private/var/...,
+        // and the scanner walks the resolved path, so a drive given as
+        // /var/... would match none of its files. (`resolvingSymlinksInPath`
+        // strips /private back off, so it's no help here.)
+        var temp = FileManager.default.temporaryDirectory
+        #if canImport(Darwin)
+        if let real = realpath(temp.path, nil) {
+            temp = URL(fileURLWithPath: String(cString: real), isDirectory: true)
+            free(real)
+        }
+        #endif
+        let drive = temp
             .appendingPathComponent("grasp-icloud-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: drive) }
         let vault = drive.appendingPathComponent("iCloud~md~obsidian", isDirectory: true)

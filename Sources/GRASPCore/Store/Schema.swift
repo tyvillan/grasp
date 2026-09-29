@@ -387,6 +387,18 @@ enum Schema {
             try SyncSchema.installTriggers(db)
         }
 
+        // Which synced tables this device has pulled from the start. A
+        // device on an older build skips rows for tables it doesn't have
+        // yet, and its pull cursor moves past them; without this, updating
+        // it (the iPhone, after study guides) left those rows on the server
+        // but never on the device. NULL: nothing recorded, so the next sync
+        // pulls everything once. See `SyncEngine.pull`.
+        migrator.registerMigration("v10_sync_pulled_tables") { db in
+            try db.alter(table: "syncState") { t in
+                t.add(column: "pulledTables", .text)
+            }
+        }
+
         return migrator
     }
 }
