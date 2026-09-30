@@ -399,17 +399,32 @@ struct NoteScreen: View {
     @Environment(AppStore.self) private var store
     let materialId: String
 
+    /// The lecture/chapter and date, read the same way an overview's own
+    /// header does -- so a note filed as
+    /// "2026-08-27_Lecture-02_Row-Reduction-and-Echelon-Forms" reads as
+    /// "LECTURE 2 · AUG 27" here too, not as its raw filename.
+    private var heading: (kicker: String?, title: String)? {
+        ((try? store.material(materialId)) ?? nil).map(DeckOverviewReader.lessonHeading(for:))
+    }
+
     var body: some View {
         ScrollView {
-            Text((try? store.noteText(forMaterial: materialId))??.reflowed ?? "This note's text isn't available.")
-                .graspType(.prose)
-                .foregroundStyle(GRASPColor.textPrimary)
-                .textSelection(.enabled)
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                if let kicker = heading?.kicker {
+                    Text(kicker)
+                        .graspType(.eyebrow)
+                        .foregroundStyle(GRASPColor.accent)
+                }
+                Text((try? store.noteText(forMaterial: materialId))??.reflowed ?? "This note's text isn't available.")
+                    .graspType(.prose)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .textSelection(.enabled)
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(GRASPColor.canvas.ignoresSafeArea())
-        .navigationTitle((try? store.material(materialId))??.title ?? "Note")
+        .navigationTitle(heading?.title ?? (try? store.material(materialId))??.title ?? "Note")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

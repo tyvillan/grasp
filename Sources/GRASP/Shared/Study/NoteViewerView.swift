@@ -12,10 +12,25 @@ struct NoteViewerView: View {
     @State private var noteText: NoteText?
     @State private var showRaw = false
 
+    /// The lecture/chapter and date, read the same way an overview's own
+    /// header does -- so a note filed as
+    /// "2026-08-27_Lecture-02_Row-Reduction-and-Echelon-Forms" reads as
+    /// "LECTURE 2 · AUG 27" here too, not as its raw filename.
+    private var heading: (kicker: String?, title: String)? {
+        material.map(DeckOverviewReader.lessonHeading(for:))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(material?.title ?? "Note").font(.headline)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let kicker = heading?.kicker {
+                        Text(kicker)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(GRASPColor.accent)
+                    }
+                    Text(heading?.title ?? material?.title ?? "Note").font(.headline)
+                }
                 Spacer()
                 Toggle("Raw", isOn: $showRaw).toggleStyle(.button)
                 Button("Close") { dismiss() }

@@ -194,6 +194,10 @@ Coming on the Mac: weakest-skills-first, tests weighted by question count, traps
 
 Tyler's two real guides are already in his synced library, so after a sync the Windows DB has them to test with (ECO 2023 Midterm 1, Microeconomic Principles). Mark any core change `[needs Mac check]` as usual.
 
+## From the Mac session: source note view is missing its lecture/date (Tyler asked 2026-09-30)
+
+Tyler's notes are named by lecture and date (`2026-08-27_Lecture-02_Row-Reduction-and-Echelon-Forms.md`), and `Material.chapter`/`Material.noteDate` already carry that. `DeckOverviewReader.lessonHeading(for:)` turns it into `(kicker: "LECTURE 2 · AUG 27", title: "Row Reduction and Echelon Forms")`, which is what an overview's own header already shows. The Show Source Note view in `CardList.swift` doesn't use it at all -- it shows only the note's raw text, no title and no date. Small fix, same shape as the Mac's and iPhone's: call `lessonHeading(for:)` on the card's material and show the kicker line (and the humanized title in place of the raw filename) above the note text. No core change.
+
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.
