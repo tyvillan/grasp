@@ -55,6 +55,7 @@ struct DeckListView: View {
     let onAddStudyGuide: () -> Void
     @AppStorage("deckSortOption") private var sortOption: DeckSortOption = .deckOrder
     @State private var decks: [Deck] = []
+    @State private var kickers: [String: String] = [:]
     @State private var exams: [CalendarEvent] = []
     @State private var renamingDeck: Deck?
     @State private var deletingDeck: Deck?
@@ -102,7 +103,8 @@ struct DeckListView: View {
 
                 ForEach(sortedDecks) { deck in
                     let counts = store.deckCounts[deck.id] ?? (0, 0)
-                    DeckRow(name: deck.name, cardCount: counts.cardCount, dueCount: counts.dueCount)
+                    DeckRow(name: deck.name, kicker: kickers[deck.id],
+                            cardCount: counts.cardCount, dueCount: counts.dueCount)
                         .tag(deck.id)
                         .listRowBackground(
                             dropTargetDeckId == deck.id ? GRASPColor.accentSoft : Color.clear
@@ -191,6 +193,7 @@ struct DeckListView: View {
 
     private func load() {
         decks = (try? store.decks(inCourse: courseId)) ?? []
+        kickers = store.deckKickers(forDecks: decks.map(\.id))
         exams = store.guidedExams(courseId: courseId)
     }
 
@@ -271,14 +274,22 @@ private struct ExamRow: View {
 /// with each deck's name length.
 private struct DeckRow: View {
     let name: String
+    let kicker: String?
     let cardCount: Int
     let dueCount: Int
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(name)
-                .graspType(.rowTitle)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                if let kicker {
+                    Text(kicker)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                }
+                Text(name)
+                    .graspType(.rowTitle)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 4)
             if dueCount > 0 {
                 Text("\(dueCount)")

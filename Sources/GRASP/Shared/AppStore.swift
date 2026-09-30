@@ -441,6 +441,24 @@ final class AppStore {
         }
     }
 
+    /// Each deck's "LECTURE 2 · AUG 27"-style kicker, from its earliest
+    /// linked note -- the same `lessonHeading(for:)` the Overview tab and
+    /// the source-note viewers use, so `DeckListView`'s sidebar rows show a
+    /// lecture's date too when notes are organized by lecture rather than
+    /// topic. A deck with no linked material (hand-made, or notes named by
+    /// topic) simply gets no kicker.
+    func deckKickers(forDecks deckIds: [String]) -> [String: String] {
+        (try? database.queue.read { db -> [String: String] in
+            var result: [String: String] = [:]
+            for deckId in deckIds {
+                guard let first = try OverviewQueries.materials(forDecks: [deckId], db: db).first,
+                      let kicker = DeckOverviewReader.lessonHeading(for: first).kicker else { continue }
+                result[deckId] = kicker
+            }
+            return result
+        }) ?? [:]
+    }
+
     func cards(inDeck deckId: String) throws -> [Card] {
         try cards(inDecks: [deckId])
     }
