@@ -434,11 +434,12 @@ final class Library {
     }
 
     /// A note's text, for reading a search hit in full.
-    func note(_ materialId: String) -> (title: String, text: String)? {
+    func note(_ materialId: String) -> (kicker: String?, title: String, text: String)? {
         try? database.queue.read { db in
             guard let material = try Material.fetchOne(db, key: materialId),
                   let note = try NoteText.fetchOne(db, key: materialId) else { return nil }
-            return (DeckOverviewReader.lessonHeading(for: material).title, note.raw)
+            let heading = DeckOverviewReader.lessonHeading(for: material)
+            return (heading.kicker, heading.title, note.raw)
         }
     }
 
@@ -576,7 +577,7 @@ final class Library {
         let key = "\(revision)|\(deckIds.joined(separator: ","))"
         if let cached = overviewCache, cached.key == key { return cached.value }
         let value = try? database.queue.read { db in
-            try DeckOverviewReader.read(deckIds: deckIds, db: db, metrics: Self.diagramMetrics, cache: diagramCache)
+            try DeckOverviewReader.read(deckIds: deckIds, db: db, cache: diagramCache)
         }
         overviewCache = (key, value)
         return value
@@ -638,14 +639,6 @@ final class Library {
             installed: await probe.installedModels())
     }
 
-    /// Concept-map labels at 12 pt Segoe UI: about 6.6 pt a character on
-    /// average, rounded up so a label never clips.
-    private static let diagramMetrics: DiagramMetrics = {
-        var metrics = DiagramMetrics()
-        metrics.characterWidth = 7
-        metrics.lineHeight = 16
-        return metrics
-    }()
 }
 
 /// A row reduction ready to draw: `states[0]` is the starting matrix and

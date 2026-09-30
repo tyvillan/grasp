@@ -223,7 +223,7 @@ struct OverviewPane: View {
         let writable = overview.writable.count
         if writable > 0 {
             let what = "GRASP can read the \(writable) note\(writable == 1 ? "" : "s") behind this deck and write "
-                + "a short lesson for each: the key ideas, terms, worked examples and a concept map."
+                + "a short lesson for each: the key ideas, terms, worked examples."
             if !checkedModel { return what }
             return model == nil
                 ? what + " That needs Ollama running on this PC (Settings shows its status), or write them on "
@@ -269,9 +269,6 @@ private struct LessonContents: View {
                 }
                 if !lesson.takeaways.isEmpty {
                     railLine("Key takeaways")
-                }
-                if lesson.diagram != nil || lesson.mermaidSource != nil {
-                    railLine("How it all fits together")
                 }
                 if entries.count > 1 {
                     SectionLabel("Lessons").padding(.top, 18)
@@ -416,10 +413,6 @@ struct LessonView: View {
             if !overview.takeaways.isEmpty {
                 TakeawaysView(takeaways: overview.takeaways)
             }
-            if overview.diagram != nil || overview.mermaidSource != nil {
-                DiagramSection(diagram: overview.diagram, source: overview.mermaidSource,
-                               linkedNodes: overview.linkedNodes, onOpenCards: onOpenCards)
-            }
         }
     }
 }
@@ -541,35 +534,6 @@ private struct TakeawayRow: View {
             Text(LessonText.clean(text)).font(LessonFont.prose).foregroundColor(GRASPColor.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
-        }
-    }
-}
-
-private struct DiagramSection: View {
-    let diagram: LaidOutDiagram?
-    let source: String?
-    let linkedNodes: [String: [String]]
-    let onOpenCards: ([String]) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("How it all fits together").font(LessonFont.h2).foregroundColor(GRASPColor.textPrimary)
-            if let diagram {
-                ConceptMapView(diagram: diagram, linkedNodes: linkedNodes, onOpenCards: onOpenCards)
-                if !linkedNodes.values.allSatisfy(\.isEmpty) {
-                    Text("Green boxes name one of your cards; click one to see it.")
-                        .font(GRASPFont.meta)
-                        .foregroundColor(GRASPColor.textTertiary)
-                }
-            } else if let source {
-                // Couldn't be parsed: the source is more use than nothing.
-                Text(source)
-                    .font(LessonFont.code)
-                    .foregroundColor(GRASPColor.textSecondary)
-                    .padding(14)
-                    .background(GRASPColor.surface)
-                    .cornerRadius(8)
-            }
         }
     }
 }

@@ -152,9 +152,14 @@ struct NoteReader: View {
         let note = library.note(materialId)
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(note?.title ?? "Note")
-                    .font(Font.system(size: 18, weight: .semibold))
-                    .foregroundColor(GRASPColor.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let kicker = note?.kicker {
+                        Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
+                    }
+                    Text(note?.title ?? "Note")
+                        .font(Font.system(size: 18, weight: .semibold))
+                        .foregroundColor(GRASPColor.textPrimary)
+                }
                 Spacer()
                 Button(closeLabel) { close() }.fixedSize()
             }
