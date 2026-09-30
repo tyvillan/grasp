@@ -29,7 +29,6 @@ struct CardAITests {
         }
         func generateOverview(noteTitle: String, courseName: String, noteContext: String,
                               includeFormulas: Bool, partLabel: String?) async -> GeneratedOverview { .empty }
-        func generateDiagram(noteTitle: String, courseName: String, conceptOutline: String) async -> String { "" }
         func generateFigures(noteTitle: String, courseName: String, noteContext: String,
                              sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
     }

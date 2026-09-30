@@ -427,10 +427,11 @@ struct WriteOverviewsSheet: View {
     let onCancel: () -> Void
 
     private var estimate: String {
-        // Measured, not hoped: qwen3.5 on an M-series laptop takes three to
-        // five minutes a note -- a plan, a call per section, figures, and a
-        // diagram. The old "30 seconds a note" promised a two-minute run
-        // that took forty.
+        // Measured, not hoped: qwen3.5 on an M-series laptop took three to
+        // five minutes a note -- a plan, a call per section, figures, and
+        // (formerly) a diagram. The old "30 seconds a note" promised a
+        // two-minute run that took forty. Dropping the diagram call should
+        // make this a slight overestimate now, not a fresh measurement.
         let seconds = noteCount * 240
         let minutes = seconds / 60
         if minutes < 90 { return "roughly \(minutes) minutes" }
@@ -535,9 +536,6 @@ private struct LessonContents: View {
                         }
                         if !entry.takeaways.isEmpty {
                             link("Key takeaways", anchor: "\(entry.materialId)#takeaways", isTitle: false)
-                        }
-                        if entry.diagram != nil || entry.mermaidSource != nil {
-                            link("How it all fits together", anchor: "\(entry.materialId)#map", isTitle: false)
                         }
                     }
                 }

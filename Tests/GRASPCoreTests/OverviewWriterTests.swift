@@ -5,8 +5,7 @@ import GRDB
 
 @Suite("Overview writer")
 struct OverviewWriterTests {
-    /// Answers every overview call with one section, and draws a two-box
-    /// diagram.
+    /// Answers every overview call with one section.
     private final class OneSectionGenerator: CardGenerator, @unchecked Sendable {
         var available = true
         var overviewCalls = 0
@@ -27,9 +26,6 @@ struct OverviewWriterTests {
                 title: "Light becomes sugar",
                 sections: [OverviewSection(heading: "Chlorophyll catches light", paragraphs: ["Chlorophyll absorbs light."])]
             ))
-        }
-        func generateDiagram(noteTitle: String, courseName: String, conceptOutline: String) async -> String {
-            "graph TD\nA[Light]-->B[Sugar]"
         }
         func generateFigures(noteTitle: String, courseName: String, noteContext: String,
                              sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
@@ -61,7 +57,6 @@ struct OverviewWriterTests {
         let stored = try #require(try await db.queue.read { try NoteOverview.fetchOne($0, key: id) })
         #expect(stored.sourceContentHash == "hash-1")
         #expect(stored.document()?.sections.first?.heading == "Chlorophyll catches light")
-        #expect(stored.mermaidSource?.contains("Light") == true)
 
         let calls = generator.overviewCalls
         #expect(await OverviewWriter.write(materialId: id, using: generator, database: db) == .unchanged)

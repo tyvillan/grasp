@@ -226,7 +226,7 @@ struct CardGeneratorTests {
 
     // MARK: - Overview generation
 
-    @Test("no generator means no overview and no diagram, never a fabricated one")
+    @Test("no generator means no overview, never a fabricated one")
     func noGeneratorProducesNothing() async {
         let generator = NoGenerator()
         let overview = await generator.generateOverview(
@@ -234,9 +234,6 @@ struct CardGeneratorTests {
             includeFormulas: true, partLabel: nil
         )
         #expect(overview == .empty)
-        #expect(await generator.generateDiagram(
-            noteTitle: "L", courseName: "Biology", conceptOutline: "outline"
-        ) == "")
     }
 
     @Test("Ollama returns an empty overview rather than throwing when no server is running")
@@ -327,36 +324,15 @@ struct CardGeneratorTests {
         #expect(!whole.contains("one piece of it"))
     }
 
-    @Test("the diagram prompt constrains the model to the subset the parser reads")
-    func diagramPromptShape() {
-        let prompt = OllamaGenerator.diagramPrompt(
-            noteTitle: "Cell Cycle", courseName: "Biology 101", conceptOutline: "- Mitosis"
+    @Test("the section prompt asks for every one of a section's several procedures, not just the first")
+    func sectionPromptCoversEveryProcedure() {
+        let prompt = OllamaGenerator.sectionPrompt(
+            courseName: "Matrix Theory", noteContext: "Elementary row operations: Replacement, Interchange, Scaling.",
+            heading: "Only Replacement, Interchange, and Scaling preserve all solutions",
+            covers: "the three row operations", lessonHeadings: ["A claim"]
         )
-        #expect(prompt.contains("graph TD"))
-        #expect(prompt.contains("graph LR"))
-        #expect(prompt.contains("mindmap"))
-        #expect(prompt.contains("Do not write subgraph"))
-        #expect(prompt.contains("between 4 and 12 boxes"))
-        #expect(prompt.contains("NONE"))
-        #expect(prompt.contains("No other text."))
-    }
-
-    @Test("the diagram prompt never shows a placeholder a model could copy literally")
-    func diagramPromptHasNoCopyablePlaceholder() {
-        // A real 7B read "A node is written id[Label]" and used `id` as the
-        // actual name of every box. They all collapsed into one node, every
-        // edge became a self-loop, and the concept map rendered as a single
-        // rectangle in an empty frame. The fix is a worked example with
-        // distinct, meaningful names and an explicit ban.
-        let prompt = OllamaGenerator.diagramPrompt(
-            noteTitle: "L", courseName: "Biology", conceptOutline: "- A"
-        )
-        #expect(!prompt.contains("id[Label]"))
-        #expect(prompt.contains("never use the word \"id\" as a name"))
-        #expect(prompt.contains("Give every box a different name"))
-        #expect(prompt.contains("Never link a box to itself"))
-        // A complete, correct example the model can pattern-match against.
-        #expect(prompt.contains("scarcity[Wants exceed resources]"))
+        #expect(prompt.contains("several distinct operations or stages"))
+        #expect(prompt.contains("give every one of them its own step with real numbers"))
     }
 
     @Test("salvages JSON out of a fence or a preamble, and leaves clean JSON alone")
@@ -373,19 +349,6 @@ struct CardGeneratorTests {
         #expect(OllamaGenerator.salvageJSON("") == "")
         #expect(OllamaGenerator.salvageJSON("no json here") == "no json here")
         #expect(OllamaGenerator.salvageJSON("{unclosed") == "{unclosed")
-    }
-
-    @Test("salvages Mermaid from a fence, a preamble, or not at all")
-    func salvageMermaid() {
-        #expect(OllamaGenerator.salvageMermaid("graph TD\nA-->B") == "graph TD\nA-->B")
-        #expect(OllamaGenerator.salvageMermaid("```mermaid\ngraph TD\nA-->B\n```") == "graph TD\nA-->B")
-        #expect(OllamaGenerator.salvageMermaid("Sure! Here you go:\ngraph TD\nA-->B") == "graph TD\nA-->B")
-        #expect(OllamaGenerator.salvageMermaid("mindmap\n  Root") == "mindmap\n  Root")
-        // The explicit "nothing worth drawing" answer, and an apology with
-        // no diagram in it, both mean the same thing to a caller.
-        #expect(OllamaGenerator.salvageMermaid("NONE") == "")
-        #expect(OllamaGenerator.salvageMermaid("I'm sorry, I can't do that.") == "")
-        #expect(OllamaGenerator.salvageMermaid("") == "")
     }
 
     @Test("an unreadable overview response is empty, not a crash")

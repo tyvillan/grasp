@@ -282,16 +282,6 @@ public struct OllamaGenerator: CardGenerator {
         return GeneratedOverview(document: Self.parseOverviewResponse(content))
     }
 
-    public func generateDiagram(
-        noteTitle: String, courseName: String, conceptOutline: String
-    ) async -> String {
-        guard !conceptOutline.isEmpty else { return "" }
-        let prompt = Self.diagramPrompt(
-            noteTitle: noteTitle, courseName: courseName, conceptOutline: conceptOutline
-        )
-        guard let content = try? await chat(prompt: prompt, json: false, maxTokens: 600) else { return "" }
-        return Self.salvageMermaid(content)
-    }
 
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         guard !noteContext.isEmpty, !section.paragraphs.isEmpty else { return [] }
@@ -819,10 +809,11 @@ public struct OllamaGenerator: CardGenerator {
         struct Message: Decodable { let content: String }
     }
 
-    /// `json: false` drops Ollama's JSON grammar mode. Only the diagram
-    /// pass wants that, for the reason on `CardGenerator.generateDiagram`:
-    /// Mermaid is multi-line, and a newline inside a JSON string is where a
-    /// 7B model's response breaks.
+    /// `json: false` drops Ollama's JSON grammar mode, for a call whose
+    /// answer isn't JSON at all. No caller needs that any more since the
+    /// concept-map pass (the one multi-line answer this file ever asked
+    /// for in plain text) was dropped, but the knob stays for whatever
+    /// comes next that isn't JSON either.
     ///
     /// `maxTokens` caps how much one answer can write. Generation is where
     /// the time and heat go -- reading a note takes seconds, writing about
@@ -923,35 +914,6 @@ public struct OllamaGenerator: CardGenerator {
         return String(text[first...last])
     }
 
-    /// The plain-text counterpart to `salvageJSON`. Strips a fence the
-    /// prompt already forbade, treats the explicit "NONE" answer as
-    /// nothing, and otherwise drops everything before the first line that
-    /// opens a diagram the parser accepts. `MermaidParser` would reject a
-    /// preamble anyway -- doing it here is what keeps an empty string,
-    /// rather than a paragraph of apology, in `mermaidSource`.
-    static func salvageMermaid(_ raw: String) -> String {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.hasPrefix("```") {
-            if let newline = text.firstIndex(of: "\n") {
-                text = String(text[text.index(after: newline)...])
-            }
-            if let close = text.range(of: "```", options: .backwards) {
-                text = String(text[..<close.lowerBound])
-            }
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !text.isEmpty else { return "" }
-        if text.uppercased() == "NONE" { return "" }
-
-        let lines = text.components(separatedBy: "\n")
-        guard let start = lines.firstIndex(where: { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
-            return trimmed == "mindmap"
-                || trimmed.hasPrefix("graph ") || trimmed == "graph"
-                || trimmed.hasPrefix("flowchart ")
-        }) else { return "" }
-        return lines[start...].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 
     // MARK: - Prompts
 
@@ -1136,11 +1098,9 @@ public struct OllamaGenerator: CardGenerator {
     /// presenting itself as describing the lecture. `OverviewChunker` has
     /// already guaranteed what arrives here fits.
     ///
-    /// Second, it insists on single-line strings everywhere. The one truly
-    /// multi-line artifact in this feature, the Mermaid diagram, is asked
-    /// for separately and in plain text by `diagramPrompt`, because an
-    /// unescaped newline inside a JSON string is where a local 7B model's
-    /// response actually breaks.
+    /// Second, it insists on single-line strings everywhere: an unescaped
+    /// newline inside a JSON string is where a local 7B model's response
+    /// actually breaks.
     ///
     /// Third -- and this is the one that inverts every other prompt in this
     /// file -- it asks the model to *explain* rather than to stay inside
@@ -1466,11 +1426,14 @@ public struct OllamaGenerator: CardGenerator {
         notes give nothing to base it on. An empty list is fine.
         - example: if this part of the notes works through something step by step -- a \
         calculation, a derivation, an algorithm, a procedure, a process -- give those steps here \
-        instead of narrating them in a paragraph. A title naming what is worked, a setup stating \
-        the starting point, two to six steps each with a label of two to four words, the action \
-        taken, the result it produced copied from the notes, and why that step, then the outcome. \
-        Use only steps and values the notes actually show. Use null if the notes don't work one \
-        through here.
+        instead of narrating them in a paragraph. When this section's terms are themselves \
+        several distinct operations or stages -- three kinds of row operation, three phases of a \
+        process -- the example is what makes each one concrete: give every one of them its own \
+        step with real numbers, not just the first, leaving the rest as a one-line mention under \
+        terms. A title naming what is worked, a setup stating the starting point, two to six \
+        steps each with a label of two to four words, the action taken, the result it produced \
+        copied from the notes, and why that step, then the outcome. Use only steps and values the \
+        notes actually show. Use null if the notes don't work one through here.
         - visual: for any step where a picture would make it clearer to someone new to the \
         subject, add one. \(visualShapes) Use null for a step a picture wouldn't help.
         - check: one question that makes the reader think, of whichever kind fits this section \
@@ -1540,80 +1503,6 @@ public struct OllamaGenerator: CardGenerator {
         Note title: \(noteTitle)
 
         Respond with ONLY one JSON object shaped {"figures": [...]}. No other text.
-        """
-    }
-
-    /// The diagram pass, run over an already-summarized note rather than
-    /// its raw text -- the model draws the relationships it has just told
-    /// us about, which is a far easier question than "read this lecture and
-    /// draw it," and keeps the call small enough to be worth repeating on
-    /// demand when a diagram comes back unparseable.
-    ///
-    /// The subset named below is exactly what `MermaidParser` accepts, and
-    /// the prompt says outright that anything outside it is discarded. A
-    /// local 7B reliably writes Mermaid, but left unconstrained it reaches
-    /// for subgraph, classDef and style, none of which a SwiftUI Canvas is
-    /// going to draw.
-    /// The rules half, split out so `FoundationModelsGenerator` can send
-    /// the identical constraints as its session instructions. Both
-    /// generators must describe the same subset, because one parser reads
-    /// whatever either of them produces.
-    static func diagramInstructions(courseName: String) -> String {
-        """
-        You are a student's study assistant, drawing one concept diagram for a lecture note from \
-        the course "\(courseName)". Draw only what the outline you are given states -- every box \
-        and every arrow must correspond to something in it. Do not add a concept, a step, or a \
-        link the outline doesn't contain.
-
-        Answer in Mermaid, using only this subset, because anything outside it is discarded:
-        - The first line is exactly one of: graph TD, graph LR, or mindmap. Use graph TD for a \
-        process, a hierarchy, or a cause-and-effect chain. Use graph LR for a left-to-right \
-        sequence. Use mindmap for a topic and its sub-topics with no real flow between them.
-        - Every box needs its own short name, made of letters and digits with no spaces, which \
-        you invent from what the box says. Write the name, then the wording in square brackets.
-        - Give every box a different name. Never reuse a name, and never use the word "id" as a \
-        name.
-        - Draw a link by writing one box's name, then -->, then another box's name. Use --> and \
-        nothing else. To label a link, put the label between two bars right after the arrow.
-        - Never link a box to itself.
-        - Box wording is plain text: no quotation marks, no parentheses, no line breaks.
-        - Each box holds at most six words. Never put a whole sentence in a box -- name the idea, \
-        and let the arrows say how the ideas connect.
-        - In a mindmap, write one node per line as plain text with no brackets and no names, \
-        indented two spaces further than its parent. The first line after mindmap is the root.
-        - Use between 4 and 12 boxes. Do not write subgraph, end, style, classDef, click, or a \
-        comment, and do not use any other diagram type.
-
-        Here is a complete, correct answer for a different lecture, to show the shape:
-
-        graph TD
-        scarcity[Wants exceed resources] --> choice[Every choice costs something]
-        choice --> oppcost[Opportunity cost is the best forgone option]
-        choice -->|measured at the margin| marginal[Compare one more unit, not totals]
-        oppcost --> policy[Judge policies by results, not intentions]
-
-        Notice each box has its own name -- scarcity, choice, oppcost, marginal, policy -- and \
-        no name is used twice.
-
-        If the outline has nothing worth drawing -- a note that is just a list of unrelated \
-        definitions is the ordinary case for this -- reply with the single word NONE. An empty \
-        result is a normal and expected outcome, not a failure.
-
-        Respond with ONLY the Mermaid source, beginning with its first line, or the single word \
-        NONE. No code fences, no explanation. No other text.
-        """
-    }
-
-    static func diagramPrompt(
-        noteTitle: String, courseName: String, conceptOutline: String
-    ) -> String {
-        """
-        \(diagramInstructions(courseName: courseName))
-
-        Note title: \(noteTitle)
-
-        Outline:
-        \(conceptOutline)
         """
     }
 }

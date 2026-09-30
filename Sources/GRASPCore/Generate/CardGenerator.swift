@@ -162,31 +162,10 @@ public protocol CardGenerator: Sendable {
     /// the model it is seeing one piece of a longer note so it summarises
     /// only that piece.
     ///
-    /// Deliberately does not produce the diagram -- see `generateDiagram`.
     func generateOverview(
         noteTitle: String, courseName: String, noteContext: String,
         includeFormulas: Bool, partLabel: String?
     ) async -> GeneratedOverview
-
-    /// Draws one concept diagram over an already-summarised note, as raw
-    /// Mermaid source in the restricted subset `MermaidParser` accepts.
-    ///
-    /// Split out of `generateOverview` for one concrete reason: a Mermaid
-    /// block is inherently multi-line, every other call in this file comes
-    /// back inside a JSON string, and an unescaped newline in a JSON string
-    /// is the most common way a local 7B response fails to decode. Asking
-    /// for the diagram in its own plain-text response removes that failure
-    /// mode rather than trying to survive it, and it lets the overview pass
-    /// demand single-line strings everywhere.
-    ///
-    /// Returns the source verbatim, never a parsed graph: parsing belongs
-    /// to `MermaidParser`, which is pure, tolerant, independently testable,
-    /// and able to improve without regenerating anything. `""` is the
-    /// fail-soft empty result, and also the honest answer for a note with
-    /// no relationships worth drawing.
-    func generateDiagram(
-        noteTitle: String, courseName: String, conceptOutline: String
-    ) async -> String
 
     /// Chooses interactive figures for a lesson that has already been
     /// written, from the fixed set `OverviewFigure.Kind` names, and supplies
@@ -309,14 +288,6 @@ public struct NoGenerator: CardGenerator {
         .empty
     }
 
-    /// No model means no diagram. `""` rather than a stub graph: the view's
-    /// "no diagram" state is the right thing to show, where a placeholder
-    /// would look like a real answer that happened to be wrong.
-    public func generateDiagram(
-        noteTitle: String, courseName: String, conceptOutline: String
-    ) async -> String {
-        ""
-    }
 
     public func generateFigures(
         noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]

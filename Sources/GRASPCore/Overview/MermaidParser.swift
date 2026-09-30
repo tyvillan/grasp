@@ -88,7 +88,10 @@ public struct MermaidGraph: Sendable, Equatable {
     }
 }
 
-/// Parses the restricted Mermaid subset `diagramPrompt` asks for.
+/// Parses the restricted Mermaid subset the (now-retired) concept-map
+/// prompt used to ask for. No longer written by anything in this app, but
+/// kept for the diagrams already stored from before that changed -- see
+/// `OverviewComposer.Result.mermaidSource`.
 ///
 /// Totally tolerant, in `PairParser`'s style: it never throws and never
 /// lets one bad line cost the rest. It returns nil for exactly one reason

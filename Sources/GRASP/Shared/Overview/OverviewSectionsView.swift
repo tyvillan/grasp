@@ -94,15 +94,6 @@ struct OverviewSectionsView: View {
                     .padding(.bottom, 30)
             }
 
-            if overview.diagram != nil || overview.mermaidSource != nil {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("How it all fits together")
-                        .graspType(.proseH2)
-                        .foregroundStyle(GRASPColor.textPrimary)
-                    DiagramSection(overview: overview, onOpenCards: onOpenCards)
-                }
-                .id("\(overview.materialId)#map")
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)

@@ -135,7 +135,7 @@ public struct FoundationModelsGenerator: CardGenerator {
         var paragraphs: [String]
         @Guide(description: "Key terms first introduced in this section. Empty if none.")
         var terms: [DefinitionDraft]
-        @Guide(description: "A calculation, derivation or procedure the note works through step by step, given as steps rather than narrated in the paragraphs. Leave the steps empty if the note works nothing through here.")
+        @Guide(description: "A calculation, derivation or procedure the note works through step by step, given as steps rather than narrated in the paragraphs. When this section's terms are themselves several distinct operations or stages, give every one of them its own step with real numbers, not just the first. Leave the steps empty if the note works nothing through here.")
         var example: ExampleDraft
         var check: CheckDraft
     }
@@ -283,31 +283,6 @@ public struct FoundationModelsGenerator: CardGenerator {
         []
     }
 
-    /// Unguided, unlike everything else here. Guided generation can't
-    /// express "valid Mermaid in this subset", and forcing a `@Generable`
-    /// node/edge schema is exactly the bespoke-schema approach the Mermaid
-    /// decision rejected -- the same instruction text goes to both
-    /// generators so one parser handles both.
-    public func generateDiagram(
-        noteTitle: String, courseName: String, conceptOutline: String
-    ) async -> String {
-        #if canImport(FoundationModels)
-        guard await isAvailable, !conceptOutline.isEmpty else { return "" }
-        let session = LanguageModelSession(
-            instructions: OllamaGenerator.diagramInstructions(courseName: courseName)
-        )
-        let prompt = """
-        Note title: \(noteTitle)
-
-        Outline:
-        \(conceptOutline.prefix(1500))
-        """
-        guard let response = try? await session.respond(to: prompt) else { return "" }
-        return OllamaGenerator.salvageMermaid(response.content)
-        #else
-        return ""
-        #endif
-    }
 
     #if canImport(FoundationModels)
     @Generable

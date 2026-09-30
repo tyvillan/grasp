@@ -157,12 +157,4 @@ struct OverviewDocumentTests {
         #expect(merged.takeaways.count == OverviewLimits.takeaways)
         #expect(merged.formulas.count == OverviewLimits.formulas)
     }
-
-    @Test("builds the diagram spine from the lesson's claims")
-    func diagramSpine() {
-        let spine = OverviewComposer.diagramSpine(of: sample())
-        #expect(spine.contains("Row operations never move the answer"))
-        #expect(spine.contains("Swapping two equations cannot change the answer"))
-        #expect(spine.contains("Interchange"))
-    }
 }

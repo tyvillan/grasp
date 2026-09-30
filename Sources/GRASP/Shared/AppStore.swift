@@ -46,7 +46,6 @@ final class AppStore {
     /// overview's `generatedAt` (see `DeckOverviewReader`). Not observed:
     /// it's a memo, and filling it must never invalidate a view that is in
     /// the middle of reading from it.
-    @ObservationIgnored let diagramCache = DiagramLayoutCache()
 
     var vaultPath: String {
         didSet { UserDefaults.standard.set(vaultPath, forKey: Self.vaultPathKey(for: profile)) }

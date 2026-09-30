@@ -198,6 +198,16 @@ Tyler's two real guides are already in his synced library, so after a sync the W
 
 Tyler's notes are named by lecture and date (`2026-08-27_Lecture-02_Row-Reduction-and-Echelon-Forms.md`), and `Material.chapter`/`Material.noteDate` already carry that. `DeckOverviewReader.lessonHeading(for:)` turns it into `(kicker: "LECTURE 2 · AUG 27", title: "Row Reduction and Echelon Forms")`, which is what an overview's own header already shows. The Show Source Note view in `CardList.swift` doesn't use it at all -- it shows only the note's raw text, no title and no date. Small fix, same shape as the Mac's and iPhone's: call `lessonHeading(for:)` on the card's material and show the kicker line (and the humanized title in place of the raw filename) above the note text. No core change.
 
+## From the Mac session: concept maps are dropped (Tyler asked 2026-09-30)
+
+Tyler judged the concept map on every overview -- yours (`cd113d5`) included -- as arbitrary: it read as a random graph with no obvious tie back to the lesson. His call was to drop it, not fix it. Done on the Mac/iPhone side:
+
+- `CardGenerator` no longer has a `generateDiagram` method at all -- removed from the protocol and from `OllamaGenerator`, `FoundationModelsGenerator` and `NoGenerator`. This is the shared protocol you build against too, so as soon as you pull this, nothing can ask a model for a new concept map any more, on any platform.
+- `OverviewComposer.compose` no longer calls it either; `Result.mermaidSource` is always `nil` for anything written from here on.
+- The Mac/iPhone UI no longer renders one: `ConceptDiagramView.swift` and `DiagramTextMeasurer.swift` are deleted, the "How it all fits together" section is gone from the lesson view, and the download (`OverviewExport`) no longer adds a "Concept map" block.
+
+What's deliberately **not** touched, so nothing of yours breaks: `NoteOverview.mermaidSource` (the DB column), `RenderedOverview.diagram`/`mermaidSource`/`linkedNodes`, and all of `MermaidParser.swift`/`DiagramLayout.swift` in GRASPCore. Every diagram already generated before this change is still sitting in Tyler's synced library, still valid data, and your `OverviewReader.swift`/`LessonFigureViews.swift` will keep rendering those exactly as before until you remove that code too -- there's no rush and no build break either way. When you get to it, it's the same kind of removal as the Mac's: drop the rendering, leave the stored data and the shared reader alone.
+
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.

@@ -4,8 +4,7 @@ import Foundation
 
 /// Drives the whole per-note pipeline against a stub generator, so the call
 /// *shape* is pinned without a model: how many times the note is summarised,
-/// that the diagram is drawn exactly once over the merged result, and that
-/// each piece is told which piece it is.
+/// and that each piece is told which piece it is.
 @Suite("Overview composer")
 struct OverviewComposerTests {
 
@@ -13,17 +12,13 @@ struct OverviewComposerTests {
     /// merging has something distinguishable to work with.
     private final class StubGenerator: CardGenerator, @unchecked Sendable {
         var overviewCalls: [(context: String, partLabel: String?, includeFormulas: Bool)] = []
-        var diagramCalls: [String] = []
         var figureCalls: [(context: String, headings: [String])] = []
         var budget: Int
-        var diagramAnswer: String
         var returnsEmpty: Bool
         var figureAnswer: [GeneratedFigure]
 
-        init(budget: Int = 1_200, diagramAnswer: String = "graph TD\nA-->B",
-             returnsEmpty: Bool = false, figureAnswer: [GeneratedFigure] = []) {
+        init(budget: Int = 1_200, returnsEmpty: Bool = false, figureAnswer: [GeneratedFigure] = []) {
             self.budget = budget
-            self.diagramAnswer = diagramAnswer
             self.returnsEmpty = returnsEmpty
             self.figureAnswer = figureAnswer
         }
@@ -62,13 +57,6 @@ struct OverviewComposerTests {
             ))
         }
 
-        func generateDiagram(
-            noteTitle: String, courseName: String, conceptOutline: String
-        ) async -> String {
-            diagramCalls.append(conceptOutline)
-            return diagramAnswer
-        }
-
         func generateFigures(
             noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]
         ) async -> [GeneratedFigure] {
@@ -103,20 +91,23 @@ struct OverviewComposerTests {
         return base
     }
 
-    @Test("a short note costs one overview call and one diagram call")
+    @Test("a short note costs one overview call, and no diagram is ever drawn")
     func shortNote() async {
         let generator = StubGenerator()
         let outcome = await OverviewComposer.compose(
             using: generator, noteTitle: "Lecture 1", courseName: "Biology", note: note(words: 800)
         )
         #expect(generator.overviewCalls.count == 1)
-        #expect(generator.diagramCalls.count == 1)
         guard case .generated(let result) = outcome else {
             Issue.record("expected a generated overview")
             return
         }
         #expect(result.chunkCount == 1)
-        #expect(result.mermaidSource == "graph TD\nA-->B")
+        // Overviews no longer draw a concept map -- see the "Drop concept
+        // maps" decision. Always nil, regardless of what a generator
+        // offers: `CardGenerator` no longer even has a `generateDiagram`
+        // method to call.
+        #expect(result.mermaidSource == nil)
     }
 
     @Test("accounts for every step of a long note, so the bar ends at the end")
@@ -131,11 +122,12 @@ struct OverviewComposerTests {
         let snapshot = progress.snapshot
         // This stub reports nothing itself: per piece, one lesson step, one
         // check per section and a figures step; then the repetition check
-        // (the merged lesson has more than two sections) and the diagram.
+        // (the merged lesson has more than two sections; there's no
+        // diagram step to account for any more -- see "Drop concept maps").
         let pieces = generator.overviewCalls.count
-        #expect(snapshot.completed == pieces * 4 + 2)
+        #expect(snapshot.completed == pieces * 4 + 1)
         #expect(snapshot.completed == snapshot.expected)
-        #expect(snapshot.step == "Drawing the concept map")
+        #expect(snapshot.step == "Removing repetition")
         #expect(snapshot.part == nil)
     }
 
@@ -157,7 +149,6 @@ struct OverviewComposerTests {
                 AIProgress.current?.advance(3)
                 return await inner.generateOverview(noteTitle: noteTitle, courseName: courseName, noteContext: noteContext, includeFormulas: includeFormulas, partLabel: partLabel)
             }
-            func generateDiagram(noteTitle: String, courseName: String, conceptOutline: String) async -> String { "graph TD\nA-->B" }
             func generateFigures(noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
         }
         let progress = AIProgress()
@@ -167,9 +158,10 @@ struct OverviewComposerTests {
             )
         }
         // Plan + 3 sections + a check for each of the 2 sections that came
-        // back + figures + diagram. Two sections is too few to repeat.
-        #expect(progress.snapshot.completed == 8)
-        #expect(progress.snapshot.expected == 8)
+        // back + figures. Two sections is too few to repeat, and there's no
+        // diagram step any more.
+        #expect(progress.snapshot.completed == 7)
+        #expect(progress.snapshot.expected == 7)
     }
 
     @Test("a single-chunk note is not told it is part of anything")
@@ -181,16 +173,13 @@ struct OverviewComposerTests {
         #expect(generator.overviewCalls.first?.partLabel == nil)
     }
 
-    @Test("a long note is summarised in pieces but still drawn exactly once")
-    func longNoteDrawsOneDiagram() async {
+    @Test("a long note is summarised in pieces, with one chunk count per piece")
+    func longNoteChunkCount() async {
         let generator = StubGenerator()
         let outcome = await OverviewComposer.compose(
             using: generator, noteTitle: "L", courseName: "Biology", note: note(words: 4_000)
         )
         #expect(generator.overviewCalls.count > 1)
-        // The reason `generateDiagram` is a separate protocol method: a
-        // diagram per chunk would be N unrelated fragments.
-        #expect(generator.diagramCalls.count == 1)
         guard case .generated(let result) = outcome else {
             Issue.record("expected a generated overview")
             return
@@ -240,20 +229,6 @@ struct OverviewComposerTests {
         #expect(math.overviewCalls.first?.includeFormulas == true)
     }
 
-    @Test("draws the diagram from the merged summary, not the raw note")
-    func diagramSeesTheSummary() async {
-        let generator = StubGenerator()
-        _ = await OverviewComposer.compose(
-            using: generator, noteTitle: "L", courseName: "Biology", note: note(words: 800)
-        )
-        let spine = try! #require(generator.diagramCalls.first)
-        #expect(spine.contains("Claim 1a"))
-        // Headings only: given paragraphs too, a real 7B pasted them into
-        // the concept map's boxes whole.
-        #expect(!spine.contains("Explained in call 1."))
-        #expect(!spine.contains("word0 word1"))
-    }
-
     @Test("reports a model that had nothing to say as empty, not as a document")
     func emptyModelOutput() async {
         let generator = StubGenerator(returnsEmpty: true)
@@ -261,22 +236,6 @@ struct OverviewComposerTests {
             using: generator, noteTitle: "L", courseName: "Biology", note: note(words: 800)
         )
         #expect(outcome == .empty)
-        // Nothing to draw, so the diagram call never happens.
-        #expect(generator.diagramCalls.isEmpty)
-    }
-
-    @Test("stores no diagram when the model declines to draw one")
-    func declinedDiagram() async {
-        let generator = StubGenerator(diagramAnswer: "")
-        let outcome = await OverviewComposer.compose(
-            using: generator, noteTitle: "L", courseName: "Biology", note: note(words: 800)
-        )
-        guard case .generated(let result) = outcome else {
-            Issue.record("expected a generated overview")
-            return
-        }
-        // nil, not "" -- the view's "no diagram" state keys off absence.
-        #expect(result.mermaidSource == nil)
     }
 
     @Test("passes the chunker's verdict straight through for a note it won't touch")
@@ -463,11 +422,6 @@ struct OverviewComposerTests {
             return GeneratedOverview(document: OverviewDocument(
                 sections: [OverviewSection(heading: "A claim here", paragraphs: ["Text."])]
             ))
-        }
-        func generateDiagram(noteTitle: String, courseName: String, conceptOutline: String) async -> String {
-            calls += 1
-            try? await Task.sleep(for: .seconds(30))
-            return ""
         }
         func generateFigures(noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]) async -> [GeneratedFigure] {
             calls += 1

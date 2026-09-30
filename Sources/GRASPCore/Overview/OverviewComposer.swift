@@ -1,8 +1,8 @@
 import Foundation
 
 /// Runs one note all the way from its stored text to a finished overview:
-/// cut it to size, summarise each piece, merge the pieces deterministically,
-/// then draw one diagram over the merged result.
+/// cut it to size, summarise each piece, then merge the pieces
+/// deterministically.
 ///
 /// The merge is plain Swift, not a second model call. Asking a 7B to merge
 /// four summaries costs another 20-60 seconds and introduces a fresh chance
@@ -11,8 +11,10 @@ import Foundation
 public enum OverviewComposer {
     public struct Result: Sendable, Equatable {
         public let document: OverviewDocument
-        /// nil when the model declined to draw one, which is the ordinary
-        /// outcome for a note that's a flat list of unrelated definitions.
+        /// Always nil -- overviews no longer draw a concept map. Kept
+        /// rather than removed: `NoteOverview`/`RenderedOverview` still
+        /// carry it for the diagrams already stored from before this
+        /// changed, and Windows still reads and renders those.
         public let mermaidSource: String?
         public let chunkCount: Int
     }
@@ -51,10 +53,10 @@ public enum OverviewComposer {
 
         // Per piece: the lesson (a plan call plus one call per section, the
         // section count assumed until the plan says otherwise) and the
-        // figures call. Then one diagram for the whole note.
+        // figures call.
         let progress = AIProgress.current
         let lessonSteps = 1 + assumedSectionsPerPart
-        progress?.expect(chunks.count * (lessonSteps + 1) + 1)
+        progress?.expect(chunks.count * (lessonSteps + 1))
 
         var parts: [(chunk: OverviewChunker.Chunk, document: OverviewDocument)] = []
         for (index, chunk) in chunks.enumerated() {
@@ -171,10 +173,14 @@ public enum OverviewComposer {
         var merged = merge(parts)
         guard !merged.isEmpty, !Task.isCancelled else { return .empty }
 
-        // Once over the whole lesson: sections and takeaways that repeat an
-        // earlier one. Only a model can tell -- measured on real lessons, two
-        // sections teaching the same idea shared no more words than two that
-        // merely shared a topic.
+        // Done with any one part now -- what's left runs once over the
+        // whole merged lesson, not per chunk.
+        progress?.setPart(nil)
+
+        // Sections and takeaways that repeat an earlier one. Only a model
+        // can tell -- measured on real lessons, two sections teaching the
+        // same idea shared no more words than two that merely shared a
+        // topic.
         if merged.sections.count > 2 {
             progress?.expect(1)
             progress?.begin("Removing repetition")
@@ -183,20 +189,9 @@ public enum OverviewComposer {
         }
         merged = OverviewReview.cleaned(merged, noteText: note.reflowed)
 
-        // Exactly one diagram call, over the merged result. A diagram per
-        // chunk would be N unrelated fragments with no way to join them.
-        let outline = diagramSpine(of: merged)
-        progress?.setPart(nil)
-        progress?.begin("Drawing the concept map")
-        let source = await generator.generateDiagram(
-            noteTitle: noteTitle, courseName: courseName, conceptOutline: outline
-        )
-        progress?.advance()
-        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
-
         return .generated(Result(
             document: merged,
-            mermaidSource: trimmed.isEmpty ? nil : trimmed,
+            mermaidSource: nil,
             chunkCount: chunks.count
         ))
     }
@@ -518,32 +513,5 @@ public enum OverviewComposer {
             takeaways: Array(takeaways.prefix(OverviewLimits.takeaways)),
             formulas: Array(formulas.prefix(OverviewLimits.formulas))
         )
-    }
-
-    /// What the diagram pass draws from: the lesson's claims, in order, and
-    /// the terms they introduce. The headings are already the insights
-    /// stated as sentences, which is exactly what belongs in a concept
-    /// map's boxes -- far easier to draw from than raw lecture text.
-    public static func diagramSpine(of document: OverviewDocument) -> String {
-        var lines: [String] = []
-        if let title = document.title {
-            lines.append("Lesson: \(title)")
-            lines.append("")
-        }
-        // Headings only, no prose. Given each section's first paragraph as
-        // well, a real 7B pasted those paragraphs into the boxes whole.
-        if !document.sections.isEmpty {
-            lines.append("Ideas, in order:")
-            for section in document.sections {
-                lines.append("- \(section.heading)")
-            }
-        }
-        let terms = document.allTerms
-        if !terms.isEmpty {
-            lines.append("")
-            lines.append("Terms:")
-            lines += terms.prefix(12).map { "- \($0.term)" }
-        }
-        return lines.joined(separator: "\n")
     }
 }

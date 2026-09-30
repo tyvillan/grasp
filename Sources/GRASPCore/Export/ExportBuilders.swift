@@ -166,12 +166,6 @@ public enum OverviewExport {
             blocks.append(.heading("Key takeaways", level: level))
             blocks.append(.bullets(overview.takeaways))
         }
-        // Obsidian draws a Mermaid block as the diagram; a PDF shows it as
-        // text, which still reads as the map's links.
-        if let mermaid = overview.mermaidSource, !mermaid.isEmpty {
-            blocks.append(.heading("Concept map", level: level))
-            blocks.append(.code(mermaid, language: "mermaid"))
-        }
         return blocks
     }
 
