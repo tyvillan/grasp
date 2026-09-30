@@ -4,7 +4,7 @@ import SwiftCrossUI
 
 // The lesson's figures, drawn with SwiftCrossUI shapes: row reductions,
 // two lines stepped through row operations, a 2x2 matrix as the plane it
-// deforms, "is / isn't" matrix pairs, step pictures, and the concept map.
+// deforms, "is / isn't" matrix pairs and step pictures.
 // After the Mac's LessonFigures, MatrixFigures, StepVisualViews and
 // ConceptDiagramView, simplified where SwiftCrossUI has no canvas.
 
@@ -458,123 +458,5 @@ private struct FlowStripView: View {
                     .fixedSize()
             }
         }
-    }
-}
-
-// MARK: - Concept map
-
-/// The lesson's concept map, drawn where `DiagramLayout` placed each box.
-/// Wider than the column scrolls sideways rather than shrinking the text.
-struct ConceptMapView: View {
-    let diagram: LaidOutDiagram
-    /// Box label -> the cards it names (`RenderedOverview.linkedNodes`).
-    var linkedNodes: [String: [String]] = [:]
-    var onOpenCards: ([String]) -> Void = { _ in }
-
-    private func isLinked(_ node: LaidOutDiagram.PlacedNode) -> Bool {
-        !(linkedNodes[node.lines.joined(separator: " ")] ?? []).isEmpty
-    }
-
-    var body: some View {
-        let width = diagram.bounds.width
-        let height = diagram.bounds.height
-        ScrollView(.horizontal) {
-            ZStack(alignment: .topLeading) {
-                Rectangle().fill(GRASPColor.surface).frame(width: width, height: height)
-                DiagramEdges(diagram: diagram)
-                    .stroke(GRASPColor.hairlineStrong, style: StrokeStyle(width: 1.25))
-                    .frame(width: width, height: height)
-                ForEach(diagram.nodes, id: \.id) { node in
-                    nodeBox(node)
-                }
-                ForEach(diagram.edges.filter { $0.label != nil }, id: \.id) { edge in
-                    edgeLabel(edge)
-                }
-            }
-            .frame(width: width, height: height)
-            .padding(12)
-        }
-        .frame(height: height + 24 + 12)
-        .background(GRASPColor.surface)
-        .cornerRadius(10)
-    }
-
-    private func nodeBox(_ node: LaidOutDiagram.PlacedNode) -> some View {
-        let radius: Int = switch node.shape {
-        case .stadium, .circle: Int(node.size.height / 2)
-        case .rounded: 14
-        default: 8
-        }
-        return VStack(spacing: 0) {
-            ForEach(Array(node.lines.enumerated()), id: \.offset) { _, line in
-                Text(line)
-                    .font(Font.system(size: 12, weight: .medium))
-                    .foregroundColor(GRASPColor.textPrimary)
-                    .fixedSize()
-            }
-        }
-        .frame(width: node.size.width, height: node.size.height)
-        .background(isLinked(node) ? GRASPColor.successSoft
-                    : node.depth == 0 ? GRASPColor.accentSoft : GRASPColor.surfaceRaised)
-        .cornerRadius(radius)
-        // As on the Mac: a box naming a card opens it.
-        .onTapGesture {
-            if let ids = linkedNodes[node.lines.joined(separator: " ")], !ids.isEmpty { onOpenCards(ids) }
-        }
-        .padding(.leading, Int((node.center.x - node.size.width / 2).rounded()))
-        .padding(.top, Int((node.center.y - node.size.height / 2).rounded()))
-    }
-
-    private func edgeLabel(_ edge: LaidOutDiagram.PlacedEdge) -> some View {
-        let middle = edge.waypoints[edge.waypoints.count / 2]
-        let text = edge.label ?? ""
-        let width = Double(text.count) * 6 + 10
-        return Text(text)
-            .font(Font.system(size: 10, weight: .medium))
-            .foregroundColor(GRASPColor.textSecondary)
-            .fixedSize()
-            .padding(.horizontal, 4)
-            .background(GRASPColor.surface)
-            .cornerRadius(4)
-            .padding(.leading, max(0, Int(middle.x - width / 2)))
-            .padding(.top, max(0, Int(middle.y - 8)))
-    }
-}
-
-/// Every edge as a curve bowed along the layout's flow, with an arrowhead
-/// at the target -- the Mac's rule: curved lines never cut straight through
-/// an unrelated box the way unrouted straight ones do.
-private struct DiagramEdges: Shape {
-    let diagram: LaidOutDiagram
-
-    func path(in bounds: Path.Rect) -> Path {
-        var path = Path()
-        for edge in diagram.edges where edge.waypoints.count >= 2 {
-            let start = SIMD2(edge.waypoints[0].x + bounds.x, edge.waypoints[0].y + bounds.y)
-            let last = edge.waypoints[edge.waypoints.count - 1]
-            let end = SIMD2(last.x + bounds.x, last.y + bounds.y)
-            let (c1, c2): (SIMD2<Double>, SIMD2<Double>)
-            switch diagram.flow {
-            case .topDown, .bottomTop:
-                let bow = (end.y - start.y) * 0.45
-                (c1, c2) = (SIMD2(start.x, start.y + bow), SIMD2(end.x, end.y - bow))
-            case .leftRight, .rightLeft:
-                let bow = (end.x - start.x) * 0.45
-                (c1, c2) = (SIMD2(start.x + bow, start.y), SIMD2(end.x - bow, end.y))
-            }
-            path = path.move(to: start).addCubicCurve(control1: c1, control2: c2, to: end)
-            if edge.style != .open {
-                // Along the curve's last tangent, which points from the
-                // second control point to the end.
-                let angle = atan2(end.y - c2.y, end.x - c2.x)
-                let length = 7.0, spread = Double.pi / 7
-                path = path
-                    .move(to: end)
-                    .addLine(to: SIMD2(end.x - length * cos(angle - spread), end.y - length * sin(angle - spread)))
-                    .move(to: end)
-                    .addLine(to: SIMD2(end.x - length * cos(angle + spread), end.y - length * sin(angle + spread)))
-            }
-        }
-        return path
     }
 }

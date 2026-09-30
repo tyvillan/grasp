@@ -385,11 +385,20 @@ struct CardEditor: View {
             if let materialId = target.card?.materialId {
                 QuietLink(title: showingNote ? "Hide Source Note ▴" : "Show Source Note ▾") { showingNote.toggle() }
                 if showingNote {
+                    let note = library.note(materialId)
                     ScrollView {
-                        Text(library.note(materialId)?.text ?? "This card's note isn't in the library.")
-                            .font(GRASPFont.body)
-                            .foregroundColor(GRASPColor.textSecondary)
-                            .frame(maxWidth: 440.0)
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let kicker = note?.kicker {
+                                Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
+                            }
+                            if let title = note?.title {
+                                Text(title).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                            }
+                            Text(note?.text ?? "This card's note isn't in the library.")
+                                .font(GRASPFont.body)
+                                .foregroundColor(GRASPColor.textSecondary)
+                        }
+                        .frame(maxWidth: 440.0, alignment: .leading)
                     }
                     .frame(height: 180.0)
                     .padding(10)

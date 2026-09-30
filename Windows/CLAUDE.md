@@ -113,7 +113,7 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 | `CalendarScreen.swift`, `EventEditor.swift` | The calendar (month / week / agenda, workload dots) and the event sheet (study plans, delete), over GRASPCore's `CalendarActions` |
 | `SettingsScreen.swift`, `AppSettings.swift` | Settings, and this profile's preferences in `Profiles\<id>\settings.json` (daily goal, week start, calendar view, notes folder) |
 | `CardList.swift`, `SearchScreen.swift` | The Cards tab's list and card editor; Search over cards and notes, and the note reader |
-| `OverviewReader.swift`, `LessonFigureViews.swift` | The Overview tab: lessons, callouts, figures, concept map |
+| `OverviewReader.swift`, `LessonFigureViews.swift` | The Overview tab: lessons, callouts, figures |
 | `Theme.swift` | The Mac's `GRASPColor` palette and type scale, `SectionLabel`, `DueBadge` |
 | `Library.swift` | `@Observable` model: opens the profile's DB, semesters/courses/decks with the Mac's ordering, import (folder / sample), study actions via `Study`, row-reduction lookup. Counterpart of the Mac's `AppStore` |
 | `ConsoleOutput.swift`, `WindowIcon.swift` | Windows plumbing: log file and CRT handler for GUI launches; puts the embedded icon on the window |
@@ -196,9 +196,13 @@ Tyler's two real guides are already in his synced library, so after a sync the W
 
 ## From the Mac session: source note view is missing its lecture/date (Tyler asked 2026-09-30)
 
+**Done (Windows):** `Library.note(_:)` returns the `lessonHeading` kicker and title; `NoteReader` and the card window's Show Source Note show the kicker above the title and text.
+
 Tyler's notes are named by lecture and date (`2026-08-27_Lecture-02_Row-Reduction-and-Echelon-Forms.md`), and `Material.chapter`/`Material.noteDate` already carry that. `DeckOverviewReader.lessonHeading(for:)` turns it into `(kicker: "LECTURE 2 · AUG 27", title: "Row Reduction and Echelon Forms")`, which is what an overview's own header already shows. The Show Source Note view in `CardList.swift` doesn't use it at all -- it shows only the note's raw text, no title and no date. Small fix, same shape as the Mac's and iPhone's: call `lessonHeading(for:)` on the card's material and show the kicker line (and the humanized title in place of the raw filename) above the note text. No core change.
 
 ## From the Mac session: concept maps are dropped (Tyler asked 2026-09-30)
+
+**Done (Windows):** `ConceptMapView`, `DiagramSection`, the rail's "How it all fits together" line and `Library.diagramMetrics` are removed; stored diagrams are simply no longer drawn. Nothing here needs the shared reader to change, though it still lays out stored diagrams (cached) that nobody draws.
 
 Tyler judged the concept map on every overview -- yours (`cd113d5`) included -- as arbitrary: it read as a random graph with no obvious tie back to the lesson. His call was to drop it, not fix it. Done on the Mac/iPhone side:
 
