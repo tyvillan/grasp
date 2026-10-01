@@ -77,6 +77,29 @@ public enum AIPreferences {
     }
 
     static let bestCloudModelKey = "GRASP.cloudBestModel"
+    static let cachedCloudModelsKey = "GRASP.cloudModelList"
+
+    /// The key's usable models from the last check, best first -- what
+    /// the next-best model is when the best one is overloaded.
+    public static var cachedCloudModels: [String] {
+        get { UserDefaults.standard.stringArray(forKey: cachedCloudModelsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: cachedCloudModelsKey) }
+    }
+
+    /// Models to try, in order, if the chosen one is overloaded. Empty when
+    /// the student pinned a model: they asked for that one.
+    public static func alternateCloudModels(besides primary: String) -> [String] {
+        guard cloudModel.isEmpty else { return [] }
+        return alternates(from: cachedCloudModels, besides: primary)
+    }
+
+    static func alternates(from known: [String], besides primary: String) -> [String] {
+        let list = known.isEmpty ? [CloudProvider.fallbackModel] : known
+        // Stable releases before previews and experiments.
+        let stable = list.filter { !$0.contains("preview") && !$0.contains("exp") }
+        let rest = list.filter { $0.contains("preview") || $0.contains("exp") }
+        return Array((stable + rest).filter { $0 != primary }.prefix(3))
+    }
 
     /// The best model the key's live list offered, remembered so a request
     /// doesn't have to list models first.
@@ -123,6 +146,7 @@ public final class CloudUsage: @unchecked Sendable {
     private var paused: Date?
     private var fallback: String?
     private var transportError: String?
+    private var avoidedModels: [String: Date] = [:]
 
     public init(defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }) {
         self.defaults = defaults
@@ -254,6 +278,22 @@ public final class CloudUsage: @unchecked Sendable {
         transportError = detail
         lock.unlock()
         if changed { notify() }
+    }
+
+    /// Whether a model was recently overloaded and should be skipped.
+    func isAvoided(_ model: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let until = avoidedModels[model] else { return false }
+        if until <= now() { avoidedModels[model] = nil; return false }
+        return true
+    }
+
+    /// Skips a model for a while after it kept failing, so the next call
+    /// goes straight to one that works instead of waiting it out again.
+    func avoid(_ model: String, for seconds: TimeInterval = 600) {
+        lock.lock()
+        avoidedModels[model] = now().addingTimeInterval(seconds)
+        lock.unlock()
     }
 
     private func notify() {

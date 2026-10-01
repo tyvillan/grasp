@@ -58,6 +58,10 @@ public struct GeminiTransport: ChatTransport {
     let pause: @Sendable (TimeInterval) async throws -> Void
     /// Waits after a rate-limit before giving up on the call.
     let maxRetries: Int
+    /// Models to move to, in order, when `model` stays overloaded.
+    let alternates: [String]
+    /// How long to wait before each retry of an overloaded model.
+    let overloadPauses: [TimeInterval]
 
     static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -69,7 +73,7 @@ public struct GeminiTransport: ChatTransport {
     init(
         apiKey: String, model: String, baseURL: URL = CloudProvider.baseURL,
         usage: CloudUsage = .shared, pacer: RequestPacer = .shared, failures: FailureLog? = nil,
-        maxRetries: Int = 2,
+        maxRetries: Int = 2, alternates: [String] = [], overloadPauses: [TimeInterval] = [3, 8],
         send: @escaping Send = { try await GeminiTransport.session.data(for: $0) },
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = {
             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
@@ -82,6 +86,8 @@ public struct GeminiTransport: ChatTransport {
         self.pacer = pacer
         self.failures = failures
         self.maxRetries = maxRetries
+        self.alternates = alternates
+        self.overloadPauses = overloadPauses
         self.send = send
         self.pause = pause
     }
@@ -95,14 +101,39 @@ public struct GeminiTransport: ChatTransport {
         var useJSONMode = json
         var useCap = maxTokens != nil
         var boost = 1
+        // The chosen model first, then the others -- skipping any that
+        // just kept failing, so the next call doesn't wait them out again.
+        let candidates = [model] + alternates
+        let usable = candidates.filter { !usage.isAvoided($0) }
+        let order = usable.isEmpty ? [model] : usable
+        var index = 0
+        var overloadTries = 0
         while true {
             try Task.checkCancellation()
             try await pacer.waitTurn()
+            let current = order[index]
             do {
                 return try await request(
-                    prompt: prompt, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
+                    prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
                     boost: boost, reasoning: useReasoning
                 )
+            } catch AIBackendError.overloaded(let status) {
+                if overloadTries < overloadPauses.count {
+                    AIProgress.current?.setNote("\(current) is overloaded (HTTP \(status)); trying again shortly")
+                    try await pause(overloadPauses[overloadTries])
+                    overloadTries += 1
+                    AIProgress.current?.setNote(nil)
+                } else if index + 1 < order.count {
+                    usage.avoid(current)
+                    index += 1
+                    overloadTries = 0
+                    AIProgress.current?.setNote("\(current) is overloaded, so GRASP is using \(order[index])")
+                } else {
+                    usage.avoid(current)
+                    usage.recordTransportError("\(current) is overloaded right now (Google answered HTTP \(status)).")
+                    failures?.record(.overloaded(status: status))
+                    throw AIBackendError.overloaded(status: status)
+                }
             } catch AIBackendError.badResponse(let body) where Self.adjust(
                 body, reasoning: &useReasoning, jsonMode: &useJSONMode, cap: &useCap, boost: &boost
             ) {
@@ -188,7 +219,9 @@ public struct GeminiTransport: ChatTransport {
         model.contains("2.5") ? "none" : "low"
     }
 
-    private func request(prompt: String, jsonMode: Bool, maxTokens: Int?, boost: Int, reasoning: Bool) async throws -> String {
+    private func request(
+        prompt: String, model: String, jsonMode: Bool, maxTokens: Int?, boost: Int, reasoning: Bool
+    ) async throws -> String {
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -236,8 +269,11 @@ public struct GeminiTransport: ChatTransport {
             }
             let header = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
             throw AIBackendError.rateLimited(retryAfter: header ?? Self.retryDelay(in: body))
-        case 500...599, 0:
-            usage.recordTransportError("Google answered HTTP \(status)")
+        case 500...599:
+            usage.recordTransportError("\(model) is overloaded right now (Google answered HTTP \(status)).")
+            throw AIBackendError.overloaded(status: status)
+        case 0:
+            usage.recordTransportError("Google didn't answer.")
             throw AIBackendError.unreachable
         default:
             throw AIBackendError.badResponse(body)
@@ -304,7 +340,7 @@ public struct GeminiTransport: ChatTransport {
         case 400 where !isKeyRejection(body): throw AIBackendError.badResponse("Google answered HTTP 400: \(body.prefix(200))")
         case 400, 401, 403: throw AIBackendError.unauthorized
         case 429: throw AIBackendError.quotaExhausted
-        case 500...599: throw AIBackendError.unreachable
+        case 500...599: throw AIBackendError.overloaded(status: status)
         default: throw AIBackendError.badResponse("Google answered HTTP \(status): \(body.prefix(200))")
         }
         struct List: Decodable { let data: [Entry]; struct Entry: Decodable { let id: String } }

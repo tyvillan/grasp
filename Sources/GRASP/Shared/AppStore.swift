@@ -318,11 +318,12 @@ final class AppStore {
             return
         }
         isCheckingCloud = true
-        let result = await CloudGenerator.check(apiKey: key)
-        cloudCheck = result
-        if case .ok(let models) = result {
-            cloudModels = models
-            if let best = models.first { AIPreferences.bestKnownCloudModel = best }
+        let report = await CloudGenerator.check(apiKey: key)
+        cloudCheck = report.status
+        if !report.models.isEmpty {
+            cloudModels = report.models
+            AIPreferences.cachedCloudModels = report.models
+            if let best = report.models.first { AIPreferences.bestKnownCloudModel = best }
         }
         isCheckingCloud = false
         await refreshGeneratorStatus()

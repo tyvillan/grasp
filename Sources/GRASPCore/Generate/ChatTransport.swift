@@ -13,8 +13,11 @@ public enum AIBackendError: Error, Equatable, Sendable {
     case quotaExhausted
     /// The key is missing, wrong or revoked.
     case unauthorized
-    /// No connection, or the server is down.
+    /// No connection.
     case unreachable
+    /// Google is up but this model is overloaded or erroring (HTTP 5xx):
+    /// try again shortly, or use another model.
+    case overloaded(status: Int)
     case badResponse(String)
 
     /// The errors Automatic answers by switching to the local model rather
@@ -22,7 +25,7 @@ public enum AIBackendError: Error, Equatable, Sendable {
     /// quietly run everything somewhere else.
     var warrantsFallback: Bool {
         switch self {
-        case .rateLimited, .quotaExhausted, .unreachable: return true
+        case .rateLimited, .quotaExhausted, .unreachable, .overloaded: return true
         case .unauthorized, .badResponse: return false
         }
     }

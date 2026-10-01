@@ -57,9 +57,10 @@ private func reply(_ content: String) -> String {
 }
 
 private func transport(_ server: FakeServer, usage: CloudUsage, failures: FailureLog? = nil,
-                       pauses: Pauses = Pauses(), model: String = "gemini-2.5-flash") -> GeminiTransport {
+                       pauses: Pauses = Pauses(), model: String = "gemini-2.5-flash",
+                       alternates: [String] = []) -> GeminiTransport {
     GeminiTransport(apiKey: "test-key", model: model, usage: usage, pacer: RequestPacer(minimumInterval: 0),
-                    failures: failures, send: server.send, pause: { pauses.record($0) })
+                    failures: failures, alternates: alternates, send: server.send, pause: { pauses.record($0) })
 }
 
 /// Answers every call with "local", so a test can tell where a call landed.
@@ -145,6 +146,49 @@ struct CloudAITests {
         #expect(AIKeyStore.sanitize("AIza SyA 0123456789abcdefghij").problem?.contains("spaces") == true)
         #expect(AIKeyStore.sanitize("short").problem?.contains("too short") == true)
         #expect(AIKeyStore.sanitize("   ").problem == nil)
+    }
+
+    @Test("an overloaded model is retried after a pause, then replaced by the next model, which is remembered")
+    func switchesFromOverloadedModel() async throws {
+        let usage = freshUsage()
+        let pauses = Pauses()
+        let down = #"{"error":{"code":503,"message":"The model is overloaded. Please try again later."}}"#
+        let server = FakeServer([(503, down), (503, down), (503, down), (200, reply("{}")), (200, reply("{}"))])
+        let first = transport(server, usage: usage, pauses: pauses, model: "gemini-3.8-flash", alternates: ["gemini-2.5-flash"])
+        _ = try await first.complete(prompt: "hi", json: true, maxTokens: nil)
+        #expect(pauses.waits == [3, 8])
+        #expect(server.requestCount == 4)
+        #expect(server.body(0).contains("gemini-3.8-flash"))
+        #expect(server.body(3).contains("gemini-2.5-flash"))
+        #expect(usage.isAvoided("gemini-3.8-flash"))
+
+        // The next call goes straight to the model that worked.
+        _ = try await transport(server, usage: usage, pauses: pauses, model: "gemini-3.8-flash",
+                                alternates: ["gemini-2.5-flash"]).complete(prompt: "again", json: true, maxTokens: nil)
+        #expect(server.requestCount == 5)
+        #expect(server.body(4).contains("gemini-2.5-flash"))
+    }
+
+    @Test("when every model is overloaded the call fails as overloaded, with the reason kept")
+    func everyModelOverloaded() async {
+        let usage = freshUsage()
+        let down = #"{"error":{"code":503,"message":"overloaded"}}"#
+        let server = FakeServer(Array(repeating: (503, down), count: 12))
+        await #expect(throws: AIBackendError.overloaded(status: 503)) {
+            try await transport(server, usage: usage, model: "gemini-3.8-flash", alternates: ["gemini-2.5-flash"])
+                .complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+        #expect(usage.lastTransportError?.contains("overloaded") == true)
+        #expect(AIBackendError.overloaded(status: 503).warrantsFallback)
+    }
+
+    @Test("alternates put stable releases before previews, leave out the primary, and stop at three")
+    func alternateOrdering() {
+        let known = ["gemini-3.8-flash", "gemini-3.1-flash-preview", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"]
+        #expect(AIPreferences.alternates(from: known, besides: "gemini-3.8-flash")
+                == ["gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+        #expect(AIPreferences.alternates(from: [], besides: "gemini-3.8-flash") == [CloudProvider.fallbackModel])
+        #expect(AIPreferences.alternates(from: [], besides: CloudProvider.fallbackModel).isEmpty)
     }
 
     @Test("an empty answer (thinking used the allowance) is retried with three times the room")

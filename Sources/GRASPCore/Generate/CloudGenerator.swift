@@ -12,10 +12,11 @@ public struct CloudGenerator: CardGenerator {
     let failures: FailureLog
     private let hasKey: Bool
 
-    public init(apiKey: String, model: String, fallingBackTo local: OllamaGenerator? = nil,
-                usage: CloudUsage = .shared) {
+    public init(apiKey: String, model: String, alternates: [String] = [],
+                fallingBackTo local: OllamaGenerator? = nil, usage: CloudUsage = .shared) {
         let failures = FailureLog()
-        let gemini = GeminiTransport(apiKey: apiKey, model: model, usage: usage, failures: failures)
+        let gemini = GeminiTransport(apiKey: apiKey, model: model, usage: usage, failures: failures,
+                                     alternates: alternates)
         let transport: any ChatTransport = local.map {
             FallbackTransport(primary: gemini, secondary: OllamaTransport(baseURL: $0.serverURL, model: $0.modelName),
                               secondaryName: $0.modelName, usage: usage)
@@ -102,46 +103,68 @@ public struct CloudGenerator: CardGenerator {
         case failed(String)
     }
 
-    /// Proves the key works and that the model it will use actually
-    /// answers: lists the models (free), then sends one tiny generation
-    /// request. Listing alone said "Connected" for a model that then
-    /// refused every real request.
-    public static func check(apiKey: String, model: String? = nil) async -> ConnectionCheck {
-        guard !apiKey.isEmpty else { return .badKey }
+    public struct ConnectionReport: Sendable {
+        public var status: ConnectionCheck
+        /// The key's usable models, best first -- kept even when the check
+        /// failed, so the model picker still works.
+        public var models: [String]
+    }
+
+    /// Proves the key works and that a model it can use actually answers:
+    /// lists the models (free), then sends one tiny generation request,
+    /// moving on to the next model if one is overloaded. Listing alone said
+    /// "Connected" for a model that then refused every real request.
+    public static func check(apiKey: String) async -> ConnectionReport {
+        guard !apiKey.isEmpty else { return ConnectionReport(status: .badKey, models: []) }
         let models: [String]
         do {
             models = CloudProvider.chatModels(from: try await GeminiTransport.listModels(apiKey: apiKey))
         } catch AIBackendError.unauthorized {
-            return .badKey
+            return ConnectionReport(status: .badKey, models: [])
         } catch AIBackendError.quotaExhausted {
-            return .quotaUsedUp
+            return ConnectionReport(status: .quotaUsedUp, models: [])
         } catch AIBackendError.unreachable {
-            return .offline
+            return ConnectionReport(status: .offline, models: [])
+        } catch AIBackendError.overloaded(let status) {
+            return ConnectionReport(status: .failed("Google isn't answering right now (HTTP \(status)). Try again in a few minutes."), models: [])
         } catch AIBackendError.badResponse(let detail) {
-            return .failed(detail)
+            return ConnectionReport(status: .failed(detail), models: [])
         } catch {
-            return .failed(String(describing: error))
+            return ConnectionReport(status: .failed(String(describing: error)), models: [])
         }
-        let chosen = model ?? (AIPreferences.cloudModel.isEmpty
-                               ? (models.first ?? CloudProvider.fallbackModel) : AIPreferences.cloudModel)
-        do {
-            _ = try await GeminiTransport(apiKey: apiKey, model: chosen)
-                .complete(prompt: "Reply with exactly this JSON and nothing else: {\"ok\": true}", json: true, maxTokens: 20)
-            return .ok(models: models)
-        } catch AIBackendError.unauthorized {
-            return .badKey
-        } catch AIBackendError.quotaExhausted {
-            return .quotaUsedUp
-        } catch AIBackendError.rateLimited {
-            // The key is fine; Google is just busy this minute.
-            return .ok(models: models)
-        } catch AIBackendError.unreachable {
-            return .offline
-        } catch AIBackendError.badResponse(let detail) {
-            return .failed("\(chosen): \(GeminiTransport.summarize(detail))")
-        } catch {
-            return .failed(String(describing: error))
+
+        let pinned = AIPreferences.cloudModel
+        let primary = pinned.isEmpty ? (models.first ?? CloudProvider.fallbackModel) : pinned
+        let order = [primary] + (pinned.isEmpty ? AIPreferences.alternates(from: models, besides: primary) : [])
+        var overloaded: [String] = []
+        for candidate in order {
+            do {
+                // No waiting here: an overloaded model moves straight on.
+                _ = try await GeminiTransport(apiKey: apiKey, model: candidate, overloadPauses: [])
+                    .complete(prompt: "Reply with exactly this JSON and nothing else: {\"ok\": true}", json: true, maxTokens: 20)
+                return ConnectionReport(status: .ok(models: models), models: models)
+            } catch AIBackendError.unauthorized {
+                return ConnectionReport(status: .badKey, models: models)
+            } catch AIBackendError.quotaExhausted {
+                return ConnectionReport(status: .quotaUsedUp, models: models)
+            } catch AIBackendError.rateLimited {
+                // The key is fine; Google is just busy this minute.
+                return ConnectionReport(status: .ok(models: models), models: models)
+            } catch AIBackendError.unreachable {
+                return ConnectionReport(status: .offline, models: models)
+            } catch AIBackendError.overloaded {
+                overloaded.append(candidate)
+            } catch AIBackendError.badResponse(let detail) {
+                return ConnectionReport(
+                    status: .failed("\(candidate): \(GeminiTransport.summarize(detail))"), models: models)
+            } catch {
+                return ConnectionReport(status: .failed(String(describing: error)), models: models)
+            }
         }
+        return ConnectionReport(
+            status: .failed("Google's models are overloaded right now (\(overloaded.joined(separator: ", "))). "
+                            + "This usually clears in a few minutes -- try again shortly."),
+            models: models)
     }
 }
 
@@ -181,6 +204,8 @@ enum FallbackMessage {
             return "Gemini is busy right now, so this is running on \(local)."
         case .unreachable:
             return "Gemini can't be reached, so this is running on \(local)."
+        case .overloaded:
+            return "Gemini is overloaded right now, so this is running on \(local)."
         case .unauthorized, .badResponse:
             return "Running on \(local)."
         }

@@ -307,29 +307,30 @@ public enum CardGenerators {
     public static func select() async -> any CardGenerator {
         let mode = AIPreferences.mode
         let local: any CardGenerator = mode == .cloud ? NoGenerator() : await localGenerator()
-        return select(mode: mode, cloudKey: mode.usesCloud ? AIKeyStore.read() : nil,
-                      cloudModel: AIPreferences.resolvedCloudModel, local: local)
+        let model = AIPreferences.resolvedCloudModel
+        return select(mode: mode, cloudKey: mode.usesCloud ? AIKeyStore.read() : nil, cloudModel: model,
+                      alternates: AIPreferences.alternateCloudModels(besides: model), local: local)
     }
 
     /// The decision itself, with the probing done: testable without a
     /// server, a key or a Keychain. Cloud with no key is no generator at
     /// all -- running locally there would hide that the cloud isn't set up.
     public static func select(mode: AIMode, cloudKey: String?, cloudModel: String,
-                              local: any CardGenerator) -> any CardGenerator {
+                              alternates: [String] = [], local: any CardGenerator) -> any CardGenerator {
         guard mode.usesCloud else { return local }
         guard let key = cloudKey, !key.isEmpty else { return mode == .cloud ? NoGenerator() : local }
         switch mode {
         case .local:
             return local
         case .cloud:
-            return CloudGenerator(apiKey: key, model: cloudModel)
+            return CloudGenerator(apiKey: key, model: cloudModel, alternates: alternates)
         case .automatic:
             if let ollama = local as? OllamaGenerator {
-                return CloudGenerator(apiKey: key, model: cloudModel, fallingBackTo: ollama)
+                return CloudGenerator(apiKey: key, model: cloudModel, alternates: alternates, fallingBackTo: ollama)
             }
-            if local is NoGenerator { return CloudGenerator(apiKey: key, model: cloudModel) }
-            return FallbackGenerator(cloud: CloudGenerator(apiKey: key, model: cloudModel), local: local,
-                                     localName: "Apple's on-device model")
+            if local is NoGenerator { return CloudGenerator(apiKey: key, model: cloudModel, alternates: alternates) }
+            return FallbackGenerator(cloud: CloudGenerator(apiKey: key, model: cloudModel, alternates: alternates),
+                                     local: local, localName: "Apple's on-device model")
         }
     }
 
