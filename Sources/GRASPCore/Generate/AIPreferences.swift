@@ -106,9 +106,23 @@ public final class CloudUsage: @unchecked Sendable {
     /// Posted (on whatever thread) after any change, for UI to re-read.
     public static let didChange = Notification.Name("GRASP.CloudUsage.didChange")
 
+    // Everything the UI reads is kept in memory, behind `lock`, and written
+    // to `defaults` on a separate queue -- never while the lock is held. A
+    // `UserDefaults` write notifies SwiftUI on the writing thread, and
+    // SwiftUI's handler waits for the main thread; with the lock held, the
+    // main thread (drawing Settings, reading this class) waited on the lock
+    // in turn, and the whole app froze mid-job.
     private let lock = NSLock()
     private let defaults: UserDefaults
     private let now: @Sendable () -> Date
+    private let persistQueue = DispatchQueue(label: "com.tyvillan.grasp.cloudusage")
+
+    private var loaded = false
+    private var countDay: String?
+    private var count = 0
+    private var paused: Date?
+    private var fallback: String?
+    private var transportError: String?
 
     public init(defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }) {
         self.defaults = defaults
@@ -131,13 +145,33 @@ public final class CloudUsage: @unchecked Sendable {
         return calendar.date(byAdding: .day, value: 1, to: start) ?? date.addingTimeInterval(86_400)
     }
 
-    private var usageKey: String { "GRASP.cloudUsage.\(Self.quotaDay(of: now()))" }
+    private static func usageKey(_ day: String) -> String { "GRASP.cloudUsage.\(day)" }
     private static let pausedUntilKey = "GRASP.cloudPausedUntil"
     private static let lastFallbackKey = "GRASP.cloudLastFallback"
 
+    /// The caller holds the lock. Reads only -- reading defaults notifies nobody.
+    private func prepare() {
+        if !loaded {
+            loaded = true
+            paused = defaults.object(forKey: Self.pausedUntilKey) as? Date
+            fallback = defaults.string(forKey: Self.lastFallbackKey)
+        }
+        let day = Self.quotaDay(of: now())
+        if countDay != day {
+            countDay = day
+            count = defaults.integer(forKey: Self.usageKey(day))
+        }
+    }
+
+    private func persist(_ write: @escaping @Sendable (UserDefaults) -> Void) {
+        let defaults = self.defaults
+        persistQueue.async { write(defaults) }
+    }
+
     public var requestsToday: Int {
         lock.lock(); defer { lock.unlock() }
-        return defaults.integer(forKey: usageKey)
+        prepare()
+        return count
     }
 
     /// Requests left today, by the estimate; never negative.
@@ -147,32 +181,45 @@ public final class CloudUsage: @unchecked Sendable {
 
     func recordRequest() {
         lock.lock()
-        defaults.set(defaults.integer(forKey: usageKey) + 1, forKey: usageKey)
+        prepare()
+        count += 1
+        let (key, value) = (Self.usageKey(countDay ?? ""), count)
         lock.unlock()
+        persist { $0.set(value, forKey: key) }
         notify()
     }
 
     /// Non-nil while the cloud model is out of quota: until the reset.
     public var pausedUntil: Date? {
         lock.lock(); defer { lock.unlock() }
-        guard let until = defaults.object(forKey: Self.pausedUntilKey) as? Date, until > now() else { return nil }
+        prepare()
+        guard let until = paused, until > now() else { return nil }
         return until
     }
 
     func pauseForQuota() {
         lock.lock()
-        defaults.set(Self.nextReset(after: now()), forKey: Self.pausedUntilKey)
+        prepare()
+        let until = Self.nextReset(after: now())
+        paused = until
         // The provider says it's used up, whatever the local count thought.
-        defaults.set(max(defaults.integer(forKey: usageKey), CloudProvider.estimatedRequestsPerDay), forKey: usageKey)
+        count = max(count, CloudProvider.estimatedRequestsPerDay)
+        let (key, value) = (Self.usageKey(countDay ?? ""), count)
         lock.unlock()
+        persist {
+            $0.set(until, forKey: Self.pausedUntilKey)
+            $0.set(value, forKey: key)
+        }
         notify()
     }
 
     /// Cleared when the student changes the key or tests it successfully.
     public func clearPause() {
         lock.lock()
-        defaults.removeObject(forKey: Self.pausedUntilKey)
+        prepare()
+        paused = nil
         lock.unlock()
+        persist { $0.removeObject(forKey: Self.pausedUntilKey) }
         notify()
     }
 
@@ -180,17 +227,18 @@ public final class CloudUsage: @unchecked Sendable {
     /// for today is used up, so this ran on qwen3.5:9b."
     public var lastFallback: String? {
         lock.lock(); defer { lock.unlock() }
-        return defaults.string(forKey: Self.lastFallbackKey)
+        prepare()
+        return fallback
     }
 
     func recordFallback(_ message: String) {
         lock.lock()
-        defaults.set(message, forKey: Self.lastFallbackKey)
+        prepare()
+        fallback = message
         lock.unlock()
+        persist { $0.set(message, forKey: Self.lastFallbackKey) }
         notify()
     }
-
-    private var transportError: String?
 
     /// The last way a request failed to go through, in words, or nil after
     /// one succeeds. Shown beside "Can't reach Google" so the cause isn't

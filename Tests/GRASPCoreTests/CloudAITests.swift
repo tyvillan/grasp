@@ -147,6 +147,34 @@ struct CloudAITests {
         #expect(AIKeyStore.sanitize("   ").problem == nil)
     }
 
+    @Test("recording usage never holds the lock while settings change observers run (this once froze the app)")
+    func noDeadlockWithDefaultsObservers() {
+        let defaults = UserDefaults(suiteName: "grasp.test.\(UUID().uuidString)")!
+        let usage = CloudUsage(defaults: defaults)
+        // SwiftUI observes defaults and reacts on the writing thread -- and
+        // what it draws reads this same object.
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: defaults, queue: nil
+        ) { _ in
+            _ = usage.requestsToday
+            _ = usage.pausedUntil
+            _ = usage.lastFallback
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            for _ in 0..<50 { usage.recordRequest() }
+            usage.recordFallback("Gemini is busy right now, so this is running on qwen3.5:9b.")
+            usage.pauseForQuota()
+            usage.clearPause()
+            finished.signal()
+        }
+        #expect(finished.wait(timeout: .now() + 10) == .success)
+        #expect(usage.requestsToday == CloudProvider.estimatedRequestsPerDay)
+        #expect(usage.lastFallback?.contains("qwen3.5:9b") == true)
+    }
+
     @Test("a per-minute 429 waits the server's retryDelay and tries again")
     func retriesRateLimit() async throws {
         let limited = #"{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay": "17s"}]}}"#
