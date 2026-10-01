@@ -441,19 +441,20 @@ final class AppStore {
         }
     }
 
-    /// Each deck's "LECTURE 2 · AUG 27"-style kicker, from its earliest
-    /// linked note -- the same `lessonHeading(for:)` the Overview tab and
-    /// the source-note viewers use, so `DeckListView`'s sidebar rows show a
-    /// lecture's date too when notes are organized by lecture rather than
-    /// topic. A deck with no linked material (hand-made, or notes named by
-    /// topic) simply gets no kicker.
+    /// Each deck's lecture date (e.g. "AUG 27"), from its earliest linked
+    /// note, for `DeckListView`'s sidebar rows -- just the date, not the
+    /// full "LECTURE 2 · AUG 27" kicker the Overview tab and source-note
+    /// viewers show, since the deck's own name already says which lecture
+    /// it is. A deck with no linked material, or whose note has no
+    /// extractable date (hand-made, or notes named by topic), gets none.
     func deckKickers(forDecks deckIds: [String]) -> [String: String] {
         (try? database.queue.read { db -> [String: String] in
             var result: [String: String] = [:]
             for deckId in deckIds {
-                guard let first = try OverviewQueries.materials(forDecks: [deckId], db: db).first,
-                      let kicker = DeckOverviewReader.lessonHeading(for: first).kicker else { continue }
-                result[deckId] = kicker
+                guard let first = try OverviewQueries.materials(forDecks: [deckId], db: db).first else { continue }
+                let parsed = FilenameParsing.parse(fileNameWithoutExtension: first.title)
+                guard let date = first.noteDate ?? parsed.dateFromFilename else { continue }
+                result[deckId] = date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
             }
             return result
         }) ?? [:]
