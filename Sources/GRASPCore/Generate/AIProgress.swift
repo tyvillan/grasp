@@ -33,6 +33,9 @@ public final class AIProgress: @unchecked Sendable {
         /// out of order (each one hops to the main actor separately) can
         /// drop a stale one.
         public var sequence: Int
+        /// Which model is answering, when that's worth saying: "Gemini's
+        /// free limit is used up; finishing on qwen3.5:9b".
+        public var note: String? = nil
 
         public static let empty = Snapshot(step: nil, part: nil, completed: 0, expected: 0, sequence: 0)
 
@@ -73,6 +76,11 @@ public final class AIProgress: @unchecked Sendable {
     /// Names the piece of a long note that the next steps belong to.
     public func setPart(_ part: String?) {
         update { $0.part = part }
+    }
+
+    /// Says which model is answering and why, or clears that.
+    public func setNote(_ note: String?) {
+        update { $0.note = note }
     }
 
     /// Marks steps done -- including ones skipped without a call, so the bar

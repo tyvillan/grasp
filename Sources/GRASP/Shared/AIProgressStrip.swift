@@ -38,6 +38,14 @@ struct AIProgressStrip: View {
                     .foregroundStyle(GRASPColor.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if activity.runsInCloud {
+                    Label("Cloud", systemImage: "cloud")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(GRASPColor.accentSoft, in: Capsule())
+                        .help("This job runs on \(CloudProvider.name). Its free tier may use what's sent to improve Google's products.")
+                }
                 Spacer(minLength: 8)
                 if let onStop {
                     Button(activity.stopRequested ? stoppingTitle : stopTitle) {
@@ -50,6 +58,12 @@ struct AIProgressStrip: View {
                 }
             }
             ProgressBar(value: Int((activity.fraction * 1000).rounded()), total: 1000)
+            if let note = activity.snapshot.note {
+                Label(note, systemImage: "arrow.triangle.branch")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(2)
+            }
             // Re-evaluated on a clock as well as on each step, so the time
             // left keeps counting down during a long call rather than
             // freezing between steps.

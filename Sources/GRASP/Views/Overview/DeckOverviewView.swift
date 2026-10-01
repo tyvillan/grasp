@@ -32,6 +32,8 @@ struct DeckOverviewView: View {
     /// Which model is about to write these, so the sheet can say so. Apple's
     /// on-device model is a real fallback, not an equal one.
     @State private var generatorOrigin: OverviewOrigin?
+    @State private var cloudModel: String?
+    @State private var quotaWarning: String?
     /// The same guard, for the same reason, as `DeckDetailView`'s: `scope`
     /// is a `let`, so a `Task` started from the write button holds whichever
     /// deck was open when it was pressed, while this counter read back after
@@ -75,6 +77,8 @@ struct DeckOverviewView: View {
                 noteCount: pendingTargets.count,
                 mentionsMath: hasMathInScope,
                 generator: generatorOrigin,
+                cloudModel: cloudModel,
+                quotaWarning: quotaWarning,
                 onConfirm: {
                     showingConfirmation = false
                     write(pendingTargets)
@@ -167,11 +171,12 @@ struct DeckOverviewView: View {
             // because there are cards around it; here the pane would just
             // be blank behind a tab the user only just clicked.
             ContentUnavailableView {
-                Label("Overviews need a local model", systemImage: "sparkles")
+                Label("Overviews need an AI model", systemImage: "sparkles")
             } description: {
-                Text("Writing an overview takes a local AI model -- Ollama, or Apple's "
-                     + "on-device model. Neither is available right now. Settings has the "
-                     + "setup, and everything else in GRASP works without it.")
+                Text("Writing an overview takes an AI model -- Ollama or Apple's on-device "
+                     + "model on this Mac, or Google Gemini in the cloud. None is set up right "
+                     + "now. Settings → AI has the setup, and everything else in GRASP works "
+                     + "without it.")
             }
         } else if writable.isEmpty, let overview, !overview.missing.isEmpty {
             ContentUnavailableView {
@@ -185,7 +190,7 @@ struct DeckOverviewView: View {
             } description: {
                 Text("GRASP can read the \(writable.count) note\(writable.count == 1 ? "" : "s") "
                      + "behind this deck and write a study overview for each -- key takeaways, "
-                     + "the definitions worth knowing, an outline, and a concept map.")
+                     + "the definitions worth knowing, worked examples, and an outline.")
             } actions: {
                 Button("Write Overview\(writable.count == 1 ? "" : "s")…") {
                     prepare(writable.map(\.materialId))
@@ -327,8 +332,12 @@ struct DeckOverviewView: View {
             .contains { (try? store.noteText(forMaterial: $0.id))??.hasMath == true } ?? false
         Task {
             let generator = await CardGenerators.select()
-            generatorOrigin = generator is OllamaGenerator ? .ollama
-                : (generator is NoGenerator ? nil : .appleOnDevice)
+            let origin = OverviewOrigin.of(generator)
+            generatorOrigin = origin?.origin
+            cloudModel = origin?.origin == .cloud ? origin?.model : nil
+            quotaWarning = AIQuotaEstimate.warning(
+                needed: AIQuotaEstimate.overviewRequests(notes: materialIds.count), mode: AIPreferences.mode
+            )
             showingConfirmation = true
         }
     }
@@ -411,8 +420,8 @@ struct DeckOverviewView: View {
         if failed.allSatisfy({ $0.outcome == .empty }) {
             return what + " The model ran but came back with nothing usable."
         }
-        return what + " The model stopped responding partway -- check that Ollama is "
-             + "running (Settings shows its status)."
+        return what + " The model stopped responding partway -- Settings → AI shows "
+             + "whether it's reachable."
     }
 }
 
@@ -423,16 +432,20 @@ struct WriteOverviewsSheet: View {
     let noteCount: Int
     let mentionsMath: Bool
     let generator: OverviewOrigin?
+    /// The cloud model's name, when the cloud is writing.
+    var cloudModel: String? = nil
+    /// Set when today's free allowance probably won't cover the run.
+    var quotaWarning: String? = nil
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
     private var estimate: String {
         // Measured, not hoped: qwen3.5 on an M-series laptop took three to
-        // five minutes a note -- a plan, a call per section, figures, and
-        // (formerly) a diagram. The old "30 seconds a note" promised a
-        // two-minute run that took forty. Dropping the diagram call should
-        // make this a slight overestimate now, not a fresh measurement.
-        let seconds = noteCount * 240
+        // five minutes a note -- a plan, then a call per section. The old
+        // "30 seconds a note" promised a two-minute run that took forty. On
+        // Gemini each call is quick, and the pacing that keeps the free tier
+        // happy (one request every six seconds) is what sets the pace.
+        let seconds = noteCount * (generator == .cloud ? 90 : 240)
         let minutes = seconds / 60
         if minutes < 90 { return "roughly \(minutes) minutes" }
         let hours = (Double(minutes) / 60 * 2).rounded() / 2
@@ -452,10 +465,16 @@ struct WriteOverviewsSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                effect("list.bullet", "Key takeaways, the definitions worth knowing, and the "
-                                     + "note's own outline.")
-                effect("point.topleft.down.curvedto.point.bottomright.up",
-                       "A concept map, where the note has relationships worth drawing.")
+                effect("list.bullet", "Key takeaways, the definitions worth knowing, worked "
+                                     + "examples, and the note's own outline.")
+                if generator == .cloud {
+                    effect("cloud", "Written by \(cloudModel ?? CloudProvider.name) in the cloud. Your notes "
+                                    + "are sent to Google, and its free tier may use them to improve "
+                                    + "Google's products.")
+                }
+                if let quotaWarning {
+                    effect("gauge.with.dots.needle.67percent", quotaWarning)
+                }
                 effect("clock", "Takes \(estimate). You can keep using the rest of GRASP while "
                                 + "it runs, and stop it at any time.")
                 effect("laptopcomputer", "Keep the lid open. GRASP stops your Mac from dozing off "
@@ -472,8 +491,8 @@ struct WriteOverviewsSheet: View {
                     // being told while the choice is still open.
                     effect("exclamationmark.triangle",
                            "Using Apple's on-device model, which writes noticeably thinner "
-                           + "overviews and splits long notes into more pieces. Starting Ollama "
-                           + "gives markedly better results.")
+                           + "overviews and splits long notes into more pieces. Starting Ollama, "
+                           + "or a cloud model in Settings → AI, gives markedly better results.")
                 }
             }
 

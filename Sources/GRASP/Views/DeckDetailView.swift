@@ -1111,6 +1111,17 @@ private struct RefineDeckConfirmationSheet: View {
                 .foregroundStyle(GRASPColor.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let quotaWarning = AIQuotaEstimate.warning(
+                needed: AIQuotaEstimate.contextCheckRequests(cards: draftCount)
+                    + AIQuotaEstimate.refineRequests(cards: draftCount),
+                mode: AIPreferences.mode
+            ), AIKeyStore.read() != nil {
+                Label(quotaWarning, systemImage: "gauge.with.dots.needle.67percent")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }

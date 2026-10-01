@@ -61,14 +61,13 @@ struct SettingsScreen: View {
             .graspSection()
 
             Section {
-                LabeledContent("Model", value: store.generatorStatus)
-                Toggle("AI questions in tests", isOn: $store.isAITestQuestionsEnabled)
-            } header: {
-                Text("AI")
+                NavigationLink {
+                    AISettingsScreen()
+                } label: {
+                    LabeledContent("AI", value: store.aiMode.label)
+                }
             } footer: {
-                Text(store.isGeneratorAvailable
-                     ? "Writing overviews, refining cards and adding cards use Apple's on-device model -- nothing leaves your iPhone."
-                     : "AI features need Apple Intelligence (iPhone 15 Pro or later, turned on in Settings). Everything else works without it, and overviews written on your Mac sync here.")
+                Text(store.generatorStatus)
             }
             .graspSection()
             .task { await store.refreshGeneratorStatus() }

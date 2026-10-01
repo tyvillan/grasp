@@ -303,7 +303,38 @@ public struct NoGenerator: CardGenerator {
 /// probe for Ollama, a framework availability check for Foundation
 /// Models -- rather than assumed from what's installed.
 public enum CardGenerators {
+    /// The generator for the student's AI mode (see `AIPreferences`).
     public static func select() async -> any CardGenerator {
+        let mode = AIPreferences.mode
+        let local: any CardGenerator = mode == .cloud ? NoGenerator() : await localGenerator()
+        return select(mode: mode, cloudKey: mode.usesCloud ? AIKeyStore.read() : nil,
+                      cloudModel: AIPreferences.resolvedCloudModel, local: local)
+    }
+
+    /// The decision itself, with the probing done: testable without a
+    /// server, a key or a Keychain. Cloud with no key is no generator at
+    /// all -- running locally there would hide that the cloud isn't set up.
+    public static func select(mode: AIMode, cloudKey: String?, cloudModel: String,
+                              local: any CardGenerator) -> any CardGenerator {
+        guard mode.usesCloud else { return local }
+        guard let key = cloudKey, !key.isEmpty else { return mode == .cloud ? NoGenerator() : local }
+        switch mode {
+        case .local:
+            return local
+        case .cloud:
+            return CloudGenerator(apiKey: key, model: cloudModel)
+        case .automatic:
+            if let ollama = local as? OllamaGenerator {
+                return CloudGenerator(apiKey: key, model: cloudModel, fallingBackTo: ollama)
+            }
+            if local is NoGenerator { return CloudGenerator(apiKey: key, model: cloudModel) }
+            return FallbackGenerator(cloud: CloudGenerator(apiKey: key, model: cloudModel), local: local,
+                                     localName: "Apple's on-device model")
+        }
+    }
+
+    /// The best model on this device: Ollama, then Apple's, then none.
+    public static func localGenerator() async -> any CardGenerator {
         // Ollama runs on a computer -- Mac, Windows or Linux -- and GRASP
         // reaches it at this device's own address. On iPhone there's nothing
         // there -- and in the simulator, which shares the Mac's network, it

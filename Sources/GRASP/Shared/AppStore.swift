@@ -216,16 +216,102 @@ final class AppStore {
         reload()
         sync = SyncController(database: db, profile: profile) { [weak self] in self?.reload() }
         sync.start()
+        observeCloudUsage()
         Task { await refreshGeneratorStatus() }
     }
 
     func refreshGeneratorStatus() async {
         let generator = await CardGenerators.select()
         isGeneratorAvailable = !(generator is NoGenerator)
+        hasCloudKey = AIKeyStore.read() != nil
+        var status: String
         switch generator {
-        case is OllamaGenerator: generatorStatus = "Ollama (local model)"
-        case is NoGenerator: generatorStatus = "None -- cards come from the parser only"
-        default: generatorStatus = "Apple on-device model"
+        case let cloud as CloudGenerator:
+            status = "Gemini (\(cloud.modelName))"
+            if let local = cloud.localModelName { status += ", falling back to \(local)" }
+        case let automatic as FallbackGenerator:
+            status = "Gemini (\(automatic.cloud.modelName)), falling back to Apple's on-device model"
+        case let ollama as OllamaGenerator:
+            status = "Ollama (\(ollama.modelName))"
+            if aiMode == .automatic && !hasCloudKey { status += " -- add a Gemini key to use the cloud" }
+        case is NoGenerator:
+            status = aiMode == .cloud && !hasCloudKey
+                ? "None -- add a Gemini API key to use the cloud"
+                : "None -- cards come from the parser only"
+        default:
+            status = "Apple on-device model"
+        }
+        if aiMode.usesCloud, hasCloudKey, CloudUsage.shared.pausedUntil != nil {
+            status += aiMode == .automatic
+                ? " (cloud limit reached; local until midnight Pacific)"
+                : " (cloud limit reached until midnight Pacific)"
+        }
+        generatorStatus = status
+    }
+
+    // MARK: - AI settings
+
+    /// Mirrors `AIPreferences.mode`, which is machine-wide, so the AI tab
+    /// and every status line update together.
+    private(set) var aiMode: AIMode = AIPreferences.mode
+    private(set) var hasCloudKey = false
+    private(set) var cloudCheck: CloudGenerator.ConnectionCheck?
+    private(set) var isCheckingCloud = false
+    /// The text models the key can use, best first; empty until checked.
+    private(set) var cloudModels: [String] = []
+    /// Bumped whenever `CloudUsage` changes, so views reading it redraw.
+    private(set) var cloudUsageRevision = 0
+    @ObservationIgnored private var cloudUsageObserver: NSObjectProtocol?
+
+    func setAIMode(_ mode: AIMode) {
+        AIPreferences.mode = mode
+        aiMode = mode
+        Task { await refreshGeneratorStatus() }
+    }
+
+    /// Stores the key and checks it at once, so a typo shows up here
+    /// rather than as a silent failure in the middle of a job.
+    func saveCloudKey(_ key: String) async {
+        AIKeyStore.save(key)
+        CloudUsage.shared.clearPause()
+        cloudCheck = nil
+        await testCloudConnection()
+    }
+
+    func removeCloudKey() async {
+        AIKeyStore.delete()
+        cloudCheck = nil
+        cloudModels = []
+        await refreshGeneratorStatus()
+    }
+
+    func testCloudConnection() async {
+        guard let key = AIKeyStore.read() else {
+            cloudCheck = .badKey
+            await refreshGeneratorStatus()
+            return
+        }
+        isCheckingCloud = true
+        let result = await CloudGenerator.check(apiKey: key)
+        cloudCheck = result
+        if case .ok(let models) = result {
+            cloudModels = models
+            if let best = models.first { AIPreferences.bestKnownCloudModel = best }
+        }
+        isCheckingCloud = false
+        await refreshGeneratorStatus()
+    }
+
+    func setCloudModel(_ model: String) {
+        AIPreferences.cloudModel = model
+        Task { await refreshGeneratorStatus() }
+    }
+
+    private func observeCloudUsage() {
+        cloudUsageObserver = NotificationCenter.default.addObserver(
+            forName: CloudUsage.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cloudUsageRevision += 1 }
         }
     }
 

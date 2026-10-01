@@ -2,18 +2,16 @@ import SwiftUI
 import AppKit
 import GRASPCore
 
-/// Two tabs, General and Advanced -- the standard macOS Settings shape.
-/// Vault Path and Excluded Folders moved to Advanced: both are "how the
-/// importer behaves" plumbing rather than day-to-day settings, and neither
-/// needs to compete with Profile/Card Generation for the first thing a
-/// person sees. `vaultPath` itself is still the same `AppStore` property
-/// either tab reads and writes -- moving which tab shows the field changes
-/// nothing about how it's stored or how the importer reads it.
+/// General, AI and Advanced. Every AI setting lives in AI -- which model
+/// runs, the cloud key, the local server, and the AI-only features -- so
+/// switching between local and cloud is one place, not four.
 struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AISettingsTab()
+                .tabItem { Label("AI", systemImage: "sparkles") }
             AdvancedSettingsTab()
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
@@ -24,7 +22,6 @@ private struct GeneralSettingsTab: View {
     @Environment(AppStore.self) private var store
     @Environment(\.switchProfile) private var switchProfile
     @State private var showingArchivedCourses = false
-    @State private var showingOllamaSetup = false
     // Shared with HomeView's goal bar and the study session's focus timer
     // through `@AppStorage`'s own store, rather than threaded through
     // AppStore -- these are view preferences, not app data.
@@ -45,20 +42,6 @@ private struct GeneralSettingsTab: View {
             }
 
             AccountSyncSection()
-
-            Section("Card Generation") {
-                HStack {
-                    Text(store.generatorStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
-                        .font(.caption)
-                }
-                Text("With no local model, cards come from the deterministic parser only -- fully usable, just more editing in the review queue. Install Ollama and pull a model (e.g. qwen3.5:9b) to enable AI refinement.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
 
             Section("Study Goals") {
                 Stepper(value: $dailyGoal, in: 0...500, step: 5) {
@@ -86,21 +69,6 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("AI-Generated Test Questions") {
-                Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
-                Text("When enabled, Custom Tests mix in a few fresh, written questions grounded in your notes alongside your real cards. These are generated fresh each time and never saved as cards, added to the review queue, or scheduled by FSRS. Uses the same AI connection as Card Generation above.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Ollama Local Server") {
-                ollamaStatusRow
-                ollamaDetailText
-                if !store.ollamaStatus.isRunning {
-                    Button("Setup Local AI…") { showingOllamaSetup = true }
-                }
-            }
-
             Section("Hidden Courses") {
                 SettingsManagementRow(
                     title: "Archived Courses", count: store.archivedCourses.count
@@ -109,13 +77,272 @@ private struct GeneralSettingsTab: View {
         }
         .formStyle(.grouped)
         .frame(width: 480, height: 580)
-        .task {
-            await store.refreshGeneratorStatus()
-            await store.refreshOllamaStatus()
-        }
         .sheet(isPresented: $showingArchivedCourses) { ArchivedCoursesSheet() }
+    }
+}
+
+/// Which model runs (local, cloud, or cloud with local behind it), the
+/// Gemini key, the local Ollama server, and the features that only exist
+/// with AI.
+private struct AISettingsTab: View {
+    @Environment(AppStore.self) private var store
+    @State private var showingOllamaSetup = false
+    @State private var keyDraft = ""
+    @State private var pendingMode: AIMode?
+    @AppStorage(AIPreferences.cloudModelKey, store: .standard) private var cloudModel = ""
+    /// Owned by the store: closing Settings mid-sweep used to leave it
+    /// running with no Stop button, and reopening offered a second one.
+    private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
+    @State private var contextSweepResult: AppStore.ContextCheckSummary?
+
+    var body: some View {
+        @Bindable var store = store
+        Form {
+            modelSection
+            cloudSection
+            localSection
+            featuresSection
+        }
+        .formStyle(.grouped)
+        .frame(width: 480, height: 640)
+        .task {
+            await store.refreshOllamaStatus()
+            if store.hasCloudKey || AIKeyStore.read() != nil { await store.testCloudConnection() }
+            await store.refreshGeneratorStatus()
+        }
         .sheet(isPresented: $showingOllamaSetup) {
             OllamaSetupSheet(onStartService: startOllamaAndRecheck)
+        }
+        .alert("Send your notes to Google?", isPresented: Binding(
+            get: { pendingMode != nil }, set: { if !$0 { pendingMode = nil } }
+        )) {
+            Button("Use Gemini") {
+                AIPreferences.hasAcceptedCloudNotice = true
+                if let pendingMode { store.setAIMode(pendingMode) }
+                pendingMode = nil
+            }
+            Button("Cancel", role: .cancel) { pendingMode = nil }
+        } message: {
+            Text(Self.freeTierNotice + " You can switch back to Local at any time.")
+        }
+        .sheet(isPresented: Binding(get: { contextSweepResult != nil }, set: { if !$0 { contextSweepResult = nil } })) {
+            if let contextSweepResult {
+                ResultSheet(
+                    icon: "checkmark.shield",
+                    title: "Off-Topic Card Check Complete",
+                    leadText: contextSweepResult.isEmpty
+                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment. (If no AI model is set up, nothing was checked at all -- see Model above.)"
+                        : nil,
+                    sections: contextSweepSections(contextSweepResult)
+                )
+            }
+        }
+    }
+
+    static let freeTierNotice = "Cloud mode sends the text of your notes to Google Gemini. Its free tier may use what you send to improve Google's products, and people at Google may read it."
+
+    // MARK: Model
+
+    private var modelSection: some View {
+        Section("Model") {
+            Picker("Runs on", selection: Binding(
+                get: { store.aiMode },
+                set: { mode in
+                    if mode.usesCloud && !AIPreferences.hasAcceptedCloudNotice {
+                        pendingMode = mode
+                    } else {
+                        store.setAIMode(mode)
+                    }
+                }
+            )) {
+                ForEach(AIMode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            HStack(alignment: .firstTextBaseline) {
+                Text(store.generatorStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
+                    .font(.caption)
+            }
+            Text(modeExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var modeExplanation: String {
+        switch store.aiMode {
+        case .local:
+            return "Everything runs on this Mac -- Ollama if it's running, else Apple's on-device model. Nothing leaves your Mac. With no model at all, cards come from the parser only."
+        case .cloud:
+            return "Everything runs on Google Gemini: much stronger lessons and cards than a local model, and quick. When today's free limit runs out, AI features stop until it resets at midnight Pacific."
+        case .automatic:
+            return "Gemini when it can, your local model when it can't: if Gemini is busy, offline or out of today's free requests, the job carries on locally from where it was."
+        }
+    }
+
+    // MARK: Cloud
+
+    private var cloudSection: some View {
+        Section("Cloud: \(CloudProvider.name)") {
+            if store.hasCloudKey {
+                HStack(spacing: 8) {
+                    StatusBadge(text: cloudStatusText, isPositive: cloudIsHealthy)
+                    Spacer()
+                    Button {
+                        Task { await store.testCloudConnection() }
+                    } label: {
+                        if store.isCheckingCloud { ProgressView().controlSize(.small) } else { Text("Test Connection") }
+                    }
+                    .disabled(store.isCheckingCloud)
+                    Button("Remove Key", role: .destructive) { Task { await store.removeCloudKey() } }
+                }
+                if !store.cloudModels.isEmpty {
+                    Picker("Model", selection: $cloudModel) {
+                        Text("Automatic (\(store.cloudModels.first ?? CloudProvider.fallbackModel))").tag("")
+                        ForEach(store.cloudModels, id: \.self) { Text($0).tag($0) }
+                    }
+                    .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
+                }
+                usageRow
+            } else {
+                HStack(spacing: 8) {
+                    SecureField("Paste your Gemini API key", text: $keyDraft)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save") {
+                        let key = keyDraft
+                        keyDraft = ""
+                        Task { await store.saveCloudKey(key) }
+                    }
+                    .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Link("Get a free key at Google AI Studio", destination: CloudProvider.keyPageURL)
+                    .font(.caption)
+                Text("Stored in your Keychain, never in your library or synced to GRASP's server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Label(Self.freeTierNotice, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var cloudIsHealthy: Bool {
+        if case .ok = store.cloudCheck, CloudUsage.shared.pausedUntil == nil { return true }
+        return false
+    }
+
+    private var cloudStatusText: String {
+        _ = store.cloudUsageRevision
+        if CloudUsage.shared.pausedUntil != nil { return "Free Limit Reached" }
+        switch store.cloudCheck {
+        case .ok: return "Connected"
+        case .badKey: return "Key Not Accepted"
+        case .quotaUsedUp: return "Free Limit Reached"
+        case .offline: return "Can't Reach Google"
+        case .failed: return "Check Failed"
+        case nil: return store.isCheckingCloud ? "Checking…" : "Not Checked"
+        }
+    }
+
+    private var usageRow: some View {
+        _ = store.cloudUsageRevision
+        let used = CloudUsage.shared.requestsToday
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Today")
+                Spacer()
+                Text("\(used) of about \(CloudProvider.estimatedRequestsPerDay) free requests")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            ProgressBar(value: min(used, CloudProvider.estimatedRequestsPerDay), total: CloudProvider.estimatedRequestsPerDay)
+            HStack(spacing: 4) {
+                Text("An estimate: Google sets each project's own limit, and resets it at midnight Pacific.")
+                Link("See yours", destination: CloudProvider.usagePageURL)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let last = CloudUsage.shared.lastFallback, store.aiMode == .automatic {
+                Text("Last switch to local: \(last)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Local
+
+    private var localSection: some View {
+        Section("Local: Ollama") {
+            ollamaStatusRow
+            ollamaDetailText
+            if !store.ollamaStatus.isRunning {
+                Button("Setup Local AI…") { showingOllamaSetup = true }
+            }
+        }
+    }
+
+    // MARK: Features
+
+    private var featuresSection: some View {
+        @Bindable var store = store
+        return Section("AI Features") {
+            Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
+            Text("Custom Tests mix in a few fresh, written questions grounded in your notes. They're generated each time and never saved as cards or scheduled.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let sweepActivity {
+                AIProgressStrip(
+                    activity: sweepActivity,
+                    onStop: { store.stopAIJob(AppStore.sweepJobKey) },
+                    stopHelp: "Stops now. Cards already checked keep their changes; the rest are left as they are.",
+                    isInline: true
+                )
+            } else {
+                Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
+            }
+            Text("Goes card by card against its own source note: a definition that reads like assignment instructions or a vague fragment is rewritten from the note's text, or removed if the note doesn't support one. Every change is listed afterwards and can be undone from the card's \"AI Refined\" badge.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let warning = AIQuotaEstimate.warning(
+                needed: AIQuotaEstimate.contextCheckRequests(cards: store.deckCounts.values.reduce(0) { $0 + $1.cardCount }),
+                mode: store.aiMode
+            ), store.hasCloudKey {
+                Label(warning, systemImage: "gauge.with.dots.needle.67percent")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func contextSweepSections(_ result: AppStore.ContextCheckSummary) -> [ResultSheet.Section] {
+        var sections: [ResultSheet.Section] = []
+        if !result.refined.isEmpty {
+            sections.append(.init(
+                icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success, title: "Rewrote",
+                items: result.refined.map { "\($0.front) (\($0.courseName))" }
+            ))
+        }
+        if !result.removed.isEmpty {
+            sections.append(.init(
+                icon: "trash", tint: GRASPColor.rejected, title: "Removed",
+                items: result.removed.map { "\($0.front) (\($0.courseName))" }
+            ))
+        }
+        return sections
+    }
+
+    private func sweepAllCardsForContext() {
+        let run = AIActivity(headline: "Checking every card against its note")
+        store.runAIJob(AppStore.sweepJobKey, activity: run) { [store] run in
+            let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                await store.sweepAllCardsForContext()
+            }
+            if !(run.stopRequested && result.isEmpty) { contextSweepResult = result }
         }
     }
 
@@ -181,11 +408,6 @@ private struct AdvancedSettingsTab: View {
     /// that found groups opens the review sheet instead, so this never
     /// needs to report a positive count itself.
     @State private var duplicateScanFoundNone = false
-    /// Owned by the store: closing Settings mid-sweep used to leave it
-    /// running with no Stop button, and reopening offered a second one.
-    private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
-    private var isSweepingContext: Bool { sweepActivity != nil }
-    @State private var contextSweepResult: AppStore.ContextCheckSummary?
 
     var body: some View {
         @Bindable var store = store
@@ -226,70 +448,14 @@ private struct AdvancedSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Off-Topic Card Check") {
-                if let sweepActivity {
-                    AIProgressStrip(
-                        activity: sweepActivity,
-                        onStop: { store.stopAIJob(AppStore.sweepJobKey) },
-                        stopHelp: "Stops now. Cards already checked keep their changes; "
-                            + "the rest are left as they are.",
-                        isInline: true
-                    )
-                } else {
-                    Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
-                        .disabled(isSweepingContext)
-                }
-                Text("One-time sweep of every card you already have, going card by card against its own source note with the local AI model: a definition that reads like assignment instructions or a vague fragment gets rewritten from the note's own text, or removed if the note doesn't support a real one either. Applies immediately -- there's no per-card review step -- but every change is listed in the result and can be undone individually from the \"AI Refined\" badge on the card itself. Needs a local AI model (Ollama or Apple's on-device model) to do anything.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 360)
         .sheet(isPresented: $showingExcludedFolders) { ExcludedFoldersSheet() }
         .sheet(isPresented: $showingDuplicateReview) {
             DuplicateReviewSheet(groups: duplicateGroups) { merges in
                 try? store.mergeDuplicates(merges)
             }
-        }
-        .sheet(isPresented: Binding(get: { contextSweepResult != nil }, set: { if !$0 { contextSweepResult = nil } })) {
-            if let contextSweepResult {
-                ResultSheet(
-                    icon: "checkmark.shield",
-                    title: "Off-Topic Card Check Complete",
-                    leadText: contextSweepResult.isEmpty
-                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment. (If you have no local AI model set up, nothing was checked at all -- see Card Generation above.)"
-                        : nil,
-                    sections: contextSweepSections(contextSweepResult)
-                )
-            }
-        }
-    }
-
-    private func contextSweepSections(_ result: AppStore.ContextCheckSummary) -> [ResultSheet.Section] {
-        var sections: [ResultSheet.Section] = []
-        if !result.refined.isEmpty {
-            sections.append(.init(
-                icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success, title: "Rewrote",
-                items: result.refined.map { "\($0.front) (\($0.courseName))" }
-            ))
-        }
-        if !result.removed.isEmpty {
-            sections.append(.init(
-                icon: "trash", tint: GRASPColor.rejected, title: "Removed",
-                items: result.removed.map { "\($0.front) (\($0.courseName))" }
-            ))
-        }
-        return sections
-    }
-
-    private func sweepAllCardsForContext() {
-        let run = AIActivity(headline: "Checking every card against its note")
-        store.runAIJob(AppStore.sweepJobKey, activity: run) { [store] run in
-            let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
-                await store.sweepAllCardsForContext()
-            }
-            if !(run.stopRequested && result.isEmpty) { contextSweepResult = result }
         }
     }
 
@@ -373,7 +539,7 @@ private struct OllamaSetupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Set Up Local AI").font(.headline)
-            Text("Ollama runs a small language model on this Mac so card refinement and \"Add More Cards with AI\" work fully offline.")
+            Text("Ollama runs a small language model on this Mac, so AI features work offline and your notes never leave it.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 

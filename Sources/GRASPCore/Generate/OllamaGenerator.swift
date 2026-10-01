@@ -4,31 +4,33 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Talks to a local Ollama server (`127.0.0.1:11434`) for card refinement
-/// and distractor generation. Ollama isn't installed on the machine this
-/// was built on, so this is written against the documented REST API and
-/// verified only by what's actually testable without a server: prompt
-/// construction, response parsing, and graceful unavailability. Every
-/// failure mode (server not running, model not pulled, malformed JSON
-/// back) falls back to returning the input untouched rather than
-/// throwing -- callers never need a special case for "Ollama isn't set
-/// up," which is the whole point of it being optional.
+/// Talks to a local Ollama server (`127.0.0.1:11434`) for every AI feature.
+/// Every failure mode (server not running, model not pulled, malformed JSON
+/// back) falls back to returning the input untouched rather than throwing
+/// -- callers never need a special case for "Ollama isn't set up," which is
+/// the whole point of it being optional.
+///
+/// The prompts and parsers here are also what `CloudGenerator` runs: it
+/// holds one of these built on a cloud `ChatTransport`, so a prompt fix
+/// lands for both at once.
 public struct OllamaGenerator: CardGenerator {
     private let baseURL: URL
     private let model: String
-    private let session: URLSession
+    private let transport: any ChatTransport
+    private let wordBudget: Int
 
     /// Exposed so a stored overview can record which model wrote it.
     public var modelName: String { model }
 
+    var serverURL: URL { baseURL }
+
     /// Most lectures run 900-1,700 words. At the default 1,200 -- and 900
     /// once LaTeX shrinks it -- they were cut in two, and each piece paid
-    /// for its own plan, sections, figures and diagram: fourteen-odd calls
-    /// and eight minutes for a 950-word note. At 1,800 (1,350 with math) a
-    /// lecture is one piece, about half the calls. It fits: 1,800 words is
-    /// roughly 2,500 tokens, plus instructions and the answer, well inside
-    /// `contextTokens`.
-    public var overviewContextWordBudget: Int { 1_800 }
+    /// for its own plan, sections and figures: fourteen-odd calls and eight
+    /// minutes for a 950-word note. At 1,800 (1,350 with math) a lecture is
+    /// one piece, about half the calls. 1,800 words is roughly 2,500 tokens,
+    /// plus instructions and the answer, well inside Ollama's 8K context.
+    public var overviewContextWordBudget: Int { wordBudget }
 
     public init(
         baseURL: URL = URL(string: "http://127.0.0.1:11434")!,
@@ -36,46 +38,20 @@ public struct OllamaGenerator: CardGenerator {
     ) {
         self.baseURL = baseURL
         self.model = model
-        // Every request here sets `stream: false`, so Ollama holds the
-        // entire response until generation is completely done and then
-        // sends it as one burst -- there is no incremental data to reset a
-        // "waiting for more" timer against. That makes
-        // `timeoutIntervalForRequest` (URLSession's "no new bytes for this
-        // long" timeout, which is what actually fires here, not the
-        // resource ceiling below) behave as a hard deadline on the whole
-        // call, not an idle timeout. Measured against a real local server:
-        // a small prompt answers in well under a second, but a full
-        // overview -- structured, multi-section, asked of a 7B model --
-        // took 34 seconds before a single byte arrived. A short value here
-        // (this was 4) aborts every real generation a few seconds in, and
-        // `try?` swallows the resulting error silently -- indistinguishable
-        // from the outside from the model having nothing to say. Both
-        // timeouts are set to the same generous ceiling for that reason --
-        // five minutes, because a full lesson (several sections, each with
-        // terms and a check) is a much longer answer than the overview
-        // that 34-second measurement was taken against.
-        self.session = Self.sharedSession
+        self.transport = OllamaTransport(baseURL: baseURL, model: model)
+        self.wordBudget = 1_800
     }
 
-    /// One session for every generator. A generator is made per AI action
-    /// -- often several -- and each used to open its own session, never
-    /// invalidated, so they piled up over a long sitting.
-    private static let sharedSession: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 300
-        return URLSession(configuration: config)
-    }()
+    /// The prompt pipeline on another backend (see `CloudGenerator`).
+    init(transport: any ChatTransport, model: String, wordBudget: Int) {
+        self.baseURL = URL(string: "http://127.0.0.1:11434")!
+        self.model = model
+        self.transport = transport
+        self.wordBudget = wordBudget
+    }
 
     public var isAvailable: Bool {
-        get async {
-            var request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
-            request.timeoutInterval = 2
-            guard let (_, response) = try? await session.data(for: request),
-                  let http = response as? HTTPURLResponse
-            else { return false }
-            return http.statusCode == 200
-        }
+        get async { await OllamaTransport(baseURL: baseURL, model: model).isReachable }
     }
 
     private struct TagsResponse: Decodable {
@@ -90,7 +66,7 @@ public struct OllamaGenerator: CardGenerator {
     public func installedModels() async -> [String] {
         var request = URLRequest(url: baseURL.appendingPathComponent("api/tags"))
         request.timeoutInterval = 2
-        guard let (data, response) = try? await session.data(for: request),
+        guard let (data, response) = try? await OllamaTransport.session.data(for: request),
               let http = response as? HTTPURLResponse, http.statusCode == 200,
               let decoded = try? JSONDecoder().decode(TagsResponse.self, from: data)
         else { return [] }
@@ -775,66 +751,11 @@ public struct OllamaGenerator: CardGenerator {
         let refinedBack: String?
     }
 
-    private struct ChatRequest: Encodable {
-        let model: String
-        let messages: [Message]
-        /// Optional so the diagram pass can omit the key entirely: Swift's
-        /// synthesized `Encodable` skips a nil, and an absent `format` is
-        /// exactly Ollama's free-text default.
-        let format: String?
-        let stream: Bool
-        /// Always false. Newer models (qwen3.5, gemma4) reason to themselves
-        /// before answering unless told not to, and nothing here reads that
-        /// reasoning. Measured locally: qwen3.5 spent 50 seconds and ~600
-        /// tokens thinking before replying with a two-key JSON object, and
-        /// answered in 0.6s with this set. Older models ignore the flag.
-        let think: Bool
-        let options: Options
-        struct Message: Encodable { let role: String; let content: String }
-        struct Options: Encodable {
-            let num_ctx: Int
-            /// Omitted when nil: no cap, Ollama's default.
-            let num_predict: Int?
-        }
-    }
-
-    /// The same for every call, never varied per call: Ollama reloads the
-    /// model whenever this changes. 8K rather than Ollama's 4K default so a
-    /// typical lecture fits in one piece with room to answer -- see
-    /// `overviewContextWordBudget`.
-    static let contextTokens = 8_192
-
-    private struct ChatResponse: Decodable {
-        let message: Message
-        struct Message: Decodable { let content: String }
-    }
-
-    /// `json: false` drops Ollama's JSON grammar mode, for a call whose
-    /// answer isn't JSON at all. No caller needs that any more since the
-    /// concept-map pass (the one multi-line answer this file ever asked
-    /// for in plain text) was dropped, but the knob stays for whatever
-    /// comes next that isn't JSON either.
-    ///
     /// `maxTokens` caps how much one answer can write. Generation is where
-    /// the time and heat go -- reading a note takes seconds, writing about
-    /// it takes most of a minute -- and a local model occasionally runs on
-    /// far past what was asked for. Each cap is about twice a normal answer.
+    /// the time and heat go on a local model, which occasionally runs on far
+    /// past what was asked for. Each cap is about twice a normal answer.
     private func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
-        // Check the server is there first, in the 2-second budget. A refused
-        // connection fails at once on Apple platforms, but on Windows
-        // URLSession sits out the full 300-second timeout -- five minutes
-        // before any AI action with Ollama stopped fell back.
-        guard await isAvailable else { throw URLError(.cannotConnectToHost) }
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/chat"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(ChatRequest(
-            model: model, messages: [.init(role: "user", content: prompt)],
-            format: json ? "json" : nil, stream: false, think: false,
-            options: .init(num_ctx: Self.contextTokens, num_predict: maxTokens)
-        ))
-        let (data, _) = try await session.data(for: request)
-        return try JSONDecoder().decode(ChatResponse.self, from: data).message.content
+        try await transport.complete(prompt: prompt, json: json, maxTokens: maxTokens)
     }
 
     // MARK: - Salvage

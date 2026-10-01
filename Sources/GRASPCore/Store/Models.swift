@@ -123,11 +123,25 @@ public struct NoteText: Codable, FetchableRecord, PersistableRecord, Sendable {
 public enum OverviewOrigin: String, Codable, Sendable {
     case ollama
     case appleOnDevice
+    case cloud
 
     public var label: String {
         switch self {
         case .ollama: return "Ollama (local model)"
         case .appleOnDevice: return "Apple on-device model"
+        case .cloud: return "Google Gemini (cloud)"
+        }
+    }
+
+    /// Who a generator writes as, and with which model; nil for none. In
+    /// Automatic it's the cloud's name even when some calls fell back.
+    public static func of(_ generator: any CardGenerator) -> (origin: OverviewOrigin, model: String?)? {
+        switch generator {
+        case let cloud as CloudGenerator: return (.cloud, cloud.modelName)
+        case let automatic as FallbackGenerator: return (.cloud, automatic.cloud.modelName)
+        case let ollama as OllamaGenerator: return (.ollama, ollama.modelName)
+        case is NoGenerator: return nil
+        default: return (.appleOnDevice, nil)
         }
     }
 }

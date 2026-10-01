@@ -227,6 +227,25 @@ The Mac and iPhone sidebar/deck-list rows for a lecture deck show its date (e.g.
 
 **For Windows:** your deck-list screen doesn't show the lecture-date kicker at all yet (it wasn't part of the earlier handoff, since that only covered the *source note* viewer, not the deck list). When you get to it: show the same date string above each deck's name (`formatLessonDate`'s shape is simple enough to port directly), and add whatever Windows' own affordance is for "set a value by hand, maybe as a range" -- a right-click menu item opening a small dialog with a date picker and a checkbox for the end date is the natural match. No rush; nothing breaks by leaving deck rows exactly as they are until then.
 
+## From the Mac session: cloud AI (Google Gemini) and an "AI" settings tab (Tyler asked 2026-10-01)
+
+Tyler wanted a stronger free model he can switch to and from local, every AI setting in one "AI" tab, and warnings that depend on the model in use. The Mac and iPhone have it. **Nothing changes on Windows until you wire it up**: the default mode is Local, and Windows has no key store yet, so `CardGenerators.select()` behaves exactly as before.
+
+**Core (shared, already in `GRASPCore/Generate/`):**
+- `ChatTransport` (one prompt in, one answer out) with `OllamaTransport` and `GeminiTransport` (Google's OpenAI-compatible endpoint). `OllamaGenerator`'s public API is unchanged; its private `chat()` now goes through a transport.
+- `CloudGenerator`: the same prompts and parsers on Gemini. Built with `fallingBackTo: someOllamaGenerator`, each call the cloud can't take (rate-limited, out of today's quota, offline) goes to Ollama instead, so a job switches mid-way. `FallbackGenerator` does the same at whole-call level when the local model isn't Ollama.
+- `AIPreferences.mode` (`.local` / `.cloud` / `.automatic`, UserDefaults key `GRASP.aiMode`), `AIPreferences.cloudModel`, `CloudProvider` (endpoint, pacing, estimated daily limit), `CloudUsage.shared` (today's request count, the quota pause until midnight Pacific, the last fallback message), `AIQuotaEstimate.warning(needed:mode:)`.
+- `CardGenerators.select()` now honours the mode. The pure decision is `select(mode:cloudKey:cloudModel:local:)`.
+- `AIProgress.Snapshot.note`: set when a call falls back ("Gemini's free limit for today is used up, so this is running on qwen3.5:9b"). Show it on your job strip.
+- `OverviewOrigin.cloud`, and `OverviewOrigin.of(generator)` to label who wrote an overview.
+- `AIKeyStore` (Keychain) is Apple-only; on Windows `read()` returns nil.
+
+**For Windows:**
+1. **Key storage:** store the Gemini key with DPAPI (copy `SessionVault.swift`'s pattern), never in `settings.json` or the synced DB. Then make `AIKeyStore.read()` work on Windows: add a `#if os(Windows)` branch in `AIKeyStore` that reads your DPAPI file, marked `[needs Mac check]`.
+2. **Settings:** turn the "Local AI (Ollama)" card into an "AI" card. Mac order: Model (Local/Cloud/Automatic + what will actually run), Cloud (key field, Test Connection via `CloudGenerator.check(apiKey:)`, model picker from its `.ok(models:)`, "today N of ~250 requests", the free-tier notice), Local (your existing Ollama status and picker), AI Features (test questions toggle, off-topic sweep). Show a one-time confirm before the first switch to Cloud/Automatic (`AIPreferences.hasAcceptedCloudNotice`). The Mac wording is in `Sources/GRASP/Views/SettingsView.swift` (`AISettingsTab`).
+3. **Overview job:** `OverviewJob.swift:38` only accepts `OllamaGenerator`, and its warm-up posts to Ollama directly. Accept `CloudGenerator` too, and only warm Ollama when it's the local model (`(generator as? CloudGenerator)?.localModelName`).
+4. **Warnings:** before big jobs (overviews, refine, the sweep) show `AIQuotaEstimate.warning(...)` when it's non-nil, and show a "Cloud" tag on the job strip while cloud runs it.
+
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.

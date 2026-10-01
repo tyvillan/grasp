@@ -39,10 +39,14 @@ final class AIActivity {
     /// What the job is, for a button that needs to say "Adding Cards…"
     /// only while that particular job runs.
     let purpose: String
+    /// Whether the cloud model takes this job (even if some of it falls
+    /// back), for the strip's "Cloud" tag.
+    let runsInCloud: Bool
 
     init(headline: String, units: Int = 1, purpose: String = "") {
         self.headline = headline
         self.purpose = purpose
+        self.runsInCloud = AIPreferences.mode.usesCloud && AIKeyStore.read() != nil
         self.units = max(1, units)
         #if os(macOS)
         assertion = ProcessInfo.processInfo.beginActivity(

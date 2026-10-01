@@ -73,7 +73,7 @@ public enum OverviewWriter {
         case .tooLong: return .tooLong
         case .empty: return .empty
         case .generated(let result):
-            let ollama = generator as? OllamaGenerator
+            let origin = OverviewOrigin.of(generator) ?? (.appleOnDevice, nil)
             do {
                 try await database.queue.write { db in
                     try NoteOverview(
@@ -83,8 +83,8 @@ public enum OverviewWriter {
                         sourceContentHash: context.material.contentHash,
                         sourceWordCount: context.note.wordCount,
                         chunkCount: result.chunkCount,
-                        generator: ollama != nil ? .ollama : .appleOnDevice,
-                        model: ollama?.modelName
+                        generator: origin.origin,
+                        model: origin.model
                     ).save(db)
                 }
             } catch {
