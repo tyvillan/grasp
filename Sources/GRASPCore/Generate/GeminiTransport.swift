@@ -88,25 +88,79 @@ public struct GeminiTransport: ChatTransport {
 
     public func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
         var attempt = 0
-        var reasoning = true
+        // Each setting a model might refuse is dropped, once, when Google
+        // says it's the problem -- so a newer model with different rules
+        // still answers instead of failing every call.
+        var useReasoning = true
+        var useJSONMode = json
+        var useCap = maxTokens != nil
+        var boost = 1
         while true {
             try Task.checkCancellation()
             try await pacer.waitTurn()
             do {
-                return try await request(prompt: prompt, json: json, maxTokens: maxTokens, reasoning: reasoning)
-            } catch AIBackendError.badResponse(let body) where reasoning && body.lowercased().contains("reasoning") {
-                // A model that won't take `reasoning_effort`: once more without it.
-                reasoning = false
+                return try await request(
+                    prompt: prompt, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
+                    boost: boost, reasoning: useReasoning
+                )
+            } catch AIBackendError.badResponse(let body) where Self.adjust(
+                body, reasoning: &useReasoning, jsonMode: &useJSONMode, cap: &useCap, boost: &boost
+            ) {
+                continue
             } catch AIBackendError.rateLimited(let retryAfter) where attempt < maxRetries {
                 attempt += 1
                 AIProgress.current?.setNote("\(CloudProvider.name) asked GRASP to slow down; waiting a moment")
                 try await pause(min(max(retryAfter ?? 10, 1), 60))
                 AIProgress.current?.setNote(nil)
             } catch let error as AIBackendError {
+                switch error {
+                case .badResponse(let body): usage.recordTransportError(Self.summarize(body))
+                case .unauthorized: usage.recordTransportError("Google rejected the API key.")
+                default: break
+                }
                 failures?.record(error)
                 throw error
             }
         }
+    }
+
+    /// Reads a refusal and turns off the setting it names. False when
+    /// there's nothing left to turn off, i.e. the failure is real.
+    static func adjust(_ body: String, reasoning: inout Bool, jsonMode: inout Bool, cap: inout Bool,
+                       boost: inout Int) -> Bool {
+        let text = body.lowercased()
+        if text.hasPrefix(emptyAnswerMarker) {
+            // Thinking used up the allowance before any answer: more room.
+            guard boost == 1 else { return false }
+            boost = 3
+            return true
+        }
+        if reasoning && text.contains("reasoning") { reasoning = false; return true }
+        if jsonMode && (text.contains("response_format") || text.contains("json_object") || text.contains("json mode")) {
+            jsonMode = false
+            return true
+        }
+        if cap && (text.contains("max_tokens") || text.contains("max_completion_tokens")) { cap = false; return true }
+        return false
+    }
+
+    static let emptyAnswerMarker = "empty_answer"
+
+    /// A refusal in words: Google's own message when it gave one.
+    static func summarize(_ body: String) -> String {
+        if body.lowercased().hasPrefix(emptyAnswerMarker) {
+            return "Google returned an empty answer (\(body.dropFirst(emptyAnswerMarker.count).trimmingCharacters(in: .whitespaces)))."
+        }
+        if let message = errorMessage(in: body) { return "Google said: \(message)" }
+        return "Google answered with something GRASP couldn't read: \(body.prefix(300))"
+    }
+
+    static func errorMessage(in body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let object = (json as? [[String: Any]])?.first ?? (json as? [String: Any])
+        let message = (object?["error"] as? [String: Any])?["message"] as? String
+        return message.map { String($0.prefix(300)) }
     }
 
     private struct Body: Encodable {
@@ -121,7 +175,10 @@ public struct GeminiTransport: ChatTransport {
 
     private struct Reply: Decodable {
         let choices: [Choice]
-        struct Choice: Decodable { let message: Message }
+        struct Choice: Decodable {
+            let message: Message
+            let finish_reason: String?
+        }
         struct Message: Decodable { let content: String? }
     }
 
@@ -131,7 +188,7 @@ public struct GeminiTransport: ChatTransport {
         model.contains("2.5") ? "none" : "low"
     }
 
-    private func request(prompt: String, json: Bool, maxTokens: Int?, reasoning: Bool) async throws -> String {
+    private func request(prompt: String, jsonMode: Bool, maxTokens: Int?, boost: Int, reasoning: Bool) async throws -> String {
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -141,8 +198,8 @@ public struct GeminiTransport: ChatTransport {
         // so it gets more room rather than a JSON answer cut off mid-way.
         request.httpBody = try JSONEncoder().encode(Body(
             model: model, messages: [.init(role: "user", content: prompt)],
-            response_format: json ? .init(type: "json_object") : nil,
-            max_tokens: maxTokens.map { max($0 * 4, 2_048) },
+            response_format: jsonMode ? .init(type: "json_object") : nil,
+            max_tokens: maxTokens.map { max($0 * 4, 2_048) * boost },
             reasoning_effort: reasoning ? Self.reasoningEffort(for: model) : nil
         ))
         usage.recordRequest()
@@ -162,9 +219,10 @@ public struct GeminiTransport: ChatTransport {
         let body = String(data: data, encoding: .utf8) ?? ""
         switch status {
         case 200:
-            guard let reply = try? JSONDecoder().decode(Reply.self, from: data),
-                  let content = reply.choices.first?.message.content, !content.isEmpty
+            guard let reply = try? JSONDecoder().decode(Reply.self, from: data), let choice = reply.choices.first
             else { throw AIBackendError.badResponse(body) }
+            guard let content = choice.message.content, !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { throw AIBackendError.badResponse("\(Self.emptyAnswerMarker) finish_reason: \(choice.finish_reason ?? "none")") }
             usage.recordTransportError(nil)
             return content
         case 401, 403:

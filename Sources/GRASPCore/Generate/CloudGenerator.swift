@@ -102,12 +102,15 @@ public struct CloudGenerator: CardGenerator {
         case failed(String)
     }
 
-    /// Lists the models the key can use: proves the key works without
-    /// spending a generation request.
-    public static func check(apiKey: String) async -> ConnectionCheck {
+    /// Proves the key works and that the model it will use actually
+    /// answers: lists the models (free), then sends one tiny generation
+    /// request. Listing alone said "Connected" for a model that then
+    /// refused every real request.
+    public static func check(apiKey: String, model: String? = nil) async -> ConnectionCheck {
         guard !apiKey.isEmpty else { return .badKey }
+        let models: [String]
         do {
-            return .ok(models: CloudProvider.chatModels(from: try await GeminiTransport.listModels(apiKey: apiKey)))
+            models = CloudProvider.chatModels(from: try await GeminiTransport.listModels(apiKey: apiKey))
         } catch AIBackendError.unauthorized {
             return .badKey
         } catch AIBackendError.quotaExhausted {
@@ -116,6 +119,26 @@ public struct CloudGenerator: CardGenerator {
             return .offline
         } catch AIBackendError.badResponse(let detail) {
             return .failed(detail)
+        } catch {
+            return .failed(String(describing: error))
+        }
+        let chosen = model ?? (AIPreferences.cloudModel.isEmpty
+                               ? (models.first ?? CloudProvider.fallbackModel) : AIPreferences.cloudModel)
+        do {
+            _ = try await GeminiTransport(apiKey: apiKey, model: chosen)
+                .complete(prompt: "Reply with exactly this JSON and nothing else: {\"ok\": true}", json: true, maxTokens: 20)
+            return .ok(models: models)
+        } catch AIBackendError.unauthorized {
+            return .badKey
+        } catch AIBackendError.quotaExhausted {
+            return .quotaUsedUp
+        } catch AIBackendError.rateLimited {
+            // The key is fine; Google is just busy this minute.
+            return .ok(models: models)
+        } catch AIBackendError.unreachable {
+            return .offline
+        } catch AIBackendError.badResponse(let detail) {
+            return .failed("\(chosen): \(GeminiTransport.summarize(detail))")
         } catch {
             return .failed(String(describing: error))
         }

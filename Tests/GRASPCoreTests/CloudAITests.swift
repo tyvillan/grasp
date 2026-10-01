@@ -147,6 +147,36 @@ struct CloudAITests {
         #expect(AIKeyStore.sanitize("   ").problem == nil)
     }
 
+    @Test("an empty answer (thinking used the allowance) is retried with three times the room")
+    func retriesEmptyAnswer() async throws {
+        let empty = #"{"choices":[{"message":{"content":""},"finish_reason":"length"}]}"#
+        let server = FakeServer([(200, empty), (200, reply("{\"ok\":true}"))])
+        let answer = try await transport(server, usage: freshUsage()).complete(prompt: "hi", json: true, maxTokens: 900)
+        #expect(answer == #"{"ok":true}"#)
+        #expect(server.requestCount == 2)
+        #expect(server.body(0).contains(#""max_tokens":3600"#))
+        #expect(server.body(1).contains(#""max_tokens":10800"#))
+    }
+
+    @Test("a model that refuses JSON mode is asked again without it")
+    func dropsJSONMode() async throws {
+        let server = FakeServer([(400, #"{"error":{"message":"response_format is not supported for this model"}}"#),
+                                 (200, reply("{}"))])
+        _ = try await transport(server, usage: freshUsage()).complete(prompt: "hi", json: true, maxTokens: nil)
+        #expect(server.body(0).contains("json_object"))
+        #expect(!server.body(1).contains("json_object"))
+    }
+
+    @Test("a refusal GRASP can't fix is reported in Google's own words")
+    func reportsGoogleMessage() async {
+        let usage = freshUsage()
+        let server = FakeServer([(404, #"[{"error":{"code":404,"message":"models/gemini-9 is not found for API version v1beta"}}]"#)])
+        await #expect(throws: AIBackendError.self) {
+            try await transport(server, usage: usage).complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+        #expect(usage.lastTransportError == "Google said: models/gemini-9 is not found for API version v1beta")
+    }
+
     @Test("recording usage never holds the lock while settings change observers run (this once froze the app)")
     func noDeadlockWithDefaultsObservers() {
         let defaults = UserDefaults(suiteName: "grasp.test.\(UUID().uuidString)")!

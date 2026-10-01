@@ -417,6 +417,10 @@ struct DeckOverviewView: View {
             return what + " Your Mac went to sleep during the run, which stops the model "
                  + "mid-answer -- keep the lid open until it finishes."
         }
+        // In Cloud/Automatic the reason is usually Google's own message.
+        if AIPreferences.mode.usesCloud, let reason = CloudUsage.shared.lastTransportError {
+            return what + " \(reason)"
+        }
         if failed.allSatisfy({ $0.outcome == .empty }) {
             return what + " The model ran but came back with nothing usable."
         }
