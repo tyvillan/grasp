@@ -46,10 +46,13 @@ struct AISettingsScreen: View {
                         .disabled(store.isCheckingCloud)
                     if !store.cloudModels.isEmpty {
                         Picker("Model", selection: $cloudModel) {
-                            Text("Automatic (\(store.cloudModels.first ?? CloudProvider.fallbackModel))").tag("")
-                            ForEach(store.cloudModels, id: \.self) { Text($0).tag($0) }
+                            Text(automaticModelLabel).tag("")
+                            ForEach(store.cloudModels, id: \.self) { Text(modelLabel($0)).tag($0) }
                         }
                         .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
+                        if let note = modelSwitchNote {
+                            Text(note).font(.footnote).foregroundStyle(.secondary)
+                        }
                     }
                     LabeledContent("Today", value: usageText)
                     Button("Remove Key", role: .destructive) { Task { await store.removeCloudKey() } }
@@ -116,6 +119,32 @@ struct AISettingsScreen: View {
         case .automatic:
             return "Gemini when it can, Apple's on-device model when it can't -- busy, offline, or out of today's free requests."
         }
+    }
+
+    private var automaticModelLabel: String {
+        _ = store.cloudUsageRevision
+        let best = store.cloudModels.first ?? CloudProvider.fallbackModel
+        if let used = CloudUsage.shared.lastUsedModel, used != best, CloudUsage.shared.skipNote(for: best) != nil {
+            return "Automatic (using \(used))"
+        }
+        return "Automatic (\(best))"
+    }
+
+    private func modelLabel(_ model: String) -> String {
+        _ = store.cloudUsageRevision
+        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model) -- \(note)" }
+        if model == CloudUsage.shared.lastUsedModel { return "\(model) -- in use" }
+        return model
+    }
+
+    private var modelSwitchNote: String? {
+        _ = store.cloudUsageRevision
+        let best = cloudModel.isEmpty ? (store.cloudModels.first ?? CloudProvider.fallbackModel) : cloudModel
+        guard let note = CloudUsage.shared.skipNote(for: best) else { return nil }
+        if let used = CloudUsage.shared.lastUsedModel, used != best {
+            return "Using \(used) because \(best) is \(note). GRASP tries \(best) again later."
+        }
+        return "\(best) is \(note). GRASP moves down the list when a request needs it."
     }
 
     private var cloudStatusText: String {

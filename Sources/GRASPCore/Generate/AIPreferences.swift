@@ -137,17 +137,23 @@ public final class CloudUsage: @unchecked Sendable {
     private let now: @Sendable () -> Date
     private let persistQueue = DispatchQueue(label: "com.tyvillan.grasp.cloudusage")
 
-    private var loaded = false
     private var countDay: String?
     private var count = 0
     private var paused: Date?
     private var fallback: String?
     private var transportError: String?
-    private var avoidedModels: [String: Date] = [:]
+    private var avoidedModels: [String: (until: Date, reason: String)] = [:]
+    private var usedModel: String?
 
     public init(defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }) {
         self.defaults = defaults
         self.now = now
+        // Read now, while nothing else can hold the lock or be writing.
+        paused = defaults.object(forKey: Self.pausedUntilKey) as? Date
+        fallback = defaults.string(forKey: Self.lastFallbackKey)
+        let day = Self.quotaDay(of: now())
+        countDay = day
+        count = defaults.integer(forKey: Self.usageKey(day))
     }
 
     /// The quota day a moment falls in, as "yyyy-MM-dd" in Pacific time.
@@ -170,18 +176,24 @@ public final class CloudUsage: @unchecked Sendable {
     private static let pausedUntilKey = "GRASP.cloudPausedUntil"
     private static let lastFallbackKey = "GRASP.cloudLastFallback"
 
-    /// The caller holds the lock. Reads only -- reading defaults notifies nobody.
-    private func prepare() {
-        if !loaded {
-            loaded = true
-            paused = defaults.object(forKey: Self.pausedUntilKey) as? Date
-            fallback = defaults.string(forKey: Self.lastFallbackKey)
-        }
+    /// Rolls the counter over when the quota day changes. Called before
+    /// taking the lock: it reads `UserDefaults`, and a defaults write in
+    /// flight on another thread is delivering change notifications whose
+    /// observers want this lock -- holding it across a read could wait on
+    /// that write forever.
+    private func rollOverDay() {
         let day = Self.quotaDay(of: now())
+        lock.lock()
+        let current = countDay
+        lock.unlock()
+        guard current != day else { return }
+        let stored = defaults.integer(forKey: Self.usageKey(day))
+        lock.lock()
         if countDay != day {
             countDay = day
-            count = defaults.integer(forKey: Self.usageKey(day))
+            count = stored
         }
+        lock.unlock()
     }
 
     private func persist(_ write: @escaping @Sendable (UserDefaults) -> Void) {
@@ -190,8 +202,8 @@ public final class CloudUsage: @unchecked Sendable {
     }
 
     public var requestsToday: Int {
+        rollOverDay()
         lock.lock(); defer { lock.unlock() }
-        prepare()
         return count
     }
 
@@ -201,8 +213,8 @@ public final class CloudUsage: @unchecked Sendable {
     }
 
     func recordRequest() {
+        rollOverDay()
         lock.lock()
-        prepare()
         count += 1
         let (key, value) = (Self.usageKey(countDay ?? ""), count)
         lock.unlock()
@@ -212,15 +224,15 @@ public final class CloudUsage: @unchecked Sendable {
 
     /// Non-nil while the cloud model is out of quota: until the reset.
     public var pausedUntil: Date? {
+        rollOverDay()
         lock.lock(); defer { lock.unlock() }
-        prepare()
         guard let until = paused, until > now() else { return nil }
         return until
     }
 
     func pauseForQuota() {
+        rollOverDay()
         lock.lock()
-        prepare()
         let until = Self.nextReset(after: now())
         paused = until
         // The provider says it's used up, whatever the local count thought.
@@ -236,8 +248,8 @@ public final class CloudUsage: @unchecked Sendable {
 
     /// Cleared when the student changes the key or tests it successfully.
     public func clearPause() {
+        rollOverDay()
         lock.lock()
-        prepare()
         paused = nil
         lock.unlock()
         persist { $0.removeObject(forKey: Self.pausedUntilKey) }
@@ -247,14 +259,14 @@ public final class CloudUsage: @unchecked Sendable {
     /// The most recent fallback, in a sentence, e.g. "Gemini's free limit
     /// for today is used up, so this ran on qwen3.5:9b."
     public var lastFallback: String? {
+        rollOverDay()
         lock.lock(); defer { lock.unlock() }
-        prepare()
         return fallback
     }
 
     func recordFallback(_ message: String) {
+        rollOverDay()
         lock.lock()
-        prepare()
         fallback = message
         lock.unlock()
         persist { $0.set(message, forKey: Self.lastFallbackKey) }
@@ -279,18 +291,40 @@ public final class CloudUsage: @unchecked Sendable {
 
     /// Whether a model was recently overloaded and should be skipped.
     func isAvoided(_ model: String) -> Bool {
+        skipNote(for: model) != nil
+    }
+
+    /// Why a model is being skipped right now ("overloaded"), or nil.
+    public func skipNote(for model: String) -> String? {
         lock.lock(); defer { lock.unlock() }
-        guard let until = avoidedModels[model] else { return false }
-        if until <= now() { avoidedModels[model] = nil; return false }
-        return true
+        guard let entry = avoidedModels[model] else { return nil }
+        if entry.until <= now() { avoidedModels[model] = nil; return nil }
+        return entry.reason
     }
 
     /// Skips a model for a while after it kept failing, so the next call
     /// goes straight to one that works instead of waiting it out again.
-    func avoid(_ model: String, for seconds: TimeInterval = 600) {
+    func avoid(_ model: String, for seconds: TimeInterval = 600, reason: String = "unavailable") {
         lock.lock()
-        avoidedModels[model] = now().addingTimeInterval(seconds)
+        avoidedModels[model] = (now().addingTimeInterval(seconds), reason)
         lock.unlock()
+        notify()
+    }
+
+    /// The model that answered most recently -- what the model menu shows
+    /// as in use, which differs from the best model while that one is
+    /// being skipped.
+    public var lastUsedModel: String? {
+        lock.lock(); defer { lock.unlock() }
+        return usedModel
+    }
+
+    func recordModelUsed(_ model: String) {
+        lock.lock()
+        let changed = usedModel != model
+        usedModel = model
+        lock.unlock()
+        if changed { notify() }
     }
 
     private func notify() {

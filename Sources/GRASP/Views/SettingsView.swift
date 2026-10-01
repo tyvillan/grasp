@@ -201,10 +201,15 @@ private struct AISettingsTab: View {
                 }
                 if !store.cloudModels.isEmpty {
                     Picker("Model", selection: $cloudModel) {
-                        Text("Automatic (\(store.cloudModels.first ?? CloudProvider.fallbackModel))").tag("")
-                        ForEach(store.cloudModels, id: \.self) { Text($0).tag($0) }
+                        Text(automaticModelLabel).tag("")
+                        ForEach(store.cloudModels, id: \.self) { Text(modelLabel($0)).tag($0) }
                     }
                     .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
+                    if let note = modelSwitchNote {
+                        Label(note, systemImage: "arrow.triangle.branch")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let detail = cloudErrorDetail {
                     Label(detail, systemImage: "exclamationmark.triangle.fill")
@@ -239,6 +244,35 @@ private struct AISettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // The model menu follows what GRASP is actually doing: while the best
+    // model is overloaded or out of requests, the one in use is marked and
+    // the skipped one says why.
+    private var automaticModelLabel: String {
+        _ = store.cloudUsageRevision
+        let best = store.cloudModels.first ?? CloudProvider.fallbackModel
+        if let used = CloudUsage.shared.lastUsedModel, used != best, CloudUsage.shared.skipNote(for: best) != nil {
+            return "Automatic (using \(used))"
+        }
+        return "Automatic (\(best))"
+    }
+
+    private func modelLabel(_ model: String) -> String {
+        _ = store.cloudUsageRevision
+        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model) -- \(note)" }
+        if model == CloudUsage.shared.lastUsedModel { return "\(model) -- in use" }
+        return model
+    }
+
+    private var modelSwitchNote: String? {
+        _ = store.cloudUsageRevision
+        let best = cloudModel.isEmpty ? (store.cloudModels.first ?? CloudProvider.fallbackModel) : cloudModel
+        guard let note = CloudUsage.shared.skipNote(for: best) else { return nil }
+        if let used = CloudUsage.shared.lastUsedModel, used != best {
+            return "Using \(used) because \(best) is \(note). GRASP tries \(best) again later."
+        }
+        return "\(best) is \(note). GRASP moves down the list when a request needs it."
     }
 
     /// Why the last cloud request or check didn't go through, in words.

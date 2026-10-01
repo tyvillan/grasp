@@ -137,7 +137,7 @@ public struct GeminiTransport: ChatTransport {
                     AIProgress.current?.setNote(nil)
                     continue
                 }
-                usage.avoid(current)
+                usage.avoid(current, reason: "overloaded")
                 overloadedModels += 1
                 if isLast || overloadedModels >= 3 {
                     usage.recordTransportError(overloadedModels >= 3
@@ -150,7 +150,8 @@ public struct GeminiTransport: ChatTransport {
             } catch AIBackendError.quotaExhausted {
                 // Daily free quotas are per model: this one is done until
                 // the reset, but the next may have plenty left.
-                usage.avoid(current, for: max(60, CloudUsage.nextReset(after: Date()).timeIntervalSinceNow))
+                usage.avoid(current, for: max(60, CloudUsage.nextReset(after: Date()).timeIntervalSinceNow),
+                            reason: "free limit used up today")
                 if isLast {
                     usage.pauseForQuota()
                     failures?.record(.quotaExhausted)
@@ -165,7 +166,7 @@ public struct GeminiTransport: ChatTransport {
                     AIProgress.current?.setNote(nil)
                     continue
                 }
-                usage.avoid(current, for: 60)
+                usage.avoid(current, for: 60, reason: "busy")
                 if isLast {
                     failures?.record(.rateLimited(retryAfter: retryAfter))
                     throw AIBackendError.rateLimited(retryAfter: retryAfter)
@@ -177,7 +178,7 @@ public struct GeminiTransport: ChatTransport {
                 continue
             } catch AIBackendError.badResponse(let body) where !isLast && Self.isModelUnavailable(body) {
                 // Renamed, retired or not offered to this key: skip it for an hour.
-                usage.avoid(current, for: 3_600)
+                usage.avoid(current, for: 3_600, reason: "not available to your key")
                 moveToNext("\(current) isn't available")
             } catch let error as AIBackendError {
                 switch error {
@@ -302,6 +303,7 @@ public struct GeminiTransport: ChatTransport {
             guard let content = choice.message.content, !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { throw AIBackendError.badResponse("\(Self.emptyAnswerMarker) finish_reason: \(choice.finish_reason ?? "none")") }
             usage.recordTransportError(nil)
+            usage.recordModelUsed(model)
             return content
         case 401, 403:
             throw AIBackendError.unauthorized

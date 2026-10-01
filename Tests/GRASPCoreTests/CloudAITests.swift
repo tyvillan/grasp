@@ -161,6 +161,9 @@ struct CloudAITests {
         #expect(server.body(0).contains("gemini-3.8-flash"))
         #expect(server.body(3).contains("gemini-2.5-flash"))
         #expect(usage.isAvoided("gemini-3.8-flash"))
+        // What the model menu shows.
+        #expect(usage.skipNote(for: "gemini-3.8-flash") == "overloaded")
+        #expect(usage.lastUsedModel == "gemini-2.5-flash")
 
         // The next call goes straight to the model that worked.
         _ = try await transport(server, usage: usage, pauses: pauses, model: "gemini-3.8-flash",
