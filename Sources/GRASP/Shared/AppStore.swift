@@ -223,7 +223,9 @@ final class AppStore {
     func refreshGeneratorStatus() async {
         let generator = await CardGenerators.select()
         isGeneratorAvailable = !(generator is NoGenerator)
-        hasCloudKey = AIKeyStore.read() != nil
+        let keyState = AIKeyStore.state()
+        hasCloudKey = keyState == .ready
+        cloudKeyProblem = Self.describe(keyState)
         var status: String
         switch generator {
         case let cloud as CloudGenerator:
@@ -255,6 +257,20 @@ final class AppStore {
     /// and every status line update together.
     private(set) var aiMode: AIMode = AIPreferences.mode
     private(set) var hasCloudKey = false
+    /// Set when a key is stored but unusable, so Settings can say why.
+    private(set) var cloudKeyProblem: String?
+
+    private static func describe(_ state: AIKeyStore.KeyState) -> String? {
+        switch state {
+        case .missing, .ready:
+            return nil
+        case .empty:
+            return "A Gemini key entry exists in your Keychain, but it's empty. Paste your key below to replace it."
+        case .unreadable(let code):
+            return "A Gemini key is saved, but macOS wouldn't let GRASP read it (error \(code)). "
+                + "Paste your key below to save it again, and choose Always Allow if macOS asks."
+        }
+    }
     private(set) var cloudCheck: CloudGenerator.ConnectionCheck?
     private(set) var isCheckingCloud = false
     /// The text models the key can use, best first; empty until checked.

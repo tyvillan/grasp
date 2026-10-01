@@ -54,6 +54,9 @@ struct AISettingsScreen: View {
                     LabeledContent("Today", value: usageText)
                     Button("Remove Key", role: .destructive) { Task { await store.removeCloudKey() } }
                 } else {
+                    if let problem = store.cloudKeyProblem {
+                        Text(problem).font(.footnote).foregroundStyle(.red)
+                    }
                     SecureField("Paste your Gemini API key", text: $keyDraft)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

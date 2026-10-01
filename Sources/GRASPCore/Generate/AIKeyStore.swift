@@ -17,7 +17,30 @@ public enum AIKeyStore {
     static let service = "com.tyvillan.grasp.ai"
     static let account = "gemini"
 
-    public static func read() -> String? {
+    /// Why `read()` has no key, for Settings to say rather than showing
+    /// "no key" for every cause.
+    public enum KeyState: Equatable, Sendable {
+        case missing
+        case ready
+        /// An item is stored but holds nothing (e.g. a copy command whose
+        /// source variable didn't exist).
+        case empty
+        /// An item is stored but the system wouldn't hand it over, e.g.
+        /// access was declined. Carries the OSStatus.
+        case unreadable(Int32)
+    }
+
+    public static func read() -> String? { fetch().key }
+
+    public static func state() -> KeyState {
+        let (key, status, found) = fetch()
+        if key != nil { return .ready }
+        if found { return .empty }
+        return status == errSecItemNotFound || status == errSecSuccess ? .missing : .unreadable(status)
+    }
+
+    /// `found`: an item came back, whatever it held.
+    private static func fetch() -> (key: String?, status: Int32, found: Bool) {
         #if canImport(Security)
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -32,16 +55,16 @@ public enum AIKeyStore {
         #if os(macOS)
         if status != errSecSuccess {
             query[kSecUseDataProtectionKeychain as String] = true
-            status = SecItemCopyMatching(query as CFDictionary, &result)
+            let second = SecItemCopyMatching(query as CFDictionary, &result)
+            // Not-found from the second place mustn't hide why the first failed.
+            if second == errSecSuccess || status == errSecItemNotFound { status = second }
         }
         #endif
-        guard status == errSecSuccess, let data = result as? Data,
-              let key = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !key.isEmpty
-        else { return nil }
-        return key
+        guard status == errSecSuccess, let data = result as? Data else { return (nil, status, false) }
+        let key = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (key.isEmpty ? nil : key, status, true)
         #else
-        return nil
+        return (nil, -1, false)
         #endif
     }
 

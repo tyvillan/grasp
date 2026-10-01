@@ -208,6 +208,11 @@ private struct AISettingsTab: View {
                 }
                 usageRow
             } else {
+                if let problem = store.cloudKeyProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(GRASPColor.rejected)
+                }
                 HStack(spacing: 8) {
                     SecureField("Paste your Gemini API key", text: $keyDraft)
                         .textFieldStyle(.roundedBorder)
