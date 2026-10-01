@@ -58,6 +58,7 @@ struct DeckListView: View {
     @State private var kickers: [String: String] = [:]
     @State private var exams: [CalendarEvent] = []
     @State private var renamingDeck: Deck?
+    @State private var settingLectureDateFor: Deck?
     @State private var deletingDeck: Deck?
     @State private var deletingDeckCardCount = 0
     @State private var dropTargetDeckId: String?
@@ -113,6 +114,7 @@ struct DeckListView: View {
                             DeckContextMenu(
                                 deck: deck,
                                 onRename: { renamingDeck = deck },
+                                onSetLectureDate: { settingLectureDateFor = deck },
                                 onDelete: { beginDelete(deck) }
                             )
                         }
@@ -130,6 +132,9 @@ struct DeckListView: View {
         }
         .sheet(item: $renamingDeck) { deck in
             DeckRenameSheet(deck: deck, onRenamed: load)
+        }
+        .sheet(item: $settingLectureDateFor) { deck in
+            DeckLectureDateSheet(deck: deck, onSaved: load)
         }
         .sheet(item: $deletingDeck) { deck in
             DeckDeleteSheet(
@@ -193,7 +198,7 @@ struct DeckListView: View {
 
     private func load() {
         decks = (try? store.decks(inCourse: courseId)) ?? []
-        kickers = store.deckKickers(forDecks: decks.map(\.id))
+        kickers = store.deckKickers(for: decks)
         exams = store.guidedExams(courseId: courseId)
     }
 

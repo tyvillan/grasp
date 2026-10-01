@@ -7,10 +7,13 @@ import GRASPCore
 struct DeckContextMenu: View {
     let deck: Deck
     let onRename: () -> Void
+    let onSetLectureDate: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         Button("Rename…", action: onRename)
+        Button(deck.manualLessonDate == nil ? "Set Lecture Date…" : "Change Lecture Date…",
+               action: onSetLectureDate)
         Divider()
         Button("Delete…", role: .destructive, action: onDelete)
     }
@@ -160,6 +163,56 @@ struct DeckDeleteSheet: View {
         }
         .padding(20)
         .frame(width: 420)
+    }
+}
+
+/// Lets the student assign a lecture date by hand when a deck's notes
+/// carry none to extract (no date in the filename or front matter). Never
+/// shown as overriding an extracted date -- `AppStore.deckKickers` always
+/// prefers the extracted one, so this only ever fills in where extraction
+/// found nothing.
+struct DeckLectureDateSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let deck: Deck
+    let onSaved: () -> Void
+
+    @State private var date: Date
+
+    init(deck: Deck, onSaved: @escaping () -> Void) {
+        self.deck = deck
+        self.onSaved = onSaved
+        _date = State(initialValue: deck.manualLessonDate ?? Date())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Lecture Date for \"\(deck.name)\"").font(.headline)
+            Text("Shown in the sidebar when GRASP can't read a date from this deck's notes.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            DatePicker("Date", selection: $date, displayedComponents: .date)
+                .labelsHidden()
+            HStack {
+                if deck.manualLessonDate != nil {
+                    Button("Clear", role: .destructive) {
+                        try? store.setDeckManualLessonDate(deck.id, to: nil)
+                        onSaved()
+                        dismiss()
+                    }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save") {
+                    try? store.setDeckManualLessonDate(deck.id, to: date)
+                    onSaved()
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
     }
 }
 

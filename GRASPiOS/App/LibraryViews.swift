@@ -129,10 +129,12 @@ struct CourseView: View {
     @State private var openedExam: String?
     @State private var choosingGuide = false
     @State private var guideMessage: String?
+    @State private var settingLectureDateFor: Deck?
 
     var body: some View {
         let decks = (try? store.decks(inCourse: course.id)) ?? []
         let exams = store.guidedExams(courseId: course.id)
+        let kickers = store.deckKickers(for: decks)
         List {
             Section {
                 NavigationLink {
@@ -175,8 +177,13 @@ struct CourseView: View {
                     NavigationLink {
                         DeckScreen(route: DeckRoute(scope: .deck(deck.id), name: deck.name))
                     } label: {
-                        DeckRow(name: deck.name, icon: "rectangle.stack",
+                        DeckRow(name: deck.name, icon: "rectangle.stack", kicker: kickers[deck.id],
                                 counts: store.deckCounts[deck.id].map { ($0.cardCount, $0.dueCount) } ?? (0, 0))
+                    }
+                    .contextMenu {
+                        Button(deck.manualLessonDate == nil ? "Set Lecture Date…" : "Change Lecture Date…") {
+                            settingLectureDateFor = deck
+                        }
                     }
                 }
             }
@@ -189,6 +196,9 @@ struct CourseView: View {
         .fileImporter(isPresented: $choosingGuide, allowedContentTypes: ExamScreen.guideTypes,
                       allowsMultipleSelection: true) { outcome in
             if case .success(let urls) = outcome { addGuides(urls) }
+        }
+        .sheet(item: $settingLectureDateFor) { deck in
+            DeckLectureDateSheet(deck: deck, onSaved: {})
         }
         .onAppear {
             guard openedDeck == nil, openedExam == nil, let name = DebugLaunch.deck else { return }
@@ -230,17 +240,77 @@ struct DeckRoute: Hashable {
 private struct DeckRow: View {
     let name: String
     let icon: String
+    var kicker: String? = nil
     let counts: (cards: Int, due: Int)
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundStyle(GRASPColor.accent).frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
+                if let kicker {
+                    Text(kicker).font(.caption2.weight(.semibold)).foregroundStyle(GRASPColor.accent)
+                }
                 Text(name).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
                 Text("\(counts.cards) cards").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
             }
             Spacer()
             if counts.due > 0 { DueBadge(count: counts.due) }
+        }
+    }
+}
+
+/// Lets the student assign a lecture date by hand when a deck's notes
+/// carry none to extract -- the iPhone counterpart to the Mac's sheet of
+/// the same name in `Sources/GRASP/Views/DeckActions.swift`. Never shown
+/// as overriding an extracted date: `AppStore.deckKickers` always prefers
+/// the extracted one, so this only ever fills in where extraction found
+/// nothing.
+private struct DeckLectureDateSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let deck: Deck
+    let onSaved: () -> Void
+
+    @State private var date: Date
+
+    init(deck: Deck, onSaved: @escaping () -> Void) {
+        self.deck = deck
+        self.onSaved = onSaved
+        _date = State(initialValue: deck.manualLessonDate ?? Date())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                } footer: {
+                    Text("Shown in the deck list when GRASP can't read a date from this deck's notes.")
+                }
+                if deck.manualLessonDate != nil {
+                    Section {
+                        Button("Clear Lecture Date", role: .destructive) {
+                            try? store.setDeckManualLessonDate(deck.id, to: nil)
+                            onSaved()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle(deck.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        try? store.setDeckManualLessonDate(deck.id, to: date)
+                        onSaved()
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }

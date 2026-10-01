@@ -399,6 +399,16 @@ enum Schema {
             }
         }
 
+        // A lecture date the student sets by hand, for a deck whose date
+        // couldn't be read from its notes (no date in the filename or
+        // front matter). `deck` already syncs whole-row, so this column
+        // just rides along -- no new sync table needed.
+        migrator.registerMigration("v11_deck_manual_date") { db in
+            try db.alter(table: "deck") { t in
+                t.add(column: "manualLessonDate", .datetime)
+            }
+        }
+
         return migrator
     }
 }

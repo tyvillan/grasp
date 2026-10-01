@@ -212,6 +212,21 @@ Tyler judged the concept map on every overview -- yours (`cd113d5`) included -- 
 
 What's deliberately **not** touched, so nothing of yours breaks: `NoteOverview.mermaidSource` (the DB column), `RenderedOverview.diagram`/`mermaidSource`/`linkedNodes`, and all of `MermaidParser.swift`/`DiagramLayout.swift` in GRASPCore. Every diagram already generated before this change is still sitting in Tyler's synced library, still valid data, and your `OverviewReader.swift`/`LessonFigureViews.swift` will keep rendering those exactly as before until you remove that code too -- there's no rush and no build break either way. When you get to it, it's the same kind of removal as the Mac's: drop the rendering, leave the stored data and the shared reader alone.
 
+## From the Mac session: deck list shows a lecture date, which the student can now set by hand (Tyler asked 2026-10-01)
+
+The Mac and iPhone sidebar/deck-list rows for a lecture deck show its date (e.g. "AUG 27") above the deck name, extracted the same way the overview kicker is (`DeckOverviewReader.lessonHeading(for:)` against the deck's earliest linked material). Tyler then asked for a way to set that date by hand when extraction finds none -- some decks have no date-bearing note at all.
+
+**Core change (shared, already in `GRASPCore`):**
+- `Deck` (`Store/Models.swift`) has a new `manualLessonDate: Date?` field. Migration `v11_deck_manual_date` just adds the column -- `deck` already syncs whole-row (`SyncSchema.tables`), so no other sync code needed; it rides along automatically.
+- `AppStore.deckKickers(for: [Deck]) -> [String: String]` (`Sources/GRASP/Shared/AppStore.swift`) returns each deck's date string, preferring the extracted date and falling back to `deck.manualLessonDate` only when extraction found nothing. It never shows both, and a manual date never overrides a real one.
+- `AppStore.setDeckManualLessonDate(_ deckId:, to: Date?)` sets or clears it, then reloads.
+
+**UI (Mac and iPhone, reference only, don't copy the SwiftUI):**
+- Mac: `DeckListView.swift`'s sidebar row shows the kicker; a "Set Lecture Date…" / "Change Lecture Date…" context-menu item (in `DeckContextMenu`, `Views/DeckActions.swift`) opens `DeckLectureDateSheet` -- a date picker with Save/Cancel, plus Clear when a manual date is already set.
+- iPhone: `GRASPiOS/App/LibraryViews.swift`'s `CourseView` deck rows show the same kicker; a context menu on each deck row opens the same kind of sheet (`DeckLectureDateSheet`, private to that file).
+
+**For Windows:** your deck-list screen doesn't show the lecture-date kicker at all yet (it wasn't part of the earlier handoff, since that only covered the *source note* viewer, not the deck list). When you get to it: show the same date string above each deck's name (`Deck.manualLessonDate` falls back the same way, once you read the extracted date the way `lessonHeading` does), and add whatever Windows' own affordance is for "set a value by hand" -- a right-click menu item opening a small date-picker dialog is the natural match. No rush; nothing breaks by leaving deck rows exactly as they are until then.
+
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.

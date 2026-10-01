@@ -441,23 +441,43 @@ final class AppStore {
         }
     }
 
-    /// Each deck's lecture date (e.g. "AUG 27"), from its earliest linked
-    /// note, for `DeckListView`'s sidebar rows -- just the date, not the
-    /// full "LECTURE 2 · AUG 27" kicker the Overview tab and source-note
-    /// viewers show, since the deck's own name already says which lecture
-    /// it is. A deck with no linked material, or whose note has no
-    /// extractable date (hand-made, or notes named by topic), gets none.
-    func deckKickers(forDecks deckIds: [String]) -> [String: String] {
-        (try? database.queue.read { db -> [String: String] in
-            var result: [String: String] = [:]
-            for deckId in deckIds {
-                guard let first = try OverviewQueries.materials(forDecks: [deckId], db: db).first else { continue }
+    /// Each deck's lecture date (e.g. "AUG 27"), for `DeckListView`'s
+    /// sidebar rows -- just the date, not the full "LECTURE 2 · AUG 27"
+    /// kicker the Overview tab and source-note viewers show, since the
+    /// deck's own name already says which lecture it is. Extracted from
+    /// its earliest linked note when that's possible; else `deck.
+    /// manualLessonDate`, if the student set one; else none at all.
+    func deckKickers(for decks: [Deck]) -> [String: String] {
+        let extracted = (try? database.queue.read { db -> [String: Date] in
+            var result: [String: Date] = [:]
+            for deck in decks {
+                guard let first = try OverviewQueries.materials(forDecks: [deck.id], db: db).first else { continue }
                 let parsed = FilenameParsing.parse(fileNameWithoutExtension: first.title)
                 guard let date = first.noteDate ?? parsed.dateFromFilename else { continue }
-                result[deckId] = date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+                result[deck.id] = date
             }
             return result
         }) ?? [:]
+        var result: [String: String] = [:]
+        for deck in decks {
+            guard let date = extracted[deck.id] ?? deck.manualLessonDate else { continue }
+            result[deck.id] = date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+        }
+        return result
+    }
+
+    /// Sets or clears the lecture date the student assigned by hand, for a
+    /// deck whose notes carry no extractable date. Never touches a date
+    /// that *was* extracted -- `deckKickers` already prefers that one, so a
+    /// manual date only ever fills in where extraction found nothing.
+    func setDeckManualLessonDate(_ deckId: String, to date: Date?) throws {
+        try database.queue.write { db in
+            guard var deck = try Deck.fetchOne(db, key: deckId) else { return }
+            deck.manualLessonDate = date
+            deck.updatedAt = Date()
+            try deck.save(db)
+        }
+        reload()
     }
 
     func cards(inDeck deckId: String) throws -> [Card] {
