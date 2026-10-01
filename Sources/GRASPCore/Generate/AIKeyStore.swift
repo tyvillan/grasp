@@ -17,6 +17,30 @@ public enum AIKeyStore {
     static let service = "com.tyvillan.grasp.ai"
     static let account = "gemini"
 
+    /// Cleans up what was pasted and says what's wrong with it, if anything.
+    /// Keys get pasted with a `GEMINI_API_KEY=` prefix, wrapped in quotes,
+    /// or truncated with an ellipsis; any of those is rejected by Google,
+    /// and non-ASCII characters can't even be sent in a header.
+    public static func sanitize(_ raw: String) -> (key: String, problem: String?) {
+        var key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.lowercased().hasPrefix("bearer ") { key = String(key.dropFirst(7)) }
+        if let equals = key.lastIndex(of: "="), key[..<equals].allSatisfy({ $0.isLetter || $0 == "_" }) {
+            key = String(key[key.index(after: equals)...])
+        }
+        key = key.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`").union(.whitespacesAndNewlines))
+        if key.isEmpty { return (key, nil) }
+        if key.contains(where: { $0.isWhitespace }) {
+            return (key, "That has spaces or line breaks in it. A Gemini key is one unbroken string.")
+        }
+        if !key.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 32 && $0.value < 127 }) {
+            return (key, "That contains a character a key can't have, like an ellipsis (…) from a shortened display. Copy the full key.")
+        }
+        if key.count < 20 {
+            return (key, "That's too short to be a Gemini key. Copy the full key.")
+        }
+        return (key, nil)
+    }
+
     /// Why `read()` has no key, for Settings to say rather than showing
     /// "no key" for every cause.
     public enum KeyState: Equatable, Sendable {

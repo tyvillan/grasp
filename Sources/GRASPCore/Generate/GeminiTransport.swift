@@ -155,6 +155,7 @@ public struct GeminiTransport: ChatTransport {
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
         } catch {
+            usage.recordTransportError(Self.describe(error))
             throw AIBackendError.unreachable
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -164,10 +165,11 @@ public struct GeminiTransport: ChatTransport {
             guard let reply = try? JSONDecoder().decode(Reply.self, from: data),
                   let content = reply.choices.first?.message.content, !content.isEmpty
             else { throw AIBackendError.badResponse(body) }
+            usage.recordTransportError(nil)
             return content
         case 401, 403:
             throw AIBackendError.unauthorized
-        case 400 where body.contains("API_KEY_INVALID") || body.contains("API key not valid"):
+        case 400 where Self.isKeyRejection(body):
             throw AIBackendError.unauthorized
         case 429:
             if Self.isDailyQuota(body) {
@@ -177,9 +179,38 @@ public struct GeminiTransport: ChatTransport {
             let header = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
             throw AIBackendError.rateLimited(retryAfter: header ?? Self.retryDelay(in: body))
         case 500...599, 0:
+            usage.recordTransportError("Google answered HTTP \(status)")
             throw AIBackendError.unreachable
         default:
             throw AIBackendError.badResponse(body)
+        }
+    }
+
+    /// Google's wordings for a key it won't accept: "API key not valid",
+    /// "Please pass a valid API key", status API_KEY_INVALID.
+    static func isKeyRejection(_ body: String) -> Bool {
+        let text = body.lowercased()
+        return text.contains("api_key_invalid") || text.contains("api key not valid")
+            || text.contains("valid api key") || text.contains("api key expired")
+    }
+
+    /// What went wrong, for the student: the error code and its description.
+    static func describe(_ error: Error) -> String {
+        if let url = error as? URLError { return "\(url.localizedDescription) (code \(url.code.rawValue))" }
+        return String(describing: error)
+    }
+
+    /// Whether a transport error means "no connection" rather than "this
+    /// request is malformed" -- a bad character in the key fails the
+    /// request the same way a dead network does, and has to be told apart.
+    static func isConnectivity(_ error: Error) -> Bool {
+        guard let code = (error as? URLError)?.code else { return false }
+        switch code {
+        case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
+             .dnsLookupFailed, .timedOut, .internationalRoamingOff, .dataNotAllowed:
+            return true
+        default:
+            return false
         }
     }
 
@@ -202,12 +233,21 @@ public struct GeminiTransport: ChatTransport {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
         let (data, response): (Data, URLResponse)
-        do { (data, response) = try await session.data(for: request) } catch { throw AIBackendError.unreachable }
-        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            if isConnectivity(error) { throw AIBackendError.unreachable }
+            throw AIBackendError.badResponse("The request couldn't be sent: \(describe(error))")
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let body = String(data: data, encoding: .utf8) ?? ""
+        switch status {
         case 200: break
+        case 400 where !isKeyRejection(body): throw AIBackendError.badResponse("Google answered HTTP 400: \(body.prefix(200))")
         case 400, 401, 403: throw AIBackendError.unauthorized
         case 429: throw AIBackendError.quotaExhausted
-        default: throw AIBackendError.unreachable
+        case 500...599: throw AIBackendError.unreachable
+        default: throw AIBackendError.badResponse("Google answered HTTP \(status): \(body.prefix(200))")
         }
         struct List: Decodable { let data: [Entry]; struct Entry: Decodable { let id: String } }
         guard let list = try? JSONDecoder().decode(List.self, from: data) else {

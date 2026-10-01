@@ -190,6 +190,24 @@ public final class CloudUsage: @unchecked Sendable {
         notify()
     }
 
+    private var transportError: String?
+
+    /// The last way a request failed to go through, in words, or nil after
+    /// one succeeds. Shown beside "Can't reach Google" so the cause isn't
+    /// a guess.
+    public var lastTransportError: String? {
+        lock.lock(); defer { lock.unlock() }
+        return transportError
+    }
+
+    public func recordTransportError(_ detail: String?) {
+        lock.lock()
+        let changed = transportError != detail
+        transportError = detail
+        lock.unlock()
+        if changed { notify() }
+    }
+
     private func notify() {
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }

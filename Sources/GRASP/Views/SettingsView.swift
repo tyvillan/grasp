@@ -206,6 +206,12 @@ private struct AISettingsTab: View {
                     }
                     .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
                 }
+                if let detail = cloudErrorDetail {
+                    Label(detail, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(GRASPColor.rejected)
+                        .textSelection(.enabled)
+                }
                 usageRow
             } else {
                 if let problem = store.cloudKeyProblem {
@@ -233,6 +239,19 @@ private struct AISettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Why the last cloud request or check didn't go through, in words.
+    private var cloudErrorDetail: String? {
+        _ = store.cloudUsageRevision
+        if case .failed(let detail) = store.cloudCheck { return detail }
+        if case .offline = store.cloudCheck {
+            return CloudUsage.shared.lastTransportError ?? "GRASP couldn't reach Google. Check your connection."
+        }
+        if case .badKey = store.cloudCheck {
+            return "Google didn't accept this key. Remove it and paste a fresh one from Google AI Studio."
+        }
+        return CloudUsage.shared.lastTransportError
     }
 
     private var cloudIsHealthy: Bool {

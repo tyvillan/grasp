@@ -113,6 +113,40 @@ struct CloudAITests {
         #expect(AIBackendError.unauthorized.warrantsFallback == false)
     }
 
+    @Test("Google's other wording for a rejected key is unauthorized too")
+    func rejectedKeyWording() async {
+        let server = FakeServer([(400, #"{"error":{"code":400,"message":"Please pass a valid API key","status":"INVALID_ARGUMENT"}}"#)])
+        await #expect(throws: AIBackendError.unauthorized) {
+            try await transport(server, usage: freshUsage()).complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+    }
+
+    @Test("a request that can't be sent is unreachable, and the cause is kept for Settings to show")
+    func recordsTransportError() async {
+        let usage = freshUsage()
+        let gemini = GeminiTransport(apiKey: "k", model: "gemini-2.5-flash", usage: usage,
+                                     pacer: RequestPacer(minimumInterval: 0),
+                                     send: { _ in throw URLError(.secureConnectionFailed) })
+        await #expect(throws: AIBackendError.unreachable) {
+            try await gemini.complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+        #expect(usage.lastTransportError?.contains("code -1200") == true)
+    }
+
+    @Test("a pasted key is cleaned of prefixes and quotes, and refused when it can't work")
+    func sanitizesKeys() {
+        let real = "AIzaSyA-0123456789abcdefghijklmnopqrstu"
+        #expect(AIKeyStore.sanitize("  \(real)\n").key == real)
+        #expect(AIKeyStore.sanitize("GEMINI_API_KEY=\(real)").key == real)
+        #expect(AIKeyStore.sanitize("GOOGLE_API_KEY=\"\(real)\"").key == real)
+        #expect(AIKeyStore.sanitize("Bearer \(real)").key == real)
+        #expect(AIKeyStore.sanitize(real).problem == nil)
+        #expect(AIKeyStore.sanitize("AIzaSyA-0123456789…rstu").problem?.contains("ellipsis") == true)
+        #expect(AIKeyStore.sanitize("AIza SyA 0123456789abcdefghij").problem?.contains("spaces") == true)
+        #expect(AIKeyStore.sanitize("short").problem?.contains("too short") == true)
+        #expect(AIKeyStore.sanitize("   ").problem == nil)
+    }
+
     @Test("a per-minute 429 waits the server's retryDelay and tries again")
     func retriesRateLimit() async throws {
         let limited = #"{"error":{"code":429,"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay": "17s"}]}}"#

@@ -114,6 +114,8 @@ public struct CloudGenerator: CardGenerator {
             return .quotaUsedUp
         } catch AIBackendError.unreachable {
             return .offline
+        } catch AIBackendError.badResponse(let detail) {
+            return .failed(detail)
         } catch {
             return .failed(String(describing: error))
         }

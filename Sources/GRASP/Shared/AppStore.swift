@@ -287,8 +287,18 @@ final class AppStore {
 
     /// Stores the key and checks it at once, so a typo shows up here
     /// rather than as a silent failure in the middle of a job.
-    func saveCloudKey(_ key: String) async {
-        AIKeyStore.save(key)
+    func saveCloudKey(_ pasted: String) async {
+        let (key, problem) = AIKeyStore.sanitize(pasted)
+        if let problem {
+            cloudKeyProblem = problem
+            return
+        }
+        guard AIKeyStore.save(key) else {
+            cloudKeyProblem = "macOS wouldn't let GRASP save the key to your Keychain."
+            return
+        }
+        cloudKeyProblem = nil
+        CloudUsage.shared.recordTransportError(nil)
         CloudUsage.shared.clearPause()
         cloudCheck = nil
         await testCloudConnection()
