@@ -178,11 +178,15 @@ struct DeckLectureDateSheet: View {
     let onSaved: () -> Void
 
     @State private var date: Date
+    @State private var isRange: Bool
+    @State private var endDate: Date
 
     init(deck: Deck, onSaved: @escaping () -> Void) {
         self.deck = deck
         self.onSaved = onSaved
         _date = State(initialValue: deck.manualLessonDate ?? Date())
+        _isRange = State(initialValue: deck.manualLessonDateEnd != nil)
+        _endDate = State(initialValue: deck.manualLessonDateEnd ?? deck.manualLessonDate ?? Date())
     }
 
     var body: some View {
@@ -191,12 +195,15 @@ struct DeckLectureDateSheet: View {
             Text("Shown in the sidebar when GRASP can't read a date from this deck's notes.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            DatePicker("Date", selection: $date, displayedComponents: .date)
-                .labelsHidden()
+            DatePicker(isRange ? "Starts" : "Date", selection: $date, displayedComponents: .date)
+            Toggle("This deck covers more than one lecture", isOn: $isRange)
+            if isRange {
+                DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
+            }
             HStack {
                 if deck.manualLessonDate != nil {
                     Button("Clear", role: .destructive) {
-                        try? store.setDeckManualLessonDate(deck.id, to: nil)
+                        try? store.setDeckManualLessonDate(deck.id, start: nil)
                         onSaved()
                         dismiss()
                     }
@@ -204,7 +211,7 @@ struct DeckLectureDateSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    try? store.setDeckManualLessonDate(deck.id, to: date)
+                    try? store.setDeckManualLessonDate(deck.id, start: date, end: isRange ? endDate : nil)
                     onSaved()
                     dismiss()
                 }

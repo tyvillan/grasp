@@ -223,16 +223,22 @@ public struct Deck: Codable, FetchableRecord, PersistableRecord, Identifiable, S
     /// A lecture date set by hand, for a deck whose notes carry none --
     /// shown in place of the extracted date wherever that's blank (e.g.
     /// `DeckListView`'s sidebar), never overriding one that was extracted.
+    /// With `manualLessonDateEnd` set too, it's the start of a range (a
+    /// deck covering several lectures on one topic, e.g. "Markets" spanning
+    /// two class days) rather than a single date.
     public var manualLessonDate: Date?
+    public var manualLessonDateEnd: Date?
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
 
     public init(id: String = UUID().uuidString, courseId: String, name: String, chapter: String? = nil,
                 origin: String = "auto", sortIndex: Int = 0, manualLessonDate: Date? = nil,
-                createdAt: Date = Date(), updatedAt: Date = Date(), deletedAt: Date? = nil) {
+                manualLessonDateEnd: Date? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
+                deletedAt: Date? = nil) {
         self.id = id; self.courseId = courseId; self.name = name; self.chapter = chapter
-        self.origin = origin; self.sortIndex = sortIndex; self.manualLessonDate = manualLessonDate
+        self.origin = origin; self.sortIndex = sortIndex
+        self.manualLessonDate = manualLessonDate; self.manualLessonDateEnd = manualLessonDateEnd
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.deletedAt = deletedAt
     }
 }

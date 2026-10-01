@@ -409,6 +409,14 @@ enum Schema {
             }
         }
 
+        // A manual date range, for a deck covering several lectures on one
+        // topic (e.g. a Microeconomics unit spanning two class days).
+        migrator.registerMigration("v12_deck_manual_date_range") { db in
+            try db.alter(table: "deck") { t in
+                t.add(column: "manualLessonDateEnd", .datetime)
+            }
+        }
+
         return migrator
     }
 }

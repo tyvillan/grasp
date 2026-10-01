@@ -272,25 +272,33 @@ private struct DeckLectureDateSheet: View {
     let onSaved: () -> Void
 
     @State private var date: Date
+    @State private var isRange: Bool
+    @State private var endDate: Date
 
     init(deck: Deck, onSaved: @escaping () -> Void) {
         self.deck = deck
         self.onSaved = onSaved
         _date = State(initialValue: deck.manualLessonDate ?? Date())
+        _isRange = State(initialValue: deck.manualLessonDateEnd != nil)
+        _endDate = State(initialValue: deck.manualLessonDateEnd ?? deck.manualLessonDate ?? Date())
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    DatePicker(isRange ? "Starts" : "Date", selection: $date, displayedComponents: .date)
+                    Toggle("This deck covers more than one lecture", isOn: $isRange)
+                    if isRange {
+                        DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
+                    }
                 } footer: {
                     Text("Shown in the deck list when GRASP can't read a date from this deck's notes.")
                 }
                 if deck.manualLessonDate != nil {
                     Section {
                         Button("Clear Lecture Date", role: .destructive) {
-                            try? store.setDeckManualLessonDate(deck.id, to: nil)
+                            try? store.setDeckManualLessonDate(deck.id, start: nil)
                             onSaved()
                             dismiss()
                         }
@@ -305,7 +313,7 @@ private struct DeckLectureDateSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        try? store.setDeckManualLessonDate(deck.id, to: date)
+                        try? store.setDeckManualLessonDate(deck.id, start: date, end: isRange ? endDate : nil)
                         onSaved()
                         dismiss()
                     }

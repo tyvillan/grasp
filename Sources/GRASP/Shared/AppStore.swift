@@ -441,39 +441,69 @@ final class AppStore {
         }
     }
 
-    /// Each deck's lecture date (e.g. "AUG 27"), for `DeckListView`'s
+    /// Each deck's lecture date (e.g. "AUG 27", or "AUG 27–29" / "AUG 30 –
+    /// SEP 2" when its notes span several class days), for `DeckListView`'s
     /// sidebar rows -- just the date, not the full "LECTURE 2 · AUG 27"
     /// kicker the Overview tab and source-note viewers show, since the
-    /// deck's own name already says which lecture it is. Extracted from
-    /// its earliest linked note when that's possible; else `deck.
-    /// manualLessonDate`, if the student set one; else none at all.
+    /// deck's own name already says which lecture it is. The range is the
+    /// earliest-to-latest date across every note linked to the deck when
+    /// that's extractable; else `deck.manualLessonDate`/`manualLessonDateEnd`,
+    /// if the student set one; else none at all.
     func deckKickers(for decks: [Deck]) -> [String: String] {
-        let extracted = (try? database.queue.read { db -> [String: Date] in
-            var result: [String: Date] = [:]
+        let extracted = (try? database.queue.read { db -> [String: (start: Date, end: Date)] in
+            var result: [String: (start: Date, end: Date)] = [:]
             for deck in decks {
-                guard let first = try OverviewQueries.materials(forDecks: [deck.id], db: db).first else { continue }
-                let parsed = FilenameParsing.parse(fileNameWithoutExtension: first.title)
-                guard let date = first.noteDate ?? parsed.dateFromFilename else { continue }
-                result[deck.id] = date
+                let dates = try OverviewQueries.materials(forDecks: [deck.id], db: db).compactMap { material -> Date? in
+                    let parsed = FilenameParsing.parse(fileNameWithoutExtension: material.title)
+                    return material.noteDate ?? parsed.dateFromFilename
+                }
+                guard let start = dates.min(), let end = dates.max() else { continue }
+                result[deck.id] = (start, end)
             }
             return result
         }) ?? [:]
         var result: [String: String] = [:]
         for deck in decks {
-            guard let date = extracted[deck.id] ?? deck.manualLessonDate else { continue }
-            result[deck.id] = date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+            if let range = extracted[deck.id] {
+                result[deck.id] = Self.formatLessonDate(start: range.start, end: range.end)
+            } else if let start = deck.manualLessonDate {
+                result[deck.id] = Self.formatLessonDate(start: start, end: deck.manualLessonDateEnd)
+            }
         }
         return result
     }
 
-    /// Sets or clears the lecture date the student assigned by hand, for a
-    /// deck whose notes carry no extractable date. Never touches a date
-    /// that *was* extracted -- `deckKickers` already prefers that one, so a
-    /// manual date only ever fills in where extraction found nothing.
-    func setDeckManualLessonDate(_ deckId: String, to date: Date?) throws {
+    /// "AUG 27" for a single date, "AUG 27–29" for a range within one
+    /// month, "AUG 30 – SEP 2" for one crossing a month boundary.
+    static func formatLessonDate(start: Date, end: Date?) -> String {
+        let calendar = Calendar.current
+        guard let end, !calendar.isDate(start, inSameDayAs: end) else {
+            return start.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+        }
+        let sameMonth = calendar.isDate(start, equalTo: end, toGranularity: .month)
+            && calendar.isDate(start, equalTo: end, toGranularity: .year)
+        if sameMonth {
+            let month = start.formatted(.dateTime.month(.abbreviated))
+            let startDay = start.formatted(.dateTime.day())
+            let endDay = end.formatted(.dateTime.day())
+            return "\(month) \(startDay)–\(endDay)".uppercased()
+        }
+        let startStr = start.formatted(.dateTime.month(.abbreviated).day())
+        let endStr = end.formatted(.dateTime.month(.abbreviated).day())
+        return "\(startStr) – \(endStr)".uppercased()
+    }
+
+    /// Sets or clears the lecture date (or range) the student assigned by
+    /// hand, for a deck whose notes carry no extractable date. Never
+    /// touches a date that *was* extracted -- `deckKickers` always prefers
+    /// that one, so a manual date only ever fills in where extraction
+    /// found nothing. `end` nil (or equal to `start`) means a single date,
+    /// not a range.
+    func setDeckManualLessonDate(_ deckId: String, start: Date?, end: Date? = nil) throws {
         try database.queue.write { db in
             guard var deck = try Deck.fetchOne(db, key: deckId) else { return }
-            deck.manualLessonDate = date
+            deck.manualLessonDate = start
+            deck.manualLessonDateEnd = start == nil ? nil : end
             deck.updatedAt = Date()
             try deck.save(db)
         }
