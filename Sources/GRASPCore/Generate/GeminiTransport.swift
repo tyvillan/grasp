@@ -92,8 +92,12 @@ public struct GeminiTransport: ChatTransport {
         self.pause = pause
     }
 
+    /// Models fail one at a time: overload and daily quotas are both
+    /// per-model at Google, so a call walks down the model list instead of
+    /// giving up on the first one. It stops early only when three models in
+    /// a row have given up as overloaded -- at that point it's the service,
+    /// not the model.
     public func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
-        var attempt = 0
         // Each setting a model might refuse is dropped, once, when Google
         // says it's the problem -- so a newer model with different rules
         // still answers instead of failing every call.
@@ -101,48 +105,80 @@ public struct GeminiTransport: ChatTransport {
         var useJSONMode = json
         var useCap = maxTokens != nil
         var boost = 1
-        // The chosen model first, then the others -- skipping any that
-        // just kept failing, so the next call doesn't wait them out again.
-        let candidates = [model] + alternates
-        let usable = candidates.filter { !usage.isAvoided($0) }
+        // The chosen model first, then the rest in list order -- skipping
+        // any that just failed, so the next call doesn't wait them out again.
+        let usable = ([model] + alternates).filter { !usage.isAvoided($0) }
         let order = usable.isEmpty ? [model] : usable
         var index = 0
-        var overloadTries = 0
+        var retries = 0
+        var overloadedModels = 0
         while true {
             try Task.checkCancellation()
             try await pacer.waitTurn()
             let current = order[index]
+            let isLast = index + 1 >= order.count
+            func moveToNext(_ reason: String) {
+                index += 1
+                retries = 0
+                AIProgress.current?.setNote("\(reason), so GRASP is using \(order[index])")
+            }
             do {
                 return try await request(
                     prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
                     boost: boost, reasoning: useReasoning
                 )
             } catch AIBackendError.overloaded(let status) {
-                if overloadTries < overloadPauses.count {
+                // The first model gets the full wait; the others one short one.
+                let pauses = index == 0 ? overloadPauses : Array(overloadPauses.prefix(1))
+                if retries < pauses.count {
                     AIProgress.current?.setNote("\(current) is overloaded (HTTP \(status)); trying again shortly")
-                    try await pause(overloadPauses[overloadTries])
-                    overloadTries += 1
+                    try await pause(pauses[retries])
+                    retries += 1
                     AIProgress.current?.setNote(nil)
-                } else if index + 1 < order.count {
-                    usage.avoid(current)
-                    index += 1
-                    overloadTries = 0
-                    AIProgress.current?.setNote("\(current) is overloaded, so GRASP is using \(order[index])")
-                } else {
-                    usage.avoid(current)
-                    usage.recordTransportError("\(current) is overloaded right now (Google answered HTTP \(status)).")
+                    continue
+                }
+                usage.avoid(current)
+                overloadedModels += 1
+                if isLast || overloadedModels >= 3 {
+                    usage.recordTransportError(overloadedModels >= 3
+                        ? "Google's Gemini service looks overloaded: \(overloadedModels) models in a row answered HTTP \(status)."
+                        : "\(current) is overloaded right now (Google answered HTTP \(status)).")
                     failures?.record(.overloaded(status: status))
                     throw AIBackendError.overloaded(status: status)
                 }
+                moveToNext("\(current) is overloaded")
+            } catch AIBackendError.quotaExhausted {
+                // Daily free quotas are per model: this one is done until
+                // the reset, but the next may have plenty left.
+                usage.avoid(current, for: max(60, CloudUsage.nextReset(after: Date()).timeIntervalSinceNow))
+                if isLast {
+                    usage.pauseForQuota()
+                    failures?.record(.quotaExhausted)
+                    throw AIBackendError.quotaExhausted
+                }
+                moveToNext("today's free limit for \(current) is used up")
+            } catch AIBackendError.rateLimited(let retryAfter) {
+                if retries < maxRetries {
+                    retries += 1
+                    AIProgress.current?.setNote("\(CloudProvider.name) asked GRASP to slow down; waiting a moment")
+                    try await pause(min(max(retryAfter ?? 10, 1), 60))
+                    AIProgress.current?.setNote(nil)
+                    continue
+                }
+                usage.avoid(current, for: 60)
+                if isLast {
+                    failures?.record(.rateLimited(retryAfter: retryAfter))
+                    throw AIBackendError.rateLimited(retryAfter: retryAfter)
+                }
+                moveToNext("\(current) is busy")
             } catch AIBackendError.badResponse(let body) where Self.adjust(
                 body, reasoning: &useReasoning, jsonMode: &useJSONMode, cap: &useCap, boost: &boost
             ) {
                 continue
-            } catch AIBackendError.rateLimited(let retryAfter) where attempt < maxRetries {
-                attempt += 1
-                AIProgress.current?.setNote("\(CloudProvider.name) asked GRASP to slow down; waiting a moment")
-                try await pause(min(max(retryAfter ?? 10, 1), 60))
-                AIProgress.current?.setNote(nil)
+            } catch AIBackendError.badResponse(let body) where !isLast && Self.isModelUnavailable(body) {
+                // Renamed, retired or not offered to this key: skip it for an hour.
+                usage.avoid(current, for: 3_600)
+                moveToNext("\(current) isn't available")
             } catch let error as AIBackendError {
                 switch error {
                 case .badResponse(let body): usage.recordTransportError(Self.summarize(body))
@@ -153,6 +189,15 @@ public struct GeminiTransport: ChatTransport {
                 throw error
             }
         }
+    }
+
+    /// A model Google won't serve to this key, as opposed to a request that
+    /// is wrong for every model.
+    static func isModelUnavailable(_ body: String) -> Bool {
+        let text = body.lowercased()
+        return text.contains("is not found") || text.contains("not supported for generatecontent")
+            || text.contains("is not available") || text.contains("no longer available")
+            || text.contains("has been deprecated") || text.contains("does not exist")
     }
 
     /// Reads a refusal and turns off the setting it names. False when
@@ -263,10 +308,7 @@ public struct GeminiTransport: ChatTransport {
         case 400 where Self.isKeyRejection(body):
             throw AIBackendError.unauthorized
         case 429:
-            if Self.isDailyQuota(body) {
-                usage.pauseForQuota()
-                throw AIBackendError.quotaExhausted
-            }
+            if Self.isDailyQuota(body) { throw AIBackendError.quotaExhausted }
             let header = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
             throw AIBackendError.rateLimited(retryAfter: header ?? Self.retryDelay(in: body))
         case 500...599:

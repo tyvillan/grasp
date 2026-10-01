@@ -135,36 +135,32 @@ public struct CloudGenerator: CardGenerator {
 
         let pinned = AIPreferences.cloudModel
         let primary = pinned.isEmpty ? (models.first ?? CloudProvider.fallbackModel) : pinned
-        let order = [primary] + (pinned.isEmpty ? AIPreferences.alternates(from: models, besides: primary) : [])
-        var overloaded: [String] = []
-        for candidate in order {
-            do {
-                // No waiting here: an overloaded model moves straight on.
-                _ = try await GeminiTransport(apiKey: apiKey, model: candidate, overloadPauses: [])
-                    .complete(prompt: "Reply with exactly this JSON and nothing else: {\"ok\": true}", json: true, maxTokens: 20)
-                return ConnectionReport(status: .ok(models: models), models: models)
-            } catch AIBackendError.unauthorized {
-                return ConnectionReport(status: .badKey, models: models)
-            } catch AIBackendError.quotaExhausted {
-                return ConnectionReport(status: .quotaUsedUp, models: models)
-            } catch AIBackendError.rateLimited {
-                // The key is fine; Google is just busy this minute.
-                return ConnectionReport(status: .ok(models: models), models: models)
-            } catch AIBackendError.unreachable {
-                return ConnectionReport(status: .offline, models: models)
-            } catch AIBackendError.overloaded {
-                overloaded.append(candidate)
-            } catch AIBackendError.badResponse(let detail) {
-                return ConnectionReport(
-                    status: .failed("\(candidate): \(GeminiTransport.summarize(detail))"), models: models)
-            } catch {
-                return ConnectionReport(status: .failed(String(describing: error)), models: models)
-            }
+        let rest = pinned.isEmpty ? AIPreferences.alternates(from: models, besides: primary) : []
+        do {
+            // One call walks the list the way a real request does, without
+            // waiting on a busy model.
+            _ = try await GeminiTransport(apiKey: apiKey, model: primary, alternates: rest, overloadPauses: [])
+                .complete(prompt: "Reply with exactly this JSON and nothing else: {\"ok\": true}", json: true, maxTokens: 20)
+            return ConnectionReport(status: .ok(models: models), models: models)
+        } catch AIBackendError.unauthorized {
+            return ConnectionReport(status: .badKey, models: models)
+        } catch AIBackendError.quotaExhausted {
+            return ConnectionReport(status: .quotaUsedUp, models: models)
+        } catch AIBackendError.rateLimited {
+            // The key is fine; Google is just busy this minute.
+            return ConnectionReport(status: .ok(models: models), models: models)
+        } catch AIBackendError.unreachable {
+            return ConnectionReport(status: .offline, models: models)
+        } catch AIBackendError.overloaded {
+            return ConnectionReport(
+                status: .failed(CloudUsage.shared.lastTransportError
+                                ?? "Google's models are overloaded right now. Try again in a few minutes."),
+                models: models)
+        } catch AIBackendError.badResponse(let detail) {
+            return ConnectionReport(status: .failed("\(primary): \(GeminiTransport.summarize(detail))"), models: models)
+        } catch {
+            return ConnectionReport(status: .failed(String(describing: error)), models: models)
         }
-        return ConnectionReport(
-            status: .failed("Google's models are overloaded right now (\(overloaded.joined(separator: ", "))). "
-                            + "This usually clears in a few minutes -- try again shortly."),
-            models: models)
     }
 }
 

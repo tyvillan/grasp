@@ -93,12 +93,9 @@ public enum AIPreferences {
         return alternates(from: cachedCloudModels, besides: primary)
     }
 
+    /// The rest of the list, in the order the picker shows it.
     static func alternates(from known: [String], besides primary: String) -> [String] {
-        let list = known.isEmpty ? [CloudProvider.fallbackModel] : known
-        // Stable releases before previews and experiments.
-        let stable = list.filter { !$0.contains("preview") && !$0.contains("exp") }
-        let rest = list.filter { $0.contains("preview") || $0.contains("exp") }
-        return Array((stable + rest).filter { $0 != primary }.prefix(3))
+        (known.isEmpty ? [CloudProvider.fallbackModel] : known).filter { $0 != primary }
     }
 
     /// The best model the key's live list offered, remembered so a request

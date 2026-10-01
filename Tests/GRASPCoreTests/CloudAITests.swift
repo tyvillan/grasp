@@ -182,13 +182,53 @@ struct CloudAITests {
         #expect(AIBackendError.overloaded(status: 503).warrantsFallback)
     }
 
-    @Test("alternates put stable releases before previews, leave out the primary, and stop at three")
+    @Test("alternates are the rest of the list, in the order the picker shows it")
     func alternateOrdering() {
         let known = ["gemini-3.8-flash", "gemini-3.1-flash-preview", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"]
         #expect(AIPreferences.alternates(from: known, besides: "gemini-3.8-flash")
-                == ["gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+                == ["gemini-3.1-flash-preview", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
         #expect(AIPreferences.alternates(from: [], besides: "gemini-3.8-flash") == [CloudProvider.fallbackModel])
         #expect(AIPreferences.alternates(from: [], besides: CloudProvider.fallbackModel).isEmpty)
+    }
+
+    @Test("a model whose daily free quota is gone is skipped for the next, and only the last one pauses the cloud")
+    func quotaIsPerModel() async throws {
+        let usage = freshUsage()
+        let quota = #"{"error":{"code":429,"message":"Quota exceeded for metric: GenerateRequestsPerDayPerProjectPerModel-FreeTier, limit: 0"}}"#
+        let server = FakeServer([(429, quota), (200, reply("{}"))])
+        _ = try await transport(server, usage: usage, model: "gemini-2.5-pro", alternates: ["gemini-2.5-flash"])
+            .complete(prompt: "hi", json: true, maxTokens: nil)
+        #expect(server.body(1).contains("gemini-2.5-flash"))
+        #expect(usage.pausedUntil == nil)
+        #expect(usage.isAvoided("gemini-2.5-pro"))
+
+        let allGone = FakeServer([(429, quota), (429, quota)])
+        await #expect(throws: AIBackendError.quotaExhausted) {
+            try await transport(allGone, usage: freshUsage(), model: "gemini-2.5-pro", alternates: ["gemini-2.5-flash"])
+                .complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+    }
+
+    @Test("three overloaded models in a row means the service is struggling, so the call stops walking the list")
+    func serviceWideOverload() async {
+        let usage = freshUsage()
+        let down = #"{"error":{"code":503,"message":"overloaded"}}"#
+        let server = FakeServer(Array(repeating: (503, down), count: 40))
+        await #expect(throws: AIBackendError.overloaded(status: 503)) {
+            try await transport(server, usage: usage, model: "m1", alternates: ["m2", "m3", "m4", "m5", "m6"])
+                .complete(prompt: "hi", json: true, maxTokens: nil)
+        }
+        #expect(usage.lastTransportError?.contains("service looks overloaded") == true)
+        #expect(!usage.isAvoided("m4"))
+    }
+
+    @Test("a model Google doesn't serve to this key is skipped, not treated as a failure")
+    func skipsUnavailableModel() async throws {
+        let server = FakeServer([(404, #"{"error":{"code":404,"message":"models/gemini-9 is not found for API version v1beta"}}"#),
+                                 (200, reply("{}"))])
+        _ = try await transport(server, usage: freshUsage(), model: "gemini-9", alternates: ["gemini-2.5-flash"])
+            .complete(prompt: "hi", json: true, maxTokens: nil)
+        #expect(server.body(1).contains("gemini-2.5-flash"))
     }
 
     @Test("an empty answer (thinking used the allowance) is retried with three times the room")
