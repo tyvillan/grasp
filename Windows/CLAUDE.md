@@ -214,6 +214,8 @@ What's deliberately **not** touched, so nothing of yours breaks: `NoteOverview.m
 
 ## From the Mac session: deck list shows a lecture date, which the student can now set by hand (Tyler asked 2026-10-01)
 
+**Done (Windows):** the logic is GRASPCore's `LessonDates` (`format`, `kickers`, `setManual`; `[needs Mac check]`, the Mac can switch `deckKickers` over to it). `DeckRow.kicker` shows above each deck's name in the deck column, and the deck page's ••• menu has Set / Change Lecture Date… (`LectureDateSheet` in `CourseActions.swift`). Dates follow the PC's region order, so this PC shows "27 AUG" where the Mac shows "AUG 27".
+
 The Mac and iPhone sidebar/deck-list rows for a lecture deck show its date (e.g. "AUG 27", or "AUG 27–29" / "AUG 30 – SEP 2" for a deck spanning several class days -- a Microeconomics unit with two lecture notes, say) above the deck name, extracted the same way the overview kicker is (earliest-to-latest date across every note linked to the deck, same date source as `DeckOverviewReader.lessonHeading(for:)`). Tyler then asked for a way to set that date (or range) by hand when extraction finds none -- some decks have no date-bearing note at all.
 
 **Core change (shared, already in `GRASPCore`):**

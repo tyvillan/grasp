@@ -16,6 +16,7 @@ enum OrganizeSheet {
     case deleteCourse(Course)
     case newDeck(courseId: String)
     case renameDeck(DeckRow)
+    case lectureDate(DeckRow)
     case deleteDeck(DeckRow)
 }
 
@@ -45,6 +46,8 @@ struct OrganizeSheetView: View {
             DeckNameEditor(library: library, courseId: courseId, deck: nil, onCreated: onCreated, close: close)
         case .renameDeck(let deck):
             DeckNameEditor(library: library, courseId: deck.courseId, deck: deck, close: close)
+        case .lectureDate(let deck):
+            LectureDateSheet(library: library, deck: deck, close: close)
         case .deleteDeck(let deck):
             DeckDeleteConfirmation(library: library, deck: deck, onDeleted: onDeleted, close: close)
         }
@@ -167,6 +170,77 @@ private struct CourseEditor: View {
             close()
             if let id { onCreated(id) }
         }
+    }
+}
+
+/// "Set Lecture Date…", after the Mac's `DeckLectureDateSheet`: a date for a
+/// deck whose notes carry none, or a range for one that covers several class
+/// days. A date read from the notes always wins over this one.
+private struct LectureDateSheet: View {
+    let library: Library
+    let deck: DeckRow
+    let close: () -> Void
+    @State var start: Date
+    @State var end: Date
+    @State var isRange: Bool
+
+    init(library: Library, deck: DeckRow, close: @escaping () -> Void) {
+        self.library = library
+        self.deck = deck
+        self.close = close
+        let first = deck.manualStart ?? Date()
+        _start = State(wrappedValue: first)
+        _end = State(wrappedValue: deck.manualEnd ?? first)
+        _isRange = State(wrappedValue: deck.manualEnd != nil)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Lecture Date")
+                .font(Font.system(size: 18, weight: .semibold))
+                .foregroundColor(GRASPColor.textPrimary)
+            Text("Shown above \(deck.name) in the deck list. A date found in the deck's notes is used instead when there is one.")
+                .font(GRASPFont.meta)
+                .foregroundColor(GRASPColor.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                SectionLabel(isRange ? "From" : "Date")
+                DatePicker("", selection: $start, displayedComponents: .date)
+            }
+            // A pill rather than WinUI's toggle, which draws in Windows'
+            // accent colour instead of GRASP's amber.
+            SegmentedChoice(options: [true], selection: isRange, label: { _ in "This deck covers more than one lecture" }) { _ in
+                isRange.toggle()
+            }
+            if isRange {
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionLabel("To")
+                    DatePicker("", selection: $end, displayedComponents: .date)
+                }
+            }
+            HStack(spacing: 8) {
+                if deck.manualStart != nil {
+                    Button("Clear") {
+                        library.setLectureDate(deck.id, start: nil, end: nil)
+                        close()
+                    }
+                    .fixedSize()
+                }
+                Spacer()
+                Button("Cancel") { close() }.fixedSize()
+                Button("Save") {
+                    // A range runs earliest to latest whichever way round it was set.
+                    let low = isRange ? min(start, end) : start
+                    let high = isRange ? max(start, end) : nil
+                    library.setLectureDate(deck.id, start: low, end: high)
+                    close()
+                }
+                .fixedSize()
+            }
+        }
+        .padding(24)
+        .frame(width: 460.0)
+        .background(GRASPColor.canvas)
     }
 }
 

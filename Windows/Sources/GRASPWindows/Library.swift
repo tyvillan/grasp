@@ -12,6 +12,11 @@ struct DeckRow: Identifiable, Hashable {
     let total: Int
     let due: Int
     let drafts: Int
+    /// "AUG 27" or "AUG 27–29": the lecture date shown above the name.
+    var kicker: String?
+    /// The date or range the student set by hand, if any.
+    var manualStart: Date?
+    var manualEnd: Date?
 }
 
 /// What a deck page shows: one deck, or a course's "All Cards" -- every
@@ -168,11 +173,13 @@ final class Library {
                 .order(Column("sortIndex"), Column("name"))
                 .fetchAll(db)
             coursesBySemester = Dictionary(grouping: courses, by: \.semesterId)
+            let kickers = try LessonDates.kickers(db: db)
             decks = try Row.fetchAll(db, sql: """
                 SELECT deck.id, deck.name, deck.courseId, course.name AS courseName,
                        COUNT(card.id) AS total,
                        COALESCE(SUM(CASE WHEN card.status = 'active' AND card.due <= ? THEN 1 ELSE 0 END), 0) AS due,
-                       COALESCE(SUM(CASE WHEN card.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts
+                       COALESCE(SUM(CASE WHEN card.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+                       deck.manualLessonDate AS manualStart, deck.manualLessonDateEnd AS manualEnd
                 FROM deck
                 JOIN course ON course.id = deck.courseId
                 LEFT JOIN deckCard ON deckCard.deckId = deck.id
@@ -184,7 +191,8 @@ final class Library {
                 """, arguments: [now])
             .map { row in
                 DeckRow(id: row["id"], courseId: row["courseId"], courseName: row["courseName"],
-                        name: row["name"], total: row["total"], due: row["due"], drafts: row["drafts"])
+                        name: row["name"], total: row["total"], due: row["due"], drafts: row["drafts"],
+                        kicker: kickers[row["id"] as String], manualStart: row["manualStart"], manualEnd: row["manualEnd"])
             }
             archivedCourses = try Course
                 .filter(Column("isArchived") == true)
@@ -196,6 +204,12 @@ final class Library {
                 .map(\.folderPath)
         }
         revision += 1
+    }
+
+    /// Sets, or with nil clears, the lecture date a deck shows when its notes
+    /// carry none.
+    func setLectureDate(_ deckId: String, start: Date?, end: Date?) {
+        change { try LessonDates.setManual(deckId: deckId, start: start, end: end, db: $0) }
     }
 
     /// Runs a write, then reloads and schedules a sync, as every change does.

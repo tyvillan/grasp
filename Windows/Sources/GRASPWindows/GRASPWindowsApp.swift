@@ -420,7 +420,7 @@ struct DeckColumn: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     DeckColumnRow(
-                        name: "All Cards", isAllCards: true, cards: allCards.total, due: allCards.due,
+                        name: "All Cards", kicker: nil, isAllCards: true, cards: allCards.total, due: allCards.due,
                         isSelected: selectedId == allCards.id
                     ) { select(nil) }
                     ForEach(exams, id: \.id) { exam in
@@ -430,7 +430,7 @@ struct DeckColumn: View {
                     }
                     ForEach(decks, id: \.id) { deck in
                         DeckColumnRow(
-                            name: deck.name, isAllCards: false, cards: deck.total, due: deck.due,
+                            name: deck.name, kicker: deck.kicker, isAllCards: false, cards: deck.total, due: deck.due,
                             isSelected: selectedId == deck.id
                         ) { select(deck.id) }
                     }
@@ -445,6 +445,8 @@ struct DeckColumn: View {
 
 struct DeckColumnRow: View {
     let name: String
+    /// The lecture date, small above the name.
+    let kicker: String?
     let isAllCards: Bool
     let cards: Int
     let due: Int
@@ -453,10 +455,18 @@ struct DeckColumnRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(name)
-                .font(isAllCards ? GRASPFont.rowTitle.weight(.semibold) : GRASPFont.rowTitle)
-                .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                if let kicker {
+                    Text(kicker)
+                        .font(Font.system(size: 10, weight: .semibold))
+                        .foregroundColor(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                }
+                Text(name)
+                    .font(isAllCards ? GRASPFont.rowTitle.weight(.semibold) : GRASPFont.rowTitle)
+                    .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
+                    .lineLimit(1)
+            }
             Spacer()
             if due > 0 {
                 DueBadge(count: due)
@@ -602,6 +612,9 @@ struct DeckView: View {
                 SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
                 if let deck {
                     Menu("•••") {
+                        Button(deck.kicker == nil ? "Set Lecture Date…" : "Change Lecture Date…") {
+                            organize(.lectureDate(deck))
+                        }
                         Button("Rename Deck…") { organize(.renameDeck(deck)) }
                         Button("Delete Deck…") { organize(.deleteDeck(deck)) }
                     }
