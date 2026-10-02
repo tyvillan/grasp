@@ -60,7 +60,11 @@ public enum AIKeyStore {
         let (key, status, found) = fetch()
         if key != nil { return .ready }
         if found { return .empty }
+        #if canImport(Security)
         return status == errSecItemNotFound || status == errSecSuccess ? .missing : .unreadable(status)
+        #else
+        return .missing
+        #endif
     }
 
     /// `found`: an item came back, whatever it held.

@@ -196,9 +196,13 @@ public final class CloudUsage: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// `UserDefaults` is thread-safe but only declared `Sendable` on Apple's
+    /// Foundation; this lets the same code build against swift-corelibs.
+    private struct DefaultsBox: @unchecked Sendable { let defaults: UserDefaults }
+
     private func persist(_ write: @escaping @Sendable (UserDefaults) -> Void) {
-        let defaults = self.defaults
-        persistQueue.async { write(defaults) }
+        let box = DefaultsBox(defaults: defaults)
+        persistQueue.async { write(box.defaults) }
     }
 
     public var requestsToday: Int {
