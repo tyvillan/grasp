@@ -343,6 +343,8 @@ public enum AIQuotaEstimate {
     public static func overviewRequests(notes: Int) -> Int { notes * 13 }
     /// One call per batch of fifteen cards.
     public static func refineRequests(cards: Int) -> Int { (cards + 14) / 15 }
+    /// One call per deck.
+    public static func studyGuideRequests(decks: Int) -> Int { decks }
     /// One call per card.
     public static func contextCheckRequests(cards: Int) -> Int { cards }
 

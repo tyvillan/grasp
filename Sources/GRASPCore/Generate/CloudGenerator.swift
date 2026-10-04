@@ -87,6 +87,15 @@ public struct CloudGenerator: CardGenerator {
         )
     }
 
+    public func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart {
+        await pipeline.generateStudyGuidePart(
+            deckName: deckName, courseName: courseName, noteContext: noteContext,
+            cardTerms: cardTerms, problemCount: problemCount
+        )
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -319,6 +328,22 @@ public struct FallbackGenerator: CardGenerator {
             local: {
                 await local.generateFigures(noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
                                             sectionHeadings: sectionHeadings)
+            }
+        )
+    }
+
+    public func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart {
+        await run(
+            keep: { $0.part != nil },
+            cloud: {
+                await cloud.generateStudyGuidePart(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                                   cardTerms: cardTerms, problemCount: problemCount)
+            },
+            local: {
+                await local.generateStudyGuidePart(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                                   cardTerms: cardTerms, problemCount: problemCount)
             }
         )
     }

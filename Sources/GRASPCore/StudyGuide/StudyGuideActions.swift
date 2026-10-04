@@ -17,9 +17,15 @@ public enum StudyGuideActions {
         let document = StudyGuideParser.parse(pages: pages)
         let body = try StudyGuideCoding.encode(document)
 
+        // A copy of a guide already in the library (the same file imported
+        // again from another folder, e.g. moved from the Desktop into the
+        // vault) takes over that guide, so its exam link, skill ratings and
+        // hand-picked decks carry over instead of a second guide appearing.
         var guide = try StudyGuide.filter(Column("materialId") == material.id).fetchOne(db)
+            ?? existingCopy(of: material, db: db)
             ?? StudyGuide(courseId: material.courseId, materialId: material.id,
                           title: material.title, bodyJSON: body, createdAt: now)
+        guide.materialId = material.id
         guide.courseId = material.courseId
         guide.title = displayName(material: material, document: document)
         guide.bodyJSON = body
@@ -35,6 +41,30 @@ public enum StudyGuideActions {
         try guide.save(db)
         try rematchDecks(guideId: guide.id, document: document, courseId: guide.courseId, db: db)
         return guide
+    }
+
+    /// A title reduced to what identifies it: case, punctuation and spacing
+    /// dropped, so "ECO 2023 - Exam 1 Study Guide" and
+    /// "eco-2023_exam-1_study-guide" are the same guide.
+    static func identity(ofTitle title: String) -> String {
+        title.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init).joined()
+    }
+
+    /// An imported guide in the same course that this file duplicates: the
+    /// same content, or the same title, from a different file.
+    static func existingCopy(of material: Material, db: Database) throws -> StudyGuide? {
+        let identity = identity(ofTitle: material.title)
+        return try StudyGuide
+            .filter(Column("courseId") == material.courseId)
+            .filter(Column("materialId") != nil)
+            .filter(Column("materialId") != material.id)
+            .order(Column("createdAt"))
+            .fetchAll(db)
+            .first { guide in
+                if let hash = material.contentHash, guide.sourceContentHash == hash { return true }
+                return Self.identity(ofTitle: guide.title) == identity
+            }
     }
 
     /// The filename, readably: "Microeconomics Exam 1 Review Professor"
@@ -125,13 +155,145 @@ public enum StudyGuideActions {
     /// Every deck any of the exam's guides maps a part to, in course order
     /// -- what "Study for this exam" studies.
     public static func examDeckIds(examEventId: String, db: Database) throws -> [String] {
-        try String.fetchAll(db, sql: """
-            SELECT deck.id FROM deck
+        Deck.ordered(try Deck.fetchAll(db, sql: """
+            SELECT deck.* FROM deck
             WHERE deck.deletedAt IS NULL AND deck.id IN (
                 SELECT deckId FROM studyGuidePartDeck
                 WHERE guideId IN (SELECT id FROM studyGuide WHERE examEventId = ?))
-            ORDER BY deck.sortIndex, deck.chapter, deck.name
-            """, arguments: [examEventId])
+            """, arguments: [examEventId])).map(\.id)
+    }
+
+    // MARK: - Duplicates
+
+    /// Folds guides that are the same guide imported twice (same course,
+    /// same title or same content) into one. The survivor is the copy whose
+    /// file is still on disk, else the older one; it takes the exam link,
+    /// the skill ratings and the hand-picked decks the others had, when its
+    /// parts line up with theirs. Generated guides are never merged: they
+    /// have no file, and two practice sets are two sets.
+    ///
+    /// Idempotent and cheap, so the app runs it on every launch.
+    @discardableResult
+    public static func mergeDuplicateGuides(db: Database,
+                                            fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) })
+        throws -> Int {
+        let imported = try StudyGuide.filter(Column("materialId") != nil).order(Column("createdAt")).fetchAll(db)
+        var groups: [String: [StudyGuide]] = [:]
+        for guide in imported {
+            groups["\(guide.courseId)#\(identity(ofTitle: guide.title))", default: []].append(guide)
+        }
+        var removed = 0
+        for (_, guides) in groups where guides.count > 1 {
+            func hasFile(_ guide: StudyGuide) -> Bool {
+                guard let id = guide.materialId, let material = try? Material.fetchOne(db, key: id) else { return false }
+                return material.deletedAt == nil && fileExists(material.relativePath)
+            }
+            let survivor = guides.first(where: hasFile) ?? guides[0]
+            for loser in guides where loser.id != survivor.id {
+                try absorb(loser, into: survivor, db: db)
+                _ = try StudyGuide.deleteOne(db, key: loser.id)
+                removed += 1
+            }
+        }
+        return removed
+    }
+
+    private static func absorb(_ loser: StudyGuide, into survivor: StudyGuide, db: Database) throws {
+        if survivor.examEventId == nil, let exam = loser.examEventId {
+            try setExam(guideId: survivor.id, examEventId: exam, db: db)
+        }
+        guard let from = loser.document(), let to = survivor.document() else { return }
+
+        // Ratings are addressed by position ("p2s1"), so one carries over
+        // only where the survivor has the very same skill at that spot.
+        let have = Set(try SkillRating.filter(Column("guideId") == survivor.id).fetchAll(db).map(\.skillId))
+        for rating in try SkillRating.filter(Column("guideId") == loser.id).fetchAll(db) where !have.contains(rating.skillId) {
+            guard let (part, skill) = position(of: rating.skillId),
+                  from.parts.indices.contains(part), to.parts.indices.contains(part),
+                  from.parts[part].skills.indices.contains(skill), to.parts[part].skills.indices.contains(skill),
+                  from.parts[part].skills[skill] == to.parts[part].skills[skill]
+            else { continue }
+            try SkillRating(guideId: survivor.id, skillId: rating.skillId, rating: rating.rating,
+                            ratedAt: rating.ratedAt).save(db)
+        }
+
+        // Decks the student picked by hand, for parts that line up by title.
+        let survivorManual = Set(try StudyGuidePartDeck
+            .filter(Column("guideId") == survivor.id).filter(Column("isManual") == true).fetchAll(db).map(\.partIndex))
+        for row in try StudyGuidePartDeck.filter(Column("guideId") == loser.id).filter(Column("isManual") == true).fetchAll(db)
+        where !survivorManual.contains(row.partIndex)
+            && from.parts.indices.contains(row.partIndex) && to.parts.indices.contains(row.partIndex)
+            && from.parts[row.partIndex].title == to.parts[row.partIndex].title {
+            try StudyGuidePartDeck.filter(Column("guideId") == survivor.id)
+                .filter(Column("partIndex") == row.partIndex).filter(Column("isManual") == false).deleteAll(db)
+            try StudyGuidePartDeck(guideId: survivor.id, partIndex: row.partIndex, deckId: row.deckId,
+                                   isManual: true).save(db)
+        }
+    }
+
+    /// "p2s1" -> (2, 1).
+    static func position(of skillId: String) -> (part: Int, skill: Int)? {
+        let pieces = skillId.dropFirst().split(separator: "s")
+        guard skillId.hasPrefix("p"), pieces.count == 2, let part = Int(pieces[0]), let skill = Int(pieces[1])
+        else { return nil }
+        return (part, skill)
+    }
+
+    // MARK: - The study guide hub
+
+    public struct HubExam: Identifiable, Sendable {
+        public var id: String { exam.id }
+        public let exam: CalendarEvent
+        public let guides: [StudyGuide]
+        public let isPast: Bool
+    }
+
+    public struct HubCourse: Identifiable, Sendable {
+        public var id: String { course.id }
+        public let course: Course
+        /// Upcoming exams soonest first, then past ones, most recent first.
+        public let exams: [HubExam]
+        /// Guides that prepare for no exam: practice sets, and imports
+        /// that matched none.
+        public let practiceSets: [StudyGuide]
+    }
+
+    /// Every course's guides, past exams included -- the one place a guide
+    /// stays reachable once its exam is behind you.
+    public static func hub(now: Date = Date(), db: Database) throws -> [HubCourse] {
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        let courses = try Course.filter(Column("isArchived") == false).order(Column("sortIndex"), Column("name")).fetchAll(db)
+        var result: [HubCourse] = []
+        for course in courses {
+            let guides = try guides(forCourse: course.id, db: db)
+            guard !guides.isEmpty else { continue }
+            var byExam: [String: [StudyGuide]] = [:]
+            var loose: [StudyGuide] = []
+            for guide in guides {
+                if let id = guide.examEventId { byExam[id, default: []].append(guide) } else { loose.append(guide) }
+            }
+            var exams: [HubExam] = []
+            for (examId, examGuides) in byExam {
+                guard let exam = try CalendarEvent.fetchOne(db, key: examId) else { loose += examGuides; continue }
+                exams.append(HubExam(exam: exam, guides: examGuides, isPast: exam.startsAt < startOfToday))
+            }
+            exams.sort { a, b in
+                if a.isPast != b.isPast { return !a.isPast }
+                return a.isPast ? a.exam.startsAt > b.exam.startsAt : a.exam.startsAt < b.exam.startsAt
+            }
+            result.append(HubCourse(course: course, exams: exams,
+                                    practiceSets: loose.sorted { $0.createdAt > $1.createdAt }))
+        }
+        return result
+    }
+
+    /// A guide with no exam, read as a page of its own. The "exam" on it is
+    /// a stand-in (never saved) so the same page and downloads work.
+    public static func practicePage(guideId: String, db: Database) throws -> ExamPage? {
+        guard let guide = try StudyGuide.fetchOne(db, key: guideId) else { return nil }
+        let stand = CalendarEvent(courseId: guide.courseId, kind: .study, title: guide.title,
+                                  startsAt: guide.createdAt, isAllDay: true)
+        return try page(exam: stand, guides: [guide], isPracticeSet: true, db: db)
     }
 
     // MARK: - The exam page
@@ -150,6 +312,9 @@ public enum StudyGuideActions {
         /// Guides whose text gave no parts -- shown so they aren't silently
         /// missing.
         public let unreadGuides: [StudyGuide]
+        /// A guide with no exam: `exam` is a stand-in carrying its title
+        /// and creation date.
+        public let isPracticeSet: Bool
 
         public var deckIds: [String] {
             var seen = Set<String>()
@@ -205,6 +370,11 @@ public enum StudyGuideActions {
             .filter(Column("examEventId") == examEventId)
             .order(Column("createdAt"))
             .fetchAll(db)
+        return try page(exam: exam, guides: guides, isPracticeSet: false, db: db)
+    }
+
+    static func page(exam: CalendarEvent, guides: [StudyGuide], isPracticeSet: Bool,
+                     db: Database) throws -> ExamPage {
         let ids = guides.map(\.id)
         let partDecks = try StudyGuidePartDeck.filter(ids.contains(Column("guideId"))).fetchAll(db)
         let ratings = try SkillRating.filter(ids.contains(Column("guideId"))).fetchAll(db)
@@ -279,7 +449,7 @@ public enum StudyGuideActions {
         .sorted { ($0.number ?? .max) < ($1.number ?? .max) }
 
         return ExamPage(exam: exam, guides: guides, questionCount: questionCount, format: format,
-                        notes: notes, parts: parts, unreadGuides: unread)
+                        notes: notes, parts: parts, unreadGuides: unread, isPracticeSet: isPracticeSet)
     }
 
     /// Two guides' versions of one problem: most of the same numbers (the

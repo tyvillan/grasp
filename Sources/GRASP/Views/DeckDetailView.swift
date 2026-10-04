@@ -1637,22 +1637,58 @@ private struct CardRow: View {
 /// Reviews each duplicate group before removing anything -- "Remove
 /// Duplicates" is a quick action, but a blind bulk-delete of content
 /// someone wrote flashcards from deserves a look first, even though the
-/// underlying delete is a soft one. One radio-style choice per group
-/// (which card survives, or "keep both" when the group's smart pick isn't
-/// confident enough to guess).
+/// underlying delete is a soft one.
+///
+/// Each group has three possible outcomes: keep one card (the others fold
+/// into it), keep all of them (the group is left alone), or keep none --
+/// tapping the card that's selected deselects it, and the whole group is
+/// deleted. Cards are soft-deleted either way, so review history survives
+/// and a re-import of the same notes doesn't bring them back.
 struct DuplicateReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     let groups: [AppStore.DuplicateGroup]
     let onMerge: (_ merges: [AppStore.DuplicateMerge]) -> Void
 
-    /// Value per group: the id to keep (folding every other member into
-    /// it), or `nil` meaning "keep all of them, skip this group".
-    @State private var keepChoice: [String: String?] = [:]
+    private enum Choice: Equatable {
+        case keep(String)
+        case keepAll
+        case deleteAll
+    }
 
-    private var totalToMerge: Int {
+    @State private var choices: [String: Choice] = [:]
+    @State private var confirmingDelete = false
+
+    private func choice(for group: AppStore.DuplicateGroup) -> Choice {
+        choices[group.id] ?? defaultChoice(for: group)
+    }
+
+    /// Cards folded into a kept card.
+    private var mergedCount: Int {
         groups.reduce(0) { total, group in
-            guard let choice = keepChoice[group.id, default: defaultChoice(for: group)] else { return total }
-            return total + group.cards.filter { $0.id != choice }.count
+            guard case .keep(let id) = choice(for: group) else { return total }
+            return total + group.cards.filter { $0.id != id }.count
+        }
+    }
+
+    /// Cards in groups where nothing is kept.
+    private var deletedCount: Int {
+        groups.reduce(0) { total, group in
+            choice(for: group) == .deleteAll ? total + group.cards.count : total
+        }
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if mergedCount > 0 { parts.append("\(mergedCount) merged into the card kept") }
+        if deletedCount > 0 { parts.append("\(deletedCount) deleted outright") }
+        return parts.isEmpty ? "Nothing will change" : parts.joined(separator: ", ")
+    }
+
+    private var actionTitle: String {
+        switch (mergedCount > 0, deletedCount > 0) {
+        case (true, true): return "Merge and Delete"
+        case (false, true): return "Delete \(deletedCount) Cards"
+        default: return "Merge \(mergedCount) Cards"
         }
     }
 
@@ -1660,7 +1696,8 @@ struct DuplicateReviewSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Review Duplicates").font(.headline)
-                Text("\(groups.count) group\(groups.count == 1 ? "" : "s") found. Pick which card in each group survives.")
+                Text("\(groups.count) group\(groups.count == 1 ? "" : "s") found. Pick the card to keep in each group, "
+                     + "or tap the selected card again to keep none and delete them all.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -1680,31 +1717,49 @@ struct DuplicateReviewSheet: View {
             Divider()
 
             HStack {
-                Text("\(totalToMerge) card\(totalToMerge == 1 ? "" : "s") will be merged into the one kept")
+                Text(summary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(deletedCount > 0 ? GRASPColor.rejected : .secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }
-                Button("Merge \(totalToMerge) Cards", role: .destructive) {
-                    let merges = groups.compactMap { group -> AppStore.DuplicateMerge? in
-                        guard let choice = keepChoice[group.id, default: defaultChoice(for: group)] else { return nil }
-                        let losers = group.cards.filter { $0.id != choice }.map(\.id)
-                        guard !losers.isEmpty else { return nil }
-                        return AppStore.DuplicateMerge(survivorId: choice, losingIds: losers)
-                    }
-                    onMerge(merges)
-                    dismiss()
+                Button(actionTitle, role: .destructive) {
+                    if deletedCount > 0 { confirmingDelete = true } else { apply() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(totalToMerge == 0)
+                .disabled(mergedCount + deletedCount == 0)
             }
             .padding(20)
         }
         .frame(width: 560, height: 520)
+        .confirmationDialog(
+            "Delete \(deletedCount) card\(deletedCount == 1 ? "" : "s") you chose to keep none of?",
+            isPresented: $confirmingDelete, titleVisibility: .visible
+        ) {
+            Button("Delete \(deletedCount) Card\(deletedCount == 1 ? "" : "s")", role: .destructive) { apply() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They leave every deck. Their review history is kept, and importing the same notes again won't bring them back.")
+        }
+    }
+
+    private func apply() {
+        let merges = groups.compactMap { group -> AppStore.DuplicateMerge? in
+            switch choice(for: group) {
+            case .keepAll:
+                return nil
+            case .deleteAll:
+                return AppStore.DuplicateMerge(survivorId: nil, losingIds: group.cards.map(\.id))
+            case .keep(let id):
+                let losers = group.cards.filter { $0.id != id }.map(\.id)
+                return losers.isEmpty ? nil : AppStore.DuplicateMerge(survivorId: id, losingIds: losers)
+            }
+        }
+        onMerge(merges)
+        dismiss()
     }
 
     private func groupBlock(_ group: AppStore.DuplicateGroup) -> some View {
-        let choice = keepChoice[group.id, default: defaultChoice(for: group)]
+        let current = choice(for: group)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("\(group.cards.count) near-identical cards").font(.subheadline.weight(.medium))
@@ -1712,33 +1767,50 @@ struct DuplicateReviewSheet: View {
                     Text("· multiple have review history").font(.caption).foregroundStyle(.orange)
                 }
                 Spacer()
+                if current == .deleteAll {
+                    Label("All \(group.cards.count) will be deleted", systemImage: "trash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(GRASPColor.rejected)
+                }
             }
             VStack(spacing: 6) {
                 ForEach(group.cards) { card in
-                    memberRow(card, group: group, isKept: choice == card.id)
+                    memberRow(card, group: group, current: current)
                 }
-                Button(choice == nil ? "Keeping both" : "Keep both instead") {
-                    keepChoice[group.id] = .some(nil)
+                HStack(spacing: 14) {
+                    Button(current == .keepAll ? "Keeping all" : "Keep all instead") {
+                        choices[group.id] = .keepAll
+                    }
+                    Button(current == .deleteAll ? "Deleting all" : "Delete all") {
+                        choices[group.id] = .deleteAll
+                    }
+                    .foregroundStyle(GRASPColor.rejected)
+                    Spacer()
                 }
                 .buttonStyle(.link)
                 .font(.caption)
             }
         }
         .padding(12)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(GRASPColor.hairline))
+        .background(current == .deleteAll ? GRASPColor.rejectedSoft.opacity(0.5) : GRASPColor.surface,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(current == .deleteAll ? GRASPColor.rejected.opacity(0.5) : GRASPColor.hairline))
     }
 
-    private func memberRow(_ card: Card, group: AppStore.DuplicateGroup, isKept: Bool) -> some View {
-        Button {
-            keepChoice[group.id] = .some(card.id)
+    private func memberRow(_ card: Card, group: AppStore.DuplicateGroup, current: Choice) -> some View {
+        let isKept = current == .keep(card.id)
+        let isDeleted = current == .deleteAll
+        return Button {
+            // Tapping the card that's kept deselects it: keep none.
+            choices[group.id] = isKept ? .deleteAll : .keep(card.id)
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: isKept ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(isKept ? GRASPColor.accent : .secondary)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(card.front).font(.callout.weight(.medium))
+                    Text(card.front).font(.callout.weight(.medium)).strikethrough(isDeleted)
                     Text(card.back).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                     Text(memberMeta(card))
                         .font(.caption2)
@@ -1747,7 +1819,7 @@ struct DuplicateReviewSheet: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(isKept ? GRASPColor.textPrimary : GRASPColor.textTertiary)
-            .opacity(isKept ? 1 : 0.6)
+            .opacity(isKept || isDeleted ? 1 : 0.6)
         }
         .buttonStyle(.plain)
     }
@@ -1759,11 +1831,11 @@ struct DuplicateReviewSheet: View {
     }
 
     /// A group where two or more cards already carry real review history
-    /// defaults to "keep both" rather than the smart pick -- there's no
+    /// defaults to "keep all" rather than the smart pick -- there's no
     /// safe automatic guess about which study history to discard, so this
     /// forces a deliberate choice instead of a silent one.
-    private func defaultChoice(for group: AppStore.DuplicateGroup) -> String? {
-        group.hasCompetingHistory ? nil : group.suggestedKeepId
+    private func defaultChoice(for group: AppStore.DuplicateGroup) -> Choice {
+        group.hasCompetingHistory ? .keepAll : .keep(group.suggestedKeepId)
     }
 }
 

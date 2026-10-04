@@ -303,4 +303,107 @@ struct DuplicateDetectorTests {
             #expect(try LearnState.fetchOne(conn, key: loser.id) == nil)
         }
     }
+
+    // MARK: - Keeping none of a group
+
+    @Test("a merge with no survivor soft-deletes every card and keeps its review history")
+    func deleteAllRemovesEveryCardButKeepsHistory() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let first = card("Opportunity cost", "The next best alternative given up.")
+            let second = card("Opportunity cost", "The next best alternative you give up.")
+            try first.insert(conn)
+            try second.insert(conn)
+            try DeckCard(deckId: deckId, cardId: first.id).insert(conn)
+            try DeckCard(deckId: deckId, cardId: second.id).insert(conn)
+            try LearnState(cardId: first.id, level: 2, consecutiveCorrect: 1).save(conn)
+            try Review(
+                cardId: second.id, reviewedAt: Date(), grade: 3, source: "flashcards",
+                dueAfter: Date(), schedulerVersion: "fsrs-5"
+            ).insert(conn)
+
+            try DuplicateDetector.applyMerges([.deleteAll([first.id, second.id])], db: conn)
+
+            #expect(try #require(try Card.fetchOne(conn, key: first.id)).deletedAt != nil)
+            #expect(try #require(try Card.fetchOne(conn, key: second.id)).deletedAt != nil)
+            // No live card is left in the deck.
+            let liveInDeck = try Int.fetchOne(conn, sql: """
+                SELECT COUNT(*) FROM card JOIN deckCard ON deckCard.cardId = card.id
+                WHERE card.deletedAt IS NULL
+                """)
+            #expect(liveInDeck == 0)
+            // History is not re-pointed anywhere and not erased.
+            let review = try #require(try Review.fetchOne(conn))
+            #expect(review.cardId == second.id)
+        }
+    }
+
+    @Test("deleting a whole group leaves other groups' merges alone")
+    func deleteAllDoesNotTouchOtherGroups() async throws {
+        let db = try GRASPDatabase.inMemory()
+        try await db.queue.write { conn in
+            let deckId = try self.makeCourseAndDeck(conn)
+            let gone1 = card("Alpha", "First")
+            let gone2 = card("Alpha", "First again")
+            let keep = card("Beta", "Second")
+            let fold = card("Beta", "Second again")
+            for c in [gone1, gone2, keep, fold] {
+                try c.insert(conn)
+                try DeckCard(deckId: deckId, cardId: c.id).insert(conn)
+            }
+
+            try DuplicateDetector.applyMerges([
+                .deleteAll([gone1.id, gone2.id]),
+                .init(survivorId: keep.id, losingIds: [fold.id]),
+            ], db: conn)
+
+            #expect(try #require(try Card.fetchOne(conn, key: gone1.id)).deletedAt != nil)
+            #expect(try #require(try Card.fetchOne(conn, key: gone2.id)).deletedAt != nil)
+            #expect(try #require(try Card.fetchOne(conn, key: keep.id)).deletedAt == nil)
+            #expect(try #require(try Card.fetchOne(conn, key: fold.id)).deletedAt != nil)
+            // The merged loser left its deck; the deleted pair stays put (deleted).
+            #expect(try DeckCard.filter(Column("cardId") == fold.id).fetchCount(conn) == 0)
+            #expect(try DeckCard.filter(Column("cardId") == gone1.id).fetchCount(conn) == 1)
+        }
+    }
+
+    @Test("a card deleted as part of a duplicate group is not re-created by importing the same notes")
+    func deletedGroupDoesNotComeBackOnReimport() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let courseId = try await db.queue.write { conn in
+            let course = Course(semesterId: nil, name: "Dedup Course")
+            try course.insert(conn)
+            return course.id
+        }
+        let dir = try makeTempDir()
+        let note = """
+        Sunk cost
+        A cost that has already been incurred and cannot be recovered by
+        any future decision or action taken now, regardless of how the
+        remaining choices in front of a person are ultimately weighed.
+        """
+        let url = dir.appendingPathComponent("Lecture.md")
+        try note.write(to: url, atomically: true, encoding: .utf8)
+        let scanner = VaultScanner(database: db)
+
+        let first = try await scanner.importPaths([url], intoCourse: courseId)
+        #expect(first.cardsCreated == 1)
+        try await db.queue.write { conn in
+            let ids = try Card.fetchAll(conn).map(\.id)
+            try DuplicateDetector.applyMerges([.deleteAll(ids)], db: conn)
+        }
+
+        // The same definition arriving from a different file: not skipped by
+        // an unchanged-file hash, so only the duplicate guard can stop it.
+        let other = dir.appendingPathComponent("Canvas-Summary.md")
+        try note.write(to: other, atomically: true, encoding: .utf8)
+        let again = try await scanner.importPaths([other], intoCourse: courseId)
+        #expect(again.cardsCreated == 0)
+        #expect(again.duplicatesSkipped == 1)
+        try await db.queue.read { conn in
+            let live = try Card.filter(Column("deletedAt") == nil).fetchCount(conn)
+            #expect(live == 0)
+        }
+    }
 }

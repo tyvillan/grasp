@@ -311,6 +311,30 @@ public struct OllamaGenerator: CardGenerator {
         }
     }
 
+    public func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart {
+        guard !noteContext.isEmpty, problemCount > 0 else { return .empty }
+        let prompt = Self.studyGuidePartPrompt(
+            deckName: deckName, courseName: courseName, noteContext: noteContext,
+            cardTerms: cardTerms, problemCount: problemCount
+        )
+        // Room for the problems' worked steps as well as their answers.
+        // A second try when the first gives nothing: a model that wasn't
+        // loaded yet can fail its first request while it loads, and the
+        // same request then succeeds.
+        for attempt in 0..<2 {
+            if Task.isCancelled { return .empty }
+            if let content = try? await chat(prompt: prompt, maxTokens: 400 + 450 * problemCount),
+               let part = Self.parseStudyGuidePart(content, title: deckName, problemLimit: problemCount) {
+                return GeneratedGuidePart(part: part)
+            }
+            if attempt == 0 { AIProgress.current?.setNote("Trying \(deckName) once more") }
+        }
+        AIProgress.current?.setNote(nil)
+        return .empty
+    }
+
     public func generateFigures(
         noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]
     ) async -> [GeneratedFigure] {

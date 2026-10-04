@@ -168,14 +168,22 @@ public enum DuplicateDetector {
         return byRoot.values.filter { $0.count > 1 }
     }
 
-    /// One "keep this card, fold these into it" instruction, applied by
-    /// `applyMerges`.
+    /// One instruction from the review sheet, applied by `applyMerges`:
+    /// either "keep this card, fold these into it", or -- with no survivor
+    /// -- "keep none of them", which deletes every card listed.
     public struct Merge: Sendable {
-        public let survivorId: String
+        /// Nil means the student kept none of the group: `losingIds` are
+        /// all deleted and nothing absorbs their history.
+        public let survivorId: String?
         public let losingIds: [String]
-        public init(survivorId: String, losingIds: [String]) {
+        public init(survivorId: String?, losingIds: [String]) {
             self.survivorId = survivorId
             self.losingIds = losingIds
+        }
+
+        /// Keep none of these cards.
+        public static func deleteAll(_ cardIds: [String]) -> Merge {
+            Merge(survivorId: nil, losingIds: cardIds)
         }
     }
 
@@ -212,22 +220,29 @@ public enum DuplicateDetector {
     /// transaction management of its own, so a caller applying several
     /// merges (as `AppStore.mergeDuplicates` does for a whole review
     /// session) gets one atomic write, not one per group.
+    ///
+    /// A merge with no survivor deletes the whole group (see
+    /// `deleteGroup`).
     public static func applyMerges(_ merges: [Merge], db: Database, now: Date = Date()) throws {
         for merge in merges {
-            let losers = merge.losingIds.filter { $0 != merge.survivorId }
-            guard !losers.isEmpty, try Card.fetchOne(db, key: merge.survivorId) != nil else { continue }
+            guard let survivorId = merge.survivorId else {
+                try deleteGroup(merge.losingIds, db: db, now: now)
+                continue
+            }
+            let losers = merge.losingIds.filter { $0 != survivorId }
+            guard !losers.isEmpty, try Card.fetchOne(db, key: survivorId) != nil else { continue }
 
             try Review
                 .filter(losers.contains(Column("cardId")))
-                .updateAll(db, Column("cardId").set(to: merge.survivorId))
+                .updateAll(db, Column("cardId").set(to: survivorId))
 
             try DeckCard.filter(losers.contains(Column("cardId"))).deleteAll(db)
 
             let loserLearnStates = try LearnState.filter(losers.contains(Column("cardId"))).fetchAll(db)
             try LearnState.filter(losers.contains(Column("cardId"))).deleteAll(db)
-            if try LearnState.fetchOne(db, key: merge.survivorId) == nil, let toKeep = loserLearnStates.first {
+            if try LearnState.fetchOne(db, key: survivorId) == nil, let toKeep = loserLearnStates.first {
                 try LearnState(
-                    cardId: merge.survivorId, level: toKeep.level,
+                    cardId: survivorId, level: toKeep.level,
                     consecutiveCorrect: toKeep.consecutiveCorrect, lastSeenAt: toKeep.lastSeenAt
                 ).save(db)
             }
@@ -236,5 +251,19 @@ public enum DuplicateDetector {
                 .filter(losers.contains(Column("id")))
                 .updateAll(db, Column("deletedAt").set(to: now), Column("updatedAt").set(to: now))
         }
+    }
+
+    /// The student kept none of a duplicate group: every card in it goes.
+    ///
+    /// The same soft delete as every other card deletion in the app
+    /// (`CardActions.delete`): the rows stay with `deletedAt` set, so each
+    /// card's `Review` history survives for stats. Their deck membership is
+    /// left in place on purpose -- the scanner seeds its duplicate index
+    /// from every card in the deck, deleted ones included, so a later import
+    /// of a note that repeats the definition doesn't create it again. (A
+    /// merge's losers are different: they are dropped from their decks
+    /// because a survivor now stands in for them.)
+    static func deleteGroup(_ cardIds: [String], db: Database, now: Date) throws {
+        try CardActions.delete(cardIds, now: now, db: db)
     }
 }

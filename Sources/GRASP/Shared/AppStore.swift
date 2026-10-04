@@ -213,6 +213,9 @@ final class AppStore {
         // notes into their profile -- the mixing profiles exist to prevent.
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? ""
         self.isAITestQuestionsEnabled = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
+        // The same guide imported twice (e.g. from the Desktop and again from
+        // the vault) is one guide.
+        _ = try? db.queue.write { try StudyGuideActions.mergeDuplicateGuides(db: $0) }
         reload()
         sync = SyncController(database: db, profile: profile) { [weak self] in self?.reload() }
         sync.start()
@@ -544,14 +547,15 @@ final class AppStore {
         try database.queue.read { db in try Course.fetchOne(db, key: id) }
     }
 
+    /// In `Deck.ordered` order, so "Lecture 10" follows "Lecture 9". Every
+    /// deck list and picker reads this, so they all agree.
     func decks(inCourse courseId: String) throws -> [Deck] {
-        try database.queue.read { db in
+        Deck.ordered(try database.queue.read { db in
             try Deck
                 .filter(Column("courseId") == courseId)
                 .filter(Column("deletedAt") == nil)
-                .order(Column("sortIndex"), Column("chapter"), Column("name"))
                 .fetchAll(db)
-        }
+        })
     }
 
     /// Each deck's lecture date (e.g. "AUG 27", or "AUG 27–29" / "AUG 30 –
@@ -697,7 +701,9 @@ final class AppStore {
     /// Review Duplicates sheet -- the UI-facing mirror of
     /// `DuplicateDetector.Merge`, which does the actual work.
     struct DuplicateMerge {
-        let survivorId: String
+        /// Nil: the student kept none of the group, so every card in
+        /// `losingIds` is deleted.
+        let survivorId: String?
         let losingIds: [String]
     }
 
@@ -863,6 +869,16 @@ final class AppStore {
     /// while the fresh view offered to start a second run over the same
     /// cards.
     private(set) var aiJobs: [String: AIJob] = [:]
+
+    /// What the last "New Study Guide" run did, for the Study Guide page.
+    /// (Stored here: an extension can't hold it.)
+    var lastStudyGuideRun: StudyGuideRunResult?
+    struct StudyGuideRunResult: Equatable {
+        var guideIds: [String]
+        var skippedDecks: [String]
+        var wasStopped: Bool
+        var failure: String?
+    }
 
     func aiJob(_ key: String) -> AIJob? { aiJobs[key] }
 

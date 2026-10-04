@@ -9,6 +9,10 @@ struct ExamScreen: View {
     @Environment(AppStore.self) private var store
     let courseId: String
     let examEventId: String
+    /// Set for a guide with no exam (a practice set): just that guide.
+    var practiceGuideId: String? = nil
+
+    private var isPracticeSet: Bool { practiceGuideId != nil }
 
     @State private var page: StudyGuideActions.ExamPage?
     @State private var decks: [Deck] = []
@@ -21,7 +25,7 @@ struct ExamScreen: View {
         ScrollView {
             if let page {
                 VStack(alignment: .leading, spacing: 20) {
-                    studyButton(page)
+                    if !isPracticeSet { studyButton(page) }
                     if importing {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -45,10 +49,12 @@ struct ExamScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { choosingFiles = true } label: {
-                        Label("Add Study Guide…", systemImage: "doc.badge.plus")
+                    if !isPracticeSet {
+                        Button { choosingFiles = true } label: {
+                            Label("Add Study Guide…", systemImage: "doc.badge.plus")
+                        }
+                        .disabled(importing)
                     }
-                    .disabled(importing)
                     if let page, !page.parts.isEmpty {
                         ExportMenu(title: "Download with Answer Key") { document(answerKey: true) }
                         ExportMenu(title: "Download Practice Sheet") { document(answerKey: false) }
@@ -63,7 +69,7 @@ struct ExamScreen: View {
                       allowsMultipleSelection: true) { outcome in
             if case .success(let urls) = outcome { addGuides(urls) }
         }
-        .task(id: examEventId) { load() }
+        .task(id: practiceGuideId ?? examEventId) { load() }
         .onChange(of: store.revision) { load() }
     }
 
@@ -101,7 +107,11 @@ struct ExamScreen: View {
     }
 
     private func load() {
-        page = store.examPage(examEventId: examEventId)
+        if let practiceGuideId {
+            page = store.practicePage(guideId: practiceGuideId)
+        } else {
+            page = store.examPage(examEventId: examEventId)
+        }
         decks = (try? store.decks(inCourse: courseId)) ?? []
     }
 

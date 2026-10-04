@@ -14,6 +14,11 @@ struct ExamStudyView: View {
     @Environment(AppStore.self) private var store
     let courseId: String
     let examEventId: String
+    /// Set for a guide with no exam (a practice set): the page is that
+    /// one guide, with no Study tab and nothing to add to.
+    var practiceGuideId: String? = nil
+
+    private var isPracticeSet: Bool { practiceGuideId != nil }
 
     enum Tab: String, CaseIterable, Identifiable {
         case guide = "Guide"
@@ -30,12 +35,14 @@ struct ExamStudyView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("View", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                if !isPracticeSet {
+                    Picker("View", selection: $tab) {
+                        ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
                 Spacer()
                 if importing {
                     ProgressView().controlSize(.small)
@@ -54,15 +61,17 @@ struct ExamStudyView: View {
                     .fixedSize()
                     .help("Save this exam's guide as a PDF, Word document or Markdown file")
                 }
-                Button("Add Study Guide…", action: addGuide)
-                    .buttonStyle(GRASPQuietButton())
-                    .disabled(importing)
+                if !isPracticeSet {
+                    Button("Add Study Guide…", action: addGuide)
+                        .buttonStyle(GRASPQuietButton())
+                        .disabled(importing)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             Rectangle().fill(GRASPColor.hairline).frame(height: 1)
 
-            switch tab {
+            switch isPracticeSet ? .guide : tab {
             case .guide:
                 guideTab
             case .study:
@@ -81,12 +90,16 @@ struct ExamStudyView: View {
         .sheet(item: $openPage) { target in
             GuidePageSheet(target: target)
         }
-        .task(id: examEventId) { load() }
+        .task(id: practiceGuideId ?? examEventId) { load() }
         .onChange(of: store.revision) { load() }
     }
 
     private func load() {
-        page = store.examPage(examEventId: examEventId)
+        if let practiceGuideId {
+            page = store.practicePage(guideId: practiceGuideId)
+        } else {
+            page = store.examPage(examEventId: examEventId)
+        }
         decks = (try? store.decks(inCourse: courseId)) ?? []
     }
 

@@ -83,7 +83,7 @@ struct DeckListView: View {
         case .deckOrder:
             return decks
         case .alphabetical:
-            return decks.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return decks.sorted { NaturalOrder.isOrdered($0.name, before: $1.name) }
         case .dateAdded:
             return decks.sorted { $0.createdAt < $1.createdAt }
         case .mostDue:

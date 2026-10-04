@@ -16,6 +16,8 @@ struct ContentView: View {
     /// same trick, same single selection binding, so adding a whole new
     /// top-level screen costs no extra navigation state.
     static let calendarRoute = "calendar"
+    /// The Study Guide page, a third sentinel beside Home and Calendar.
+    static let studyGuideRoute = "studyGuide"
 
     @Environment(AppStore.self) private var store
     @State private var selectedCourseId: String? = ContentView.homeRoute
@@ -55,7 +57,8 @@ struct ContentView: View {
     /// how the Exams button ended up trying to open for "Home" the first
     /// time a second sentinel was added.
     private var activeCourseId: String? {
-        guard let id = selectedCourseId, id != Self.homeRoute, id != Self.calendarRoute else { return nil }
+        guard let id = selectedCourseId, id != Self.homeRoute, id != Self.calendarRoute,
+              id != Self.studyGuideRoute else { return nil }
         return id
     }
 
@@ -69,6 +72,15 @@ struct ContentView: View {
                     HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
                 } else if selectedCourseId == Self.calendarRoute {
                     CalendarView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
+                } else if selectedCourseId == Self.studyGuideRoute {
+                    StudyGuideHubView { target in
+                        switch target {
+                        case .exam(let courseId, let examEventId):
+                            ExamStudyView(courseId: courseId, examEventId: examEventId).id(examEventId)
+                        case .practice(let courseId, let guideId):
+                            ExamStudyView(courseId: courseId, examEventId: "", practiceGuideId: guideId).id(guideId)
+                        }
+                    }
                 } else if let courseId = activeCourseId, store.hasDecks(inCourse: courseId) {
                     // Three tiers of ground, narrowest to widest: the
                     // vibrant sidebar, then the deck list on a lifted

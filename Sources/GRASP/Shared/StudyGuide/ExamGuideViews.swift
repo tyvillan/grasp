@@ -63,7 +63,9 @@ private struct ExamHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(page.exam.startsAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) · \(page.exam.countdownText())")
+            Text(page.isPracticeSet
+                 ? "Practice set · \(page.exam.startsAt.formatted(.dateTime.month(.abbreviated).day()))"
+                 : "\(page.exam.startsAt.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) · \(page.exam.countdownText())")
                 .graspType(.eyebrow)
                 .textCase(.uppercase)
                 .foregroundStyle(GRASPColor.accent)
@@ -113,7 +115,8 @@ private struct ExamHeader: View {
                                 .graspType(.meta)
                         }
                         Menu {
-                            Button("Remove from This Exam", role: .destructive) { onRemove(guide) }
+                            Button(page.isPracticeSet ? "Delete This Practice Set" : "Remove from This Exam",
+                                   role: .destructive) { onRemove(guide) }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }

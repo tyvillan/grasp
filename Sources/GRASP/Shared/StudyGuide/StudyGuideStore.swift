@@ -59,6 +59,32 @@ extension AppStore {
         }
     }
 
+    /// Every course's guides for the Study Guide page, past exams included.
+    func studyGuideHub(now: Date = Date()) -> [StudyGuideActions.HubCourse] {
+        (try? database.queue.read { db in try StudyGuideActions.hub(now: now, db: db) }) ?? []
+    }
+
+    /// A guide with no exam, as a page of its own.
+    func practicePage(guideId: String) -> StudyGuideActions.ExamPage? {
+        try? database.queue.read { db in try StudyGuideActions.practicePage(guideId: guideId, db: db) }
+    }
+
+    /// Exams and quizzes in these courses, soonest first, past ones last --
+    /// what a new guide can be attached to.
+    func examEvents(inCourses courseIds: [String], now: Date = Date()) -> [CalendarEvent] {
+        guard !courseIds.isEmpty else { return [] }
+        let kinds = CalendarEventKind.examLike.map(\.rawValue)
+        let events = (try? database.queue.read { db in
+            try CalendarEvent
+                .filter(courseIds.contains(Column("courseId")))
+                .filter(kinds.contains(Column("kind")))
+                .order(Column("startsAt"))
+                .fetchAll(db)
+        }) ?? []
+        let today = Calendar.current.startOfDay(for: now)
+        return events.filter { $0.startsAt >= today } + events.filter { $0.startsAt < today }.reversed()
+    }
+
     func studyGuides(inCourse courseId: String) -> [StudyGuide] {
         (try? database.queue.read { db in try StudyGuideActions.guides(forCourse: courseId, db: db) }) ?? []
     }
@@ -110,6 +136,57 @@ extension AppStore {
                                   by: \.courseId)
         for (courseId, files) in byCourse {
             await importStudyGuides(files.map { URL(fileURLWithPath: $0.path) }, intoCourse: courseId)
+        }
+    }
+
+    /// Folds the same guide imported twice into one. Quiet and cheap, so it
+    /// runs at every launch; returns how many extra copies it removed.
+    @discardableResult
+    func mergeDuplicateStudyGuides() -> Int {
+        let removed = (try? database.queue.write { db in try StudyGuideActions.mergeDuplicateGuides(db: db) }) ?? 0
+        if removed > 0 { reload() }
+        return removed
+    }
+
+    // MARK: - Writing practice guides
+
+    static let studyGuideJobKey = "studyGuides"
+
+    func dismissStudyGuideRun() { lastStudyGuideRun = nil }
+
+    /// Writes practice guides from these decks in the background, with the
+    /// usual progress strip and Stop button. Returns false when one is
+    /// already running.
+    @discardableResult
+    func generateStudyGuides(courseIds: [String], deckIds: [String], problemsPerDeck: Int,
+                             examEventId: String?) -> Bool {
+        lastStudyGuideRun = nil
+        let run = AIActivity(headline: "Writing practice guide", units: 1, purpose: "study guide")
+        return runAIJob(Self.studyGuideJobKey, activity: run) { [weak self] run in
+            guard let self else { return }
+            let generator = await CardGenerators.select()
+            let outcome: StudyGuideBuilder.Outcome?
+            var failure: String?
+            do {
+                outcome = try await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                    try await StudyGuideBuilder.generate(
+                        courseIds: courseIds, deckIds: deckIds, problemsPerDeck: problemsPerDeck,
+                        examEventId: examEventId, using: generator, database: self.database
+                    )
+                }
+            } catch {
+                outcome = nil
+                failure = "Couldn't save the guide: \(error.localizedDescription)"
+            }
+            if failure == nil, outcome?.guideIds.isEmpty ?? true, !run.stopRequested {
+                failure = "The model didn't write anything usable"
+                    + (CloudUsage.shared.lastTransportError.map { ". \($0)" } ?? ". Settings → AI shows which model is in use.")
+            }
+            self.lastStudyGuideRun = StudyGuideRunResult(
+                guideIds: outcome?.guideIds ?? [], skippedDecks: outcome?.skippedDecks ?? [],
+                wasStopped: run.stopRequested, failure: failure
+            )
+            self.reload()
         }
     }
 

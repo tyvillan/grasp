@@ -37,19 +37,34 @@ public enum OverviewQueries {
     /// reason.
     ///
     /// Ordered the way a stitched overview should read: by note date, with
-    /// undated notes last. SQLite sorts NULL first on an ascending key,
-    /// hence the explicit `IS NULL` sort column ahead of it.
+    /// undated notes last, and notes on the same day (or with no date)
+    /// in natural title order -- "Lecture 2" before "Lecture 10". SQLite
+    /// sorts NULL first on an ascending key, hence the explicit `IS NULL`
+    /// sort column ahead of it; the title tie-break is done in Swift because
+    /// SQLite's text order isn't natural.
     public static func materials(forDecks deckIds: [String], db: Database) throws -> [Material] {
         guard !deckIds.isEmpty else { return [] }
         let placeholders = databaseQuestionMarks(count: deckIds.count)
-        return try Material.fetchAll(db, sql: """
+        let fetched = try Material.fetchAll(db, sql: """
             SELECT DISTINCT material.*
             FROM deckCard
             JOIN card ON card.id = deckCard.cardId AND card.deletedAt IS NULL
             JOIN material ON material.id = card.materialId AND material.deletedAt IS NULL
             WHERE deckCard.deckId IN (\(placeholders))
-            ORDER BY material.noteDate IS NULL, material.noteDate, material.title
+            ORDER BY material.noteDate IS NULL, material.noteDate
             """, arguments: StatementArguments(deckIds))
+        return fetched.enumerated().sorted { lhs, rhs in
+            let (a, b) = (lhs.element, rhs.element)
+            if a.noteDate != b.noteDate {
+                switch (a.noteDate, b.noteDate) {
+                case (nil, _): return false
+                case (_, nil): return true
+                case (let x?, let y?): return x < y
+                }
+            }
+            let title = NaturalOrder.compare(a.title, b.title)
+            return title == .orderedSame ? lhs.offset < rhs.offset : title == .orderedAscending
+        }.map(\.element)
     }
 
     /// Every deck's overview coverage in one pass, for `AppStore.reload()`.

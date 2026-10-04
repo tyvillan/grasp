@@ -427,6 +427,83 @@ public struct FoundationModelsGenerator: CardGenerator {
         #endif
     }
 
+    #if canImport(FoundationModels)
+    @Generable
+    fileprivate struct GuideProblem {
+        @Guide(description: "A practice problem stating everything needed, numbers included")
+        var question: String
+        @Guide(description: "The worked solution as short steps in order. Empty if the answer is one step.")
+        var steps: [String]
+        @Guide(description: "The final answer")
+        var answer: String
+    }
+
+    @Generable
+    fileprivate struct GuideTerm {
+        @Guide(description: "A key term, worded as the note words it")
+        var term: String
+        @Guide(description: "A one-sentence definition")
+        var definition: String
+    }
+
+    @Generable
+    fileprivate struct GuidePartDraft {
+        @Guide(description: "3 to 5 things the student should be able to do, each one sentence starting with a verb")
+        var skills: [String]
+        @Guide(description: "Practice problems like an exam would ask, each with worked steps and an answer. Empty if the note supports none.")
+        var problems: [GuideProblem]
+        @Guide(description: "Up to 5 key terms from the note")
+        var terms: [GuideTerm]
+        @Guide(description: "2 or 3 mistakes students commonly make on this material, one sentence each")
+        var traps: [String]
+    }
+    #endif
+
+    public func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart {
+        #if canImport(FoundationModels)
+        guard await isAvailable, problemCount > 0, !noteContext.isEmpty else { return .empty }
+        let instructions = """
+            You are writing one part of a practice study guide for a student's exam. Using only the \
+            note, write skills to master, practice problems with worked steps and a final answer, key \
+            terms and common mistakes. Use concrete numbers; every fact must come from the note -- \
+            never add outside knowledge. Anything the note doesn't support is left empty.
+            """
+        let session = LanguageModelSession(instructions: instructions)
+        let prompt = """
+        Course: \(courseName). This part covers: \(deckName).
+        Note: \(noteContext.prefix(2200))
+        Write at most \(problemCount) practice problem(s).
+        """
+        guard let response = try? await session.respond(to: prompt, generating: GuidePartDraft.self) else {
+            return .empty
+        }
+        let draft = response.content
+        func clean(_ text: String) -> String? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        var examples: [StudyGuideDocument.Example] = []
+        for problem in draft.problems.prefix(problemCount) {
+            guard let question = clean(problem.question), let answer = clean(problem.answer) else { continue }
+            examples.append(.init(label: "Practice \(examples.count + 1)", question: question,
+                                  steps: problem.steps.compactMap(clean), answer: answer))
+        }
+        let skills = draft.skills.compactMap(clean)
+        guard !examples.isEmpty || !skills.isEmpty else { return .empty }
+        let terms = draft.terms.prefix(6).compactMap { entry -> StudyGuideDocument.Term? in
+            guard let term = clean(entry.term), let definition = clean(entry.definition) else { return nil }
+            return .init(term: term, definition: definition)
+        }
+        return GeneratedGuidePart(part: StudyGuideDocument.Part(
+            title: deckName, skills: skills, traps: draft.traps.compactMap(clean), examples: examples, terms: terms
+        ))
+        #else
+        return .empty
+        #endif
+    }
+
     public func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] {
         // Distractor generation is left to the deterministic fallback even
         // when Foundation Models is available -- the quality gain over

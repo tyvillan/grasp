@@ -162,7 +162,7 @@ nonisolated extension WidgetSnapshot {
         let dueDecks = decks
             .map { (deck: $0, dueCount: $0.due.count(at: date)) }
             .filter { $0.dueCount > 0 }
-            .sorted { $0.dueCount != $1.dueCount ? $0.dueCount > $1.dueCount : $0.deck.name < $1.deck.name }
+            .sorted { Self.mostDueFirst($0.dueCount, $0.deck.name, $1.dueCount, $1.deck.name) }
         let recent = dueDecks
             .filter { $0.deck.lastReviewedAt != nil }
             .max { ($0.deck.lastReviewedAt ?? .distantPast) < ($1.deck.lastReviewedAt ?? .distantPast) }
@@ -180,9 +180,17 @@ nonisolated extension WidgetSnapshot {
             dueDecks: dueDecks,
             jumpBackIn: recent ?? dueDecks.first,
             dueByCourse: byCourse.map { (name: $0.key, dueCount: $0.value) }
-                .sorted { $0.dueCount != $1.dueCount ? $0.dueCount > $1.dueCount : $0.name < $1.name },
+                .sorted { Self.mostDueFirst($0.dueCount, $0.name, $1.dueCount, $1.name) },
             upcomingEvents: events.filter { $0.startsAt >= today }.sorted { $0.startsAt < $1.startsAt }
         )
+    }
+
+    /// Most due first; equal counts in natural name order, so "Lecture 2"
+    /// comes before "Lecture 10". (Spelled out here rather than shared: the
+    /// widget compiles this file on its own.)
+    static func mostDueFirst(_ aDue: Int, _ aName: String, _ bDue: Int, _ bName: String) -> Bool {
+        if aDue != bDue { return aDue > bDue }
+        return aName.compare(bName, options: [.numeric, .caseInsensitive]) == .orderedAscending
     }
 
     /// Whole days from `date` to an event, counted in calendar days -- an

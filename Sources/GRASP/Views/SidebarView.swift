@@ -35,6 +35,16 @@ struct SidebarView: View {
             .tag(ContentView.calendarRoute)
             .padding(.vertical, 3)
 
+            HStack(spacing: 7) {
+                Image(systemName: "graduationcap")
+                    .font(.system(size: 12))
+                    .frame(width: 16)
+                Text("Study Guide").graspType(.rowTitle)
+                Spacer(minLength: 0)
+            }
+            .tag(ContentView.studyGuideRoute)
+            .padding(.vertical, 3)
+
             ForEach(store.semesters.reversed()) { semester in
                 let courses = store.courses(inSemester: semester.id)
                 if !courses.isEmpty {

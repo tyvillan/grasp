@@ -185,6 +185,20 @@ public protocol CardGenerator: Sendable {
         noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]
     ) async -> [GeneratedFigure]
 
+    /// One part of a practice study guide, written from one deck's notes:
+    /// skills to master, practice problems with worked steps and answers,
+    /// sample test questions, key terms and common traps. `GeneratedGuidePart.
+    /// empty` when the model has nothing usable -- the caller skips that
+    /// deck rather than saving an empty part.
+    ///
+    /// Declared here, not only in the extension below: a requirement is
+    /// dispatched to each generator's own version, whereas a method that
+    /// exists only in an extension always runs the default, whichever
+    /// generator the call goes through.
+    func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -193,6 +207,11 @@ public protocol CardGenerator: Sendable {
 }
 
 public extension CardGenerator {
+    /// A generator that can't write study guides says so with nothing.
+    func generateStudyGuidePart(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
+    ) async -> GeneratedGuidePart { .empty }
+
     /// ~1,200 words is roughly 1,600 tokens of English prose, leaving a
     /// 7-8B model's 8k window comfortable room for the prompt and a full
     /// answer. `FoundationModelsGenerator` overrides this downward.
