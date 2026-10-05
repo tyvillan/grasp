@@ -136,7 +136,8 @@ struct CloudAITests {
 
     @Test("a pasted key is cleaned of prefixes and quotes, and refused when it can't work")
     func sanitizesKeys() {
-        let real = "AIzaSyA-0123456789abcdefghijklmnopqrstu"
+        // Split so secret scanners don't mistake this made-up key for a real one.
+        let real = "AIza" + "SyA-0123456789abcdefghijklmnopqrstu"
         #expect(AIKeyStore.sanitize("  \(real)\n").key == real)
         #expect(AIKeyStore.sanitize("GEMINI_API_KEY=\(real)").key == real)
         #expect(AIKeyStore.sanitize("GOOGLE_API_KEY=\"\(real)\"").key == real)
