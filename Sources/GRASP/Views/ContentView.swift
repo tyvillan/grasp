@@ -18,6 +18,8 @@ struct ContentView: View {
     static let calendarRoute = "calendar"
     /// The Study Guide page, a third sentinel beside Home and Calendar.
     static let studyGuideRoute = "studyGuide"
+    /// The Library page: vault import, hidden courses and library-wide checks.
+    static let libraryRoute = "library"
 
     @Environment(AppStore.self) private var store
     @State private var selectedCourseId: String? = ContentView.homeRoute
@@ -38,17 +40,9 @@ struct ContentView: View {
     // state that should reset the moment the app relaunches.
     @AppStorage("deckListCollapsed") private var isDeckListCollapsed = false
 
-    // Exams stays a toolbar-level action rather than living inside
-    // DeckListView: a zero-deck course renders no DeckListView at all (see
-    // `CourseEmptyStateView` below), so anything that must still work on
-    // an empty course can't be owned by a view that isn't mounted. New
-    // Deck and Add Files used to live here for the same reason, but
-    // `CourseEmptyStateView` already carries its own copies of both for
-    // the zero-deck case, so the real ones could move next to what they
-    // actually act on -- New Deck into `DeckListView`'s header, Add Files
-    // into `DeckDetailView`'s -- instead of sitting side by side up here
-    // looking like near-twins with different jobs.
-    @State private var showingExams = false
+    // New Deck and Add Files live next to what they act on (DeckListView's
+    // header, DeckDetailView's); `CourseEmptyStateView` carries its own
+    // copies for the zero-deck case where neither view is mounted.
     @State private var showingNewDeck = false
 
     /// The selection when it's a real course, not one of the sentinel
@@ -58,7 +52,7 @@ struct ContentView: View {
     /// time a second sentinel was added.
     private var activeCourseId: String? {
         guard let id = selectedCourseId, id != Self.homeRoute, id != Self.calendarRoute,
-              id != Self.studyGuideRoute else { return nil }
+              id != Self.studyGuideRoute, id != Self.libraryRoute else { return nil }
         return id
     }
 
@@ -72,6 +66,8 @@ struct ContentView: View {
                     HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
                 } else if selectedCourseId == Self.calendarRoute {
                     CalendarView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
+                } else if selectedCourseId == Self.libraryRoute {
+                    LibraryView()
                 } else if selectedCourseId == Self.studyGuideRoute {
                     StudyGuideHubView { target in
                         switch target {
@@ -168,15 +164,6 @@ struct ContentView: View {
                     .help(isDeckListCollapsed ? "Show deck list" : "Hide deck list")
                 }
             }
-            if activeCourseId != nil {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingExams = true
-                    } label: {
-                        Label("Exams", systemImage: "calendar")
-                    }
-                }
-            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showingSearch = true
@@ -191,9 +178,6 @@ struct ContentView: View {
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ImportButton()
             }
             ToolbarItem(placement: .primaryAction) {
                 ProfileMenuButton()
@@ -213,11 +197,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingUploadPicker, onDismiss: runUploadPanel) {
             UploadToCourseSheet(selection: $uploadTargetCourseId)
-        }
-        .sheet(isPresented: $showingExams) {
-            if let courseId = activeCourseId {
-                ExamsSheet(courseId: courseId)
-            }
         }
         .sheet(isPresented: $showingNewDeck) {
             if let courseId = activeCourseId {
@@ -390,33 +369,6 @@ private struct CourseEmptyStateView: View {
             Button("Add Files or Folder…", action: onAddFiles)
             Button("New Deck…", action: onNewDeck)
         }
-    }
-}
-
-private struct ImportButton: View {
-    @Environment(AppStore.self) private var store
-
-    var body: some View {
-        Button {
-            Task { await store.runImport() }
-        } label: {
-            if store.isImporting {
-                ProgressView().controlSize(.small)
-            } else {
-                Label("Import Vault", systemImage: "arrow.triangle.2.circlepath")
-            }
-        }
-        .disabled(store.isImporting)
-        .help(importHelp)
-    }
-
-    private var importHelp: String {
-        guard let summary = store.lastImportSummary else { return "Scan the vault for new or changed notes" }
-        var text = "Last import: \(summary.filesImportedOrUpdated) updated, \(summary.cardsCreated) cards created"
-        if summary.duplicatesSkipped > 0 {
-            text += ", \(summary.duplicatesSkipped) duplicates skipped"
-        }
-        return text
     }
 }
 

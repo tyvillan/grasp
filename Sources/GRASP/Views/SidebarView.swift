@@ -45,6 +45,16 @@ struct SidebarView: View {
             .tag(ContentView.studyGuideRoute)
             .padding(.vertical, 3)
 
+            HStack(spacing: 7) {
+                Image(systemName: "books.vertical")
+                    .font(.system(size: 12))
+                    .frame(width: 16)
+                Text("Library").graspType(.rowTitle)
+                Spacer(minLength: 0)
+            }
+            .tag(ContentView.libraryRoute)
+            .padding(.vertical, 3)
+
             ForEach(store.semesters.reversed()) { semester in
                 let courses = store.courses(inSemester: semester.id)
                 if !courses.isEmpty {
@@ -98,7 +108,7 @@ struct SidebarView: View {
     private func courseRow(_ course: Course) -> some View {
         CourseRow(course: course)
             .tag(course.id)
-            .contextMenu {
+            .rowActions {
                 CourseContextMenu(
                     course: course,
                     onEdit: { editingCourse = course },

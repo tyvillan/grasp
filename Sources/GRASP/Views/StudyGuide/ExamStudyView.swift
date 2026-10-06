@@ -52,8 +52,21 @@ struct ExamStudyView: View {
                 }
                 if let page, !page.parts.isEmpty {
                     Menu {
-                        ExportMenu(title: "Study Guide with Answer Key") { exportDocument(answerKey: true) }
-                        ExportMenu(title: "Practice Sheet, No Answers") { exportDocument(answerKey: false) }
+                        // Flat: each format is one click away, grouped by
+                        // which version of the guide it saves.
+                        ForEach([true, false], id: \.self) { answerKey in
+                            Section(answerKey ? "Study Guide with Answer Key" : "Practice Sheet, No Answers") {
+                                ForEach(ExportFormat.allCases) { format in
+                                    Button {
+                                        if let document = exportDocument(answerKey: answerKey) {
+                                            DocumentExporter.save(document, as: format)
+                                        }
+                                    } label: {
+                                        Label(format.rawValue, systemImage: format.systemImage)
+                                    }
+                                }
+                            }
+                        }
                     } label: {
                         Label("Download", systemImage: "square.and.arrow.down")
                     }

@@ -18,6 +18,22 @@ struct CoursesView: View {
                         : "Your library is on its way -- it appears here as soon as it has synced.")
                 )
             }
+            Section {
+                NavigationLink {
+                    StudyGuideHubView(standalone: false) { target in
+                        switch target {
+                        case .exam(let courseId, let examEventId):
+                            ExamScreen(courseId: courseId, examEventId: examEventId)
+                        case .practice(let courseId, let guideId):
+                            ExamScreen(courseId: courseId, examEventId: "", practiceGuideId: guideId)
+                        }
+                    }
+                } label: {
+                    Label("Study Guides", systemImage: "graduationcap")
+                        .graspType(.rowTitle)
+                }
+            }
+            .graspSection()
             ForEach(semesterSections, id: \.title) { section in
                 Section(section.title) {
                     ForEach(section.courses) { course in
@@ -179,6 +195,14 @@ struct CourseView: View {
                     } label: {
                         DeckRow(name: deck.name, icon: "rectangle.stack", kicker: kickers[deck.id],
                                 counts: store.deckCounts[deck.id].map { ($0.cardCount, $0.dueCount) } ?? (0, 0))
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button {
+                            settingLectureDateFor = deck
+                        } label: {
+                            Label(deck.manualLessonDate == nil ? "Set Date" : "Change Date", systemImage: "calendar")
+                        }
+                        .tint(GRASPColor.accent)
                     }
                     .contextMenu {
                         Button(deck.manualLessonDate == nil ? "Set Lecture Date…" : "Change Lecture Date…") {

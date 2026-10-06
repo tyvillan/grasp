@@ -17,16 +17,27 @@ enum StudyGuideHubTarget: Hashable {
 /// iPhone (a tab). Each app supplies the page a row opens.
 struct StudyGuideHubView<Destination: View>: View {
     @Environment(AppStore.self) private var store
+    /// False when pushed inside a stack that already exists (the iPhone's
+    /// Courses tab), so there is no second stack nested in the first.
+    var standalone = true
     @ViewBuilder let destination: (StudyGuideHubTarget) -> Destination
 
     @State private var courses: [StudyGuideActions.HubCourse] = []
-    @State private var path: [StudyGuideHubTarget] = []
+    @State private var openTarget: StudyGuideHubTarget?
     @State private var showingGenerator = false
 
     private var job: AppStore.AIJob? { store.aiJob(AppStore.studyGuideJobKey) }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        if standalone {
+            NavigationStack { page }
+        } else {
+            page
+        }
+    }
+
+    private var page: some View {
+        Group {
             VStack(spacing: 0) {
                 if let job {
                     AIProgressStrip(
@@ -53,6 +64,7 @@ struct StudyGuideHubView<Destination: View>: View {
                 }
             }
             .navigationDestination(for: StudyGuideHubTarget.self) { destination($0) }
+            .navigationDestination(item: $openTarget) { destination($0) }
         }
         .sheet(isPresented: $showingGenerator) { GenerateStudyGuideSheet() }
         .task { load() }
@@ -205,7 +217,7 @@ struct StudyGuideHubView<Destination: View>: View {
             if let first = run.guideIds.first, let target = target(forGuide: first) {
                 Button("Open") {
                     store.dismissStudyGuideRun()
-                    path.append(target)
+                    openTarget = target
                 }
                 .buttonStyle(GRASPQuietButton())
             }

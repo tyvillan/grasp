@@ -72,6 +72,15 @@ struct SettingsScreen: View {
             .graspSection()
             .task { await store.refreshGeneratorStatus() }
 
+            Section("Library") {
+                NavigationLink {
+                    ArchivedCoursesScreen()
+                } label: {
+                    LabeledContent("Archived Courses", value: "\(store.archivedCourses.count)")
+                }
+            }
+            .graspSection()
+
             Section {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
             }
@@ -135,5 +144,29 @@ struct SettingsScreen: View {
         } catch {
             linkError = "Couldn't turn on sync: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Courses archived on the Mac (or here), with a way back. The iPhone has no
+/// sidebar to archive from, so this is where they stay reachable.
+private struct ArchivedCoursesScreen: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        List {
+            if store.archivedCourses.isEmpty {
+                ContentUnavailableView("No Archived Courses", systemImage: "archivebox")
+            }
+            ForEach(store.archivedCourses) { course in
+                HStack {
+                    Text(course.name)
+                    Spacer()
+                    Button("Unarchive") { try? store.setCourseArchived(course.id, archived: false) }
+                        .buttonStyle(.borderless)
+                }
+            }
+        }
+        .graspList()
+        .navigationTitle("Archived Courses")
     }
 }

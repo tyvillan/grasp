@@ -265,3 +265,14 @@ All the logic is in `GRASPCore` and tested; what's left is Windows UI. Nothing h
 ## When you finish a chunk
 
 Push, then give Tyler a short summary: what works now, what he should click to try it, and anything that needs the Mac (commits marked `[needs Mac check]`). He'll pass that to the Mac session.
+
+## Mac UI cleanup (Tyler asked 2026-10-06): fewer submenus, one Library page
+
+Mac and iPhone only; Windows should follow the same layout when convenient. No core/schema changes.
+- **Library page** (sidebar row beside Home / Calendar / Study Guide): Import Vault (+ last-import summary), vault path + Choose…, Archived Courses, Excluded Folders, "Scan All Courses for Duplicates…", "Check All Cards for Off-Topic Content…". These left Settings.
+- **Settings has three tabs:** General (study goal, focus timer), AI (unchanged except the off-topic check moved out), Account (profile name + Account & Sync). "Advanced" is gone; Switch Profile lives only in the avatar menu.
+- **Toolbar:** Exams button and the bare Import Vault button removed. Search, "+" (Add Course / Upload Document) and the avatar remain.
+- **Rows have a visible hover "•••"** (course rows, course tiles, deck rows) with the same actions as right-click.
+- **Deck screen:** one "Add" menu (New Card…, Generate Cards with AI, Add Files…) plus a separate "Files" button; the old New Card / Files menus are gone. The deck-list header's graduation-cap icon is now a labeled "Add Guide".
+- **Study guide Download** is one flat menu: Answer Key / Practice Sheet, each with PDF / Word / Markdown.
+- **iPhone:** back to 5 tabs; "Study Guides" is the first row of Courses; archived courses are in Settings → Library; deck rows swipe to set a lecture date.

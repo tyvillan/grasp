@@ -23,16 +23,6 @@ struct MainTabView: View {
             Tab("Calendar", systemImage: "calendar", value: "calendar") {
                 NavigationStack { CalendarScreen() }
             }
-            Tab("Study Guide", systemImage: "graduationcap", value: "guides") {
-                StudyGuideHubView { target in
-                    switch target {
-                    case .exam(let courseId, let examEventId):
-                        ExamScreen(courseId: courseId, examEventId: examEventId)
-                    case .practice(let courseId, let guideId):
-                        ExamScreen(courseId: courseId, examEventId: "", practiceGuideId: guideId)
-                    }
-                }
-            }
             Tab("Settings", systemImage: "gearshape", value: "settings") {
                 NavigationStack { SettingsScreen(onSwitchProfile: onSwitchProfile) }
             }

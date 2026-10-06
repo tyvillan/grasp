@@ -419,7 +419,7 @@ struct HomeView: View {
                                 if let course = course(for: rollup.id) { editingCourse = course }
                             }
                             .onTapGesture { selectedCourseId = rollup.id }
-                            .contextMenu {
+                            .rowActions(alignment: .topTrailing, inset: 8) {
                                 if let course = course(for: rollup.id) {
                                     CourseContextMenu(
                                         course: course,

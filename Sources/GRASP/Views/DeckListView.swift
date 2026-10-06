@@ -27,9 +27,7 @@ private enum DeckSortOption: String, CaseIterable, Identifiable {
 /// mounted when the course actually has at least one deck -- `ContentView`
 /// renders `CourseEmptyStateView` instead otherwise, which carries its own
 /// "New Deck…" button so a zero-deck course can still get its first deck
-/// without this view ever mounting. `Exams` stays in `ContentView`'s
-/// toolbar for the same reason (it too must survive a zero-deck course);
-/// `New Deck` doesn't need that guarantee, so it lives in `header` below,
+/// without this view ever mounting. `New Deck` doesn't need that guarantee, so it lives in `header` below,
 /// beside the list it actually populates -- collapsing the deck-list pane
 /// hides it along with everything else in the pane, same as any other
 /// deck-list-scoped control.
@@ -110,7 +108,7 @@ struct DeckListView: View {
                         .listRowBackground(
                             dropTargetDeckId == deck.id ? GRASPColor.accentSoft : Color.clear
                         )
-                        .contextMenu {
+                        .rowActions {
                             DeckContextMenu(
                                 deck: deck,
                                 onRename: { renamingDeck = deck },
@@ -177,8 +175,8 @@ struct DeckListView: View {
             .fixedSize()
             .help("Sort decks: \(sortOption.label)")
             Button(action: onAddStudyGuide) {
-                Image(systemName: "graduationcap")
-                    .font(.system(size: 13))
+                Label("Add Guide", systemImage: "graduationcap")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(GRASPColor.textSecondary)
             }
             .buttonStyle(.plain)

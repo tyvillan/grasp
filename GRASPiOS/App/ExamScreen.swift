@@ -56,8 +56,19 @@ struct ExamScreen: View {
                         .disabled(importing)
                     }
                     if let page, !page.parts.isEmpty {
-                        ExportMenu(title: "Download with Answer Key") { document(answerKey: true) }
-                        ExportMenu(title: "Download Practice Sheet") { document(answerKey: false) }
+                        ForEach([true, false], id: \.self) { answerKey in
+                            Section(answerKey ? "Study Guide with Answer Key" : "Practice Sheet, No Answers") {
+                                ForEach(ExportFormat.allCases) { format in
+                                    Button {
+                                        if let doc = document(answerKey: answerKey) {
+                                            DocumentExporter.save(doc, as: format)
+                                        }
+                                    } label: {
+                                        Label(format.rawValue, systemImage: format.systemImage)
+                                    }
+                                }
+                            }
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")

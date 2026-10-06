@@ -491,12 +491,8 @@ struct DeckDetailView: View {
 
     @ViewBuilder
     private var cardActionButtons: some View {
-        // Creating a card belongs to the card list; offering it while
-        // reading the overview puts an action in the wrong room.
-        if contentTab == .cards {
-            newCardButton
-        }
-        addFilesButton
+        addMenuButton
+        filesButton
     }
 
     /// Reads as a sentence -- "231 cards · 12 due · 40 understood" -- with
@@ -534,113 +530,71 @@ struct DeckDetailView: View {
         }
     }
 
-    /// Moved here from the main window toolbar, where it used to sit right
-    /// beside "New Deck" -- close enough in icon and position that the two
-    /// were easy to mix up. Here it's scoped to the deck actually on
-    /// screen (or the whole course, for "All Cards"), same as every other
-    /// button in this row.
-    private var addFilesButton: some View {
-        // "to Course" for the "All Cards" scope -- the files land in the
-        // course as a whole (wherever the scanner/manual placement puts
-        // them), not literally inside a single deck, so the label should
-        // say what actually happens rather than overclaim scope it doesn't
-        // have when a single real deck is what's on screen.
-        let noun: String = {
-            if case .deck = scope { return "Deck" }
-            return "Course"
-        }()
-        // A menu for the same reason "New Card" is one: seeing which files
-        // are behind a deck is the other half of the same job, and a
-        // separate button would crowd a row that's already full.
+    /// "Files" or "Course" -- where added files land: a single deck, or
+    /// the course as a whole for "All Cards".
+    private var filesNoun: String {
+        if case .deck = scope { return "Deck" }
+        return "Course"
+    }
+
+    /// One flat "Add" menu for everything that puts something into this
+    /// deck: a card by hand, cards by AI, or files. These were two menus
+    /// (New Card, Files) with the AI action nested inside the first.
+    private var addMenuButton: some View {
+        let noun = filesNoun
         return Menu {
+            if contentTab == .cards {
+                Button("New Card…") { isCreatingCard = true }
+                if isGeneratorAvailable {
+                    Button {
+                        showingGenerateSheet = true
+                    } label: {
+                        Label(isGeneratingCards ? "Adding Cards…" : "Generate Cards with AI", systemImage: "sparkles")
+                    }
+                    .disabled(isGeneratingCards || aiActivity != nil)
+                }
+                Divider()
+            }
             Button("Add Files to \(noun)…") { onAddFiles() }
                 .disabled(store.isImporting)
-            Button("Show Files in This \(noun)…") { showingDeckFiles = true }
         } label: {
             HStack(spacing: 5) {
                 if store.isImporting {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "doc.badge.plus").font(.system(size: 11))
+                    Image(systemName: "plus").font(.system(size: 11))
                 }
-                Text("Files")
+                Text("Add")
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(GRASPColor.textTertiary)
             }
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: 13, weight: .semibold))
             .tracking(-0.1)
-            .foregroundStyle(GRASPColor.textPrimary)
+            .foregroundStyle(Color.black.opacity(0.88))
             .padding(.horizontal, 14)
             .frame(height: 28)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                    .blendMode(.plusLighter)
             )
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Add files to this \(noun.lowercased()), or see which files its cards came from")
-        .sheet(isPresented: $showingDeckFiles) {
-            DeckFilesSheet(
-                deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased()
-            )
-        }
+        .help("Add a card, generate cards with AI, or add files to this \(noun.lowercased())")
     }
 
-    /// Clicking "New Card" now opens a menu -- "New Card…" and "Add More
-    /// Cards with AI" together, since the two are really the same job
-    /// ("get more cards into this deck") by two different means, not two
-    /// separate actions competing for space in the row. Collapses back to
-    /// a plain one-click button with no menu at all when no generator is
-    /// available -- there'd be nothing else to put in it.
-    @ViewBuilder
-    private var newCardButton: some View {
-        if isGeneratorAvailable {
-            // A plain `Menu`, not a split button -- every earlier attempt
-            // at a "one click makes a card, a separate chevron opens the
-            // rest" control ran into the same wall: a `Menu`'s own
-            // rendering doesn't reliably respect custom styling or an
-            // outer shape once any part of it is involved (a swallowed
-            // chevron, a clipped merged background, an invisible icon
-            // color, each a different symptom of the same thing). Making
-            // the whole button the menu trigger sidesteps all of it: the
-            // label here is a fully self-drawn view with its own
-            // background and text color, so `Menu` has nothing left to
-            // draw or restyle -- it only has to provide the tap target and
-            // the popup. "New Card…" is simply the menu's first item now,
-            // rather than a separate default action.
-            Menu {
-                Button("New Card…") { isCreatingCard = true }
-                Button {
-                    showingGenerateSheet = true
-                } label: {
-                    Label(isGeneratingCards ? "Adding Cards…" : "Add More Cards with AI", systemImage: "sparkles")
-                }
-                .disabled(isGeneratingCards || aiActivity != nil)
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "plus").font(.system(size: 11))
-                    Text("New Card")
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .tracking(-0.1)
-                .foregroundStyle(Color.black.opacity(0.88))
-                .padding(.horizontal, 14)
-                .frame(height: 28)
-                .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                        .blendMode(.plusLighter)
+    /// Which files are behind this deck (or course).
+    private var filesButton: some View {
+        let noun = filesNoun
+        return modeButton("Files", "doc.on.doc", prominent: false) { showingDeckFiles = true }
+            .help("See which files this \(noun.lowercased())'s cards came from")
+            .sheet(isPresented: $showingDeckFiles) {
+                DeckFilesSheet(
+                    deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased()
                 )
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-        } else {
-            modeButton("New Card", "plus", prominent: true) { isCreatingCard = true }
-        }
     }
 
     /// The single unified action that replaced the separate "Refine with
