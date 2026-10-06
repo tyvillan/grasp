@@ -108,7 +108,7 @@ struct DeckListView: View {
                         .listRowBackground(
                             dropTargetDeckId == deck.id ? GRASPColor.accentSoft : Color.clear
                         )
-                        .rowActions {
+                        .rowActions(inline: true) {
                             DeckContextMenu(
                                 deck: deck,
                                 onRename: { renamingDeck = deck },

@@ -442,15 +442,7 @@ struct DeckDetailView: View {
                 // on having cards, and Overview has to stay reachable for a
                 // deck whose cards are all still drafts.
                 if hasSourceNotes {
-                    Picker("", selection: $contentTab) {
-                        ForEach(ContentTab.allCases) { tab in
-                            Text(tab.rawValue).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
+                    contentTabSwitch
                 }
             }
 
@@ -493,6 +485,39 @@ struct DeckDetailView: View {
     private var cardActionButtons: some View {
         addMenuButton
         filesButton
+    }
+
+    /// The Cards / Overview switch: two large, labelled buttons rather than
+    /// a small segmented control, since it changes what the whole pane is.
+    private var contentTabSwitch: some View {
+        HStack(spacing: 4) {
+            ForEach(ContentTab.allCases) { tab in
+                let selected = contentTab == tab
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { contentTab = tab }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
+                            .font(.system(size: 13))
+                        Text(tab.rawValue)
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(selected ? Color.black.opacity(0.88) : GRASPColor.textSecondary)
+                    .padding(.horizontal, 18)
+                    .frame(height: 36)
+                    .background(
+                        selected ? GRASPColor.accent : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(GRASPColor.hairlineStrong))
     }
 
     /// Reads as a sentence -- "231 cards · 12 due · 40 understood" -- with

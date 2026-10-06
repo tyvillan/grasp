@@ -108,7 +108,7 @@ struct SidebarView: View {
     private func courseRow(_ course: Course) -> some View {
         CourseRow(course: course)
             .tag(course.id)
-            .rowActions {
+            .rowActions(inline: true) {
                 CourseContextMenu(
                     course: course,
                     onEdit: { editingCourse = course },
