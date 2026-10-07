@@ -534,6 +534,10 @@ struct GuideText: View {
         let t = line.trimmingCharacters(in: .whitespaces)
         if t.isEmpty { return false }
         if t == "{" || t == "}" || t.hasPrefix("}") { return true }
+        // A matrix row: "[ 1  2 ]" or "| 3 4 |", entries only.
+        if (t.hasPrefix("[") && t.hasSuffix("]")) || (t.hasPrefix("|") && t.hasSuffix("|")),
+           t.allSatisfy({ "[]|()0123456789.,/+- ".contains($0) || $0.isLetter && t.count < 40 }) { return true }
+        if t.hasPrefix("A = [") || t.hasPrefix("B = [") || t.hasPrefix("M = [") { return true }
         let startsLikeCode = codeStarts.contains { t.hasPrefix($0) }
         let hasCodeShape = t.contains(";") || t.contains("{") || t.contains("<<") || t.contains(">>")
             || t.hasSuffix(")") || t.contains("==") || t.contains("+=")

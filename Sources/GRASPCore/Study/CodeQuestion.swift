@@ -193,7 +193,28 @@ public struct TestQuestion: Codable, FetchableRecord, PersistableRecord, Identif
         self.createdAt = createdAt; self.deletedAt = deletedAt
     }
 
-    public var question: CodeQuestion? { CodeQuestion.decode(bodyJSON) }
+    /// A bank row for a non-code problem; `language` holds its subject.
+    public init(id: String = UUID().uuidString, courseId: String, deckId: String, materialId: String? = nil,
+                problem: ProblemQuestion, bodyJSON: String, sourceContentHash: String? = nil,
+                verifiedBy: String, model: String? = nil, createdAt: Date = Date()) {
+        self.id = id; self.courseId = courseId; self.deckId = deckId; self.materialId = materialId
+        self.kind = problem.kind.rawValue; self.language = problem.subject.rawValue; self.bodyJSON = bodyJSON
+        self.sourceContentHash = sourceContentHash; self.verifiedBy = verifiedBy; self.model = model
+        self.createdAt = createdAt; self.deletedAt = nil
+    }
+
+    public var question: CodeQuestion? { CodeQuestionKind(rawValue: kind) == nil ? nil : CodeQuestion.decode(bodyJSON) }
+    public var problem: ProblemQuestion? { ProblemKind(rawValue: kind) == nil ? nil : ProblemQuestion.decode(bodyJSON) }
+
+    /// One line saying what this is, for the bank list.
+    public var summary: String {
+        if let question { return "\(question.kind.label) · \(question.language.label)" }
+        if let problem { return "\(problem.kind.label) · \(problem.subject.label)" }
+        return kind
+    }
+
+    /// The question text, whichever kind it is.
+    public var promptText: String { question?.prompt ?? problem?.prompt ?? "" }
 }
 
 // MARK: - Grading (no compiler needed)

@@ -958,8 +958,8 @@ final class AppStore {
             let budget = Study.aiQuestionBudget(for: config.questionCount)
             codeQuestions = (try? await database.queue.read { db in
                 var rng = SystemRandomNumberGenerator()
-                return try CodeQuestionBank.pick(count: budget, inDecks: deckIds, using: &rng, db: db)
-            })?.map { $0.roundQuestion() } ?? []
+                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds, using: &rng, db: db)
+            }) ?? []
             codeBudgetUsed = codeQuestions.count
         }
         let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)

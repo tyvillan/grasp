@@ -106,6 +106,20 @@ public struct CloudGenerator: CardGenerator {
         )
     }
 
+    public func generateProblems(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        subject: ProblemSubject, kinds: [ProblemKind], count: Int
+    ) async -> [GeneratedProblem] {
+        await pipeline.generateProblems(
+            deckName: deckName, courseName: courseName, noteContext: noteContext, cardTerms: cardTerms,
+            subject: subject, kinds: kinds, count: count
+        )
+    }
+
+    public func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
+        await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -373,6 +387,29 @@ public struct FallbackGenerator: CardGenerator {
                                                   cardTerms: cardTerms, language: language, kinds: kinds, count: count)
             }
         )
+    }
+
+    public func generateProblems(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        subject: ProblemSubject, kinds: [ProblemKind], count: Int
+    ) async -> [GeneratedProblem] {
+        await run(
+            keep: { !$0.isEmpty },
+            cloud: {
+                await cloud.generateProblems(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                             cardTerms: cardTerms, subject: subject, kinds: kinds, count: count)
+            },
+            local: {
+                await local.generateProblems(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                             cardTerms: cardTerms, subject: subject, kinds: kinds, count: count)
+            }
+        )
+    }
+
+    public func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
+        await run(keep: { $0 != nil },
+                  cloud: { await cloud.solveMultipleChoice(prompt: prompt, choices: choices) },
+                  local: { await local.solveMultipleChoice(prompt: prompt, choices: choices) })
     }
 
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {

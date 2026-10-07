@@ -21,8 +21,7 @@ public enum CodeQuestionBuilder {
 
     // MARK: - Verifying one question
 
-    /// Why a draft was dropped, in words a person can read.
-    struct Rejected: Error { let reason: String }
+    typealias Rejected = DraftRejected
 
     /// A question that has been run and held up, or nil.
     static func verify(_ draft: GeneratedCodeQuestion, language: CodeLanguage,
@@ -164,33 +163,7 @@ public enum CodeQuestionBuilder {
 
     // MARK: - Writing a deck's questions
 
-    struct Source: Sendable {
-        let material: Material
-        let text: String
-        let language: CodeLanguage
-    }
-
-    /// The notes behind these decks that hold code, with the language to
-    /// write in. Fenced code with a language tag decides it; failing that,
-    /// what the code looks like.
-    static func sources(forDecks deckIds: [String], wordBudget: Int, db: Database) throws -> [Source] {
-        var result: [Source] = []
-        for material in try OverviewQueries.materials(forDecks: deckIds, db: db) {
-            guard let note = try NoteText.fetchOne(db, key: material.id) else { continue }
-            let snippets = NoteCode.snippets(in: note.raw)
-            guard !snippets.isEmpty else { continue }
-            let tagged = snippets.compactMap { CodeLanguage.named($0.language) }
-            let language = mostCommon(tagged) ?? guessLanguage(snippets.map(\.code).joined(separator: "\n"))
-            guard let language else { continue }
-            let words = note.reflowed.split(separator: " ", omittingEmptySubsequences: true)
-            let text = words.prefix(wordBudget).joined(separator: " ")
-            let code = snippets.prefix(4).map { "```\n\($0.code)\n```" }.joined(separator: "\n")
-            result.append(Source(material: material, text: text + "\n\nCode from the notes:\n" + code, language: language))
-        }
-        return result
-    }
-
-    private static func mostCommon(_ languages: [CodeLanguage]) -> CodeLanguage? {
+    static func mostCommon(_ languages: [CodeLanguage]) -> CodeLanguage? {
         Dictionary(grouping: languages, by: { $0 }).max { $0.value.count < $1.value.count }?.key
     }
 
@@ -200,88 +173,6 @@ public enum CodeQuestionBuilder {
         }
         if code.contains("def ") || code.contains("print(") || code.contains("import ") { return .python }
         return nil
-    }
-
-    /// Writes up to `count` verified questions across the decks' notes
-    /// and saves them against the first deck each note belongs to. One model
-    /// request per note, spread evenly, with `AIProgress` steps per note.
-    public static func generate(
-        deckIds: [String], kinds: [CodeQuestionKind], count: Int, using generator: any CardGenerator,
-        executor: any CodeExecuting, database: GRASPDatabase
-    ) async -> Outcome {
-        var outcome = Outcome()
-        let progress = AIProgress.current
-        guard count > 0, !kinds.isEmpty else { return outcome }
-        let budget = generator.overviewContextWordBudget
-        let (sources, deckByMaterial, courseName, terms) = (try? await database.queue.read { db -> ([Source], [String: Deck], String, [String]) in
-            let sources = try sources(forDecks: deckIds, wordBudget: max(300, min(budget, 900)), db: db)
-            var deckByMaterial: [String: Deck] = [:]
-            for source in sources {
-                let row = try Row.fetchOne(db, sql: """
-                    SELECT deckCard.deckId AS deckId FROM deckCard
-                    JOIN card ON card.id = deckCard.cardId
-                    WHERE card.materialId = ? AND deckCard.deckId IN (\(databaseQuestionMarks(count: deckIds.count)))
-                    LIMIT 1
-                    """, arguments: StatementArguments([source.material.id] + deckIds))
-                if let deckId = row?["deckId"] as String?, let deck = try Deck.fetchOne(db, key: deckId) {
-                    deckByMaterial[source.material.id] = deck
-                }
-            }
-            let course = try sources.first.flatMap { try Course.fetchOne(db, key: $0.material.courseId) }
-            let terms = try Card.fetchAll(db, sql: """
-                SELECT card.* FROM card JOIN deckCard ON deckCard.cardId = card.id
-                WHERE deckCard.deckId IN (\(databaseQuestionMarks(count: deckIds.count)))
-                AND card.deletedAt IS NULL AND card.status = 'active' LIMIT 30
-                """, arguments: StatementArguments(deckIds)).map(\.front)
-            return (sources, deckByMaterial, course?.name ?? "", terms)
-        }) ?? ([], [:], "", [])
-
-        guard !sources.isEmpty else {
-            outcome.notCodeDecks = ["these decks"]
-            return outcome
-        }
-        guard sources.contains(where: { executor.canRun($0.language) }) else {
-            outcome.cannotRun = true
-            return outcome
-        }
-        let usable = sources.filter { executor.canRun($0.language) }
-        progress?.expect(usable.count)
-        let perNote = max(2, Int((Double(count) / Double(usable.count)).rounded(.up)))
-
-        for source in usable {
-            if Task.isCancelled { outcome.wasCancelled = true; break }
-            if outcome.saved >= count { break }
-            guard let deck = deckByMaterial[source.material.id] else { continue }
-            progress?.begin("Writing code questions from \(source.material.title)")
-            defer { progress?.advance() }
-            let drafts = await generator.generateCodeQuestions(
-                deckName: deck.name, courseName: courseName, noteContext: source.text, cardTerms: terms,
-                language: source.language, kinds: kinds, count: min(perNote, count - outcome.saved)
-            )
-            for draft in drafts {
-                if Task.isCancelled { outcome.wasCancelled = true; break }
-                guard outcome.saved < count else { break }
-                guard kinds.contains(draft.kind) else { outcome.rejected += 1; continue }
-                let question: CodeQuestion
-                do {
-                    question = try await check(draft, language: source.language, using: executor)
-                } catch {
-                    outcome.rejected += 1
-                    outcome.reasons[(error as? Rejected)?.reason ?? "unknown", default: 0] += 1
-                    continue
-                }
-                guard let body = question.encoded() else { outcome.rejected += 1; continue }
-                let record = TestQuestion(
-                    courseId: source.material.courseId, deckId: deck.id, materialId: source.material.id,
-                    kind: question.kind, language: question.language, bodyJSON: body,
-                    sourceContentHash: source.material.contentHash,
-                    verifiedBy: source.language == .cpp ? "compiled and ran with clang++" : "ran with python3",
-                    model: OverviewOrigin.of(generator)?.model
-                )
-                if (try? await database.queue.write({ try record.insert($0) })) != nil { outcome.saved += 1 }
-            }
-        }
-        return outcome
     }
 }
 
@@ -315,6 +206,24 @@ public enum CodeQuestionBank {
         guard let materialId = question.materialId, let material = try Material.fetchOne(db, key: materialId),
               let hash = material.contentHash, let written = question.sourceContentHash else { return false }
         return hash != written
+    }
+
+    /// Up to `count` saved questions of every kind, as test questions.
+    public static func pickRound<R: RandomNumberGenerator>(
+        count: Int, inDecks deckIds: [String], using rng: inout R, db: Database
+    ) throws -> [LearnEngine.RoundQuestion] {
+        var pool = try questions(inDecks: deckIds, db: db)
+        pool.shuffle(using: &rng)
+        var result: [LearnEngine.RoundQuestion] = []
+        for record in pool {
+            guard result.count < count else { break }
+            if let code = record.question {
+                result.append(code.roundQuestion())
+            } else if let problem = record.problem {
+                result.append(problem.roundQuestion(using: &rng))
+            }
+        }
+        return result
     }
 
     /// Up to `count` questions for a test, drawn at random.

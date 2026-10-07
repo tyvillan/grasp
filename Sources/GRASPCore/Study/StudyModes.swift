@@ -112,11 +112,12 @@ extension Study {
         for (index, question) in questions.enumerated() {
             try TestItem(
                 id: question.id + "-" + attempt.id, attemptId: attempt.id, cardId: question.cardId,
-                ordinal: index, questionType: question.code == nil ? question.type.rawValue : "code",
+                ordinal: index,
+                questionType: question.code != nil ? "code" : (question.problem != nil ? "problem" : question.type.rawValue),
                 promptText: question.prompt,
                 choicesJSON: question.choices.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
                 correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil,
-                payloadJSON: question.code?.encoded()
+                payloadJSON: question.code?.encoded() ?? question.problem?.encoded()
             ).insert(db)
         }
         return (attempt.id, questions)

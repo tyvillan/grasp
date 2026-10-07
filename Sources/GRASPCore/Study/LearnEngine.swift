@@ -28,11 +28,14 @@ public enum LearnEngine {
         /// A code question from the saved bank (see `CodeQuestionBank`):
         /// shown and graded as code, with `type` left as `.written`.
         public var code: CodeQuestion?
+        /// A worked problem (matrices, economics, concepts) from the bank.
+        public var problem: ProblemQuestion?
 
         public init(id: String? = nil, cardId: String?, prompt: String, correctAnswer: String, type: QuestionType,
                     choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil,
-                    code: CodeQuestion? = nil) {
+                    code: CodeQuestion? = nil, problem: ProblemQuestion? = nil) {
             self.code = code
+            self.problem = problem
             self.id = id ?? cardId ?? UUID().uuidString
             self.cardId = cardId; self.prompt = prompt; self.correctAnswer = correctAnswer; self.type = type
             self.choices = choices; self.statement = statement; self.statementIsTrue = statementIsTrue

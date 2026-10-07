@@ -90,9 +90,9 @@ struct TestSetupSheet: View {
             if store.isAITestQuestionsEnabled {
                 let saved = store.codeQuestionCount(inDecks: deckIds)
                 Text(saved > 0
-                     ? "\(saved) saved code question\(saved == 1 ? "" : "s") for this deck, each checked by running it, "
+                     ? "\(saved) saved practice problem\(saved == 1 ? "" : "s") for this deck, each checked before it was kept, "
                        + "are mixed in, up to a third of the test."
-                     : "Short questions are written from your notes as the test starts. Code questions can be saved ahead of time from a deck's Add menu on the Mac.")
+                     : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -286,6 +286,12 @@ struct TestRunView: View {
                     .foregroundStyle(GRASPColor.accent)
                     .help("Written by AI, then compiled and run to check the answer")
                     .padding(.top, 42)
+            } else if let problem = question.problem {
+                Label("\(problem.kind.label) · \(problem.subject.label)", systemImage: "function")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(GRASPColor.accent)
+                    .help("Written by AI, then checked before it was saved")
+                    .padding(.top, 42)
             } else if question.cardId == nil {
                 Label("AI-generated", systemImage: "sparkles")
                     .font(.system(size: 11, weight: .medium))
@@ -294,14 +300,22 @@ struct TestRunView: View {
                     .padding(.top, 42)
             }
 
-            Text(question.prompt)
-                .graspType(.studyPrompt)
-                .foregroundStyle(GRASPColor.textPrimary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .frame(maxWidth: 560)
-                .padding(.top, question.cardId == nil ? 10 : 42)
-                .padding(.bottom, question.code == nil ? 0 : 6)
+            if question.problem != nil {
+                // A problem can hold a matrix, which only lines up in a
+                // fixed-width font, so it reads left to right.
+                GuideText(text: question.prompt, style: .prose, color: GRASPColor.textPrimary)
+                    .frame(maxWidth: 560, alignment: .leading)
+                    .padding(.top, 10)
+            } else {
+                Text(question.prompt)
+                    .graspType(.studyPrompt)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 560)
+                    .padding(.top, question.cardId == nil ? 10 : 42)
+                    .padding(.bottom, question.code == nil ? 0 : 6)
+            }
 
             Spacer(minLength: 28)
 
@@ -323,6 +337,11 @@ struct TestRunView: View {
                         }
                         .frame(maxWidth: 340)
                     }
+                case .written where question.problem != nil:
+                    ProblemQuestionView(problem: question.problem!, isAnswered: isAnswered) { given, correct in
+                        submit(correct, given: given, question: question)
+                    }
+                    .id(question.id)
                 case .written where question.code != nil:
                     ScrollView {
                         CodeQuestionView(question: question.code!, isAnswered: isAnswered) { given, correct in
@@ -359,13 +378,21 @@ struct TestRunView: View {
                         .task { writtenFieldFocused = true }
                 }
 
+                if isAnswered, question.type == .multipleChoice, let explanation = question.problem?.explanation {
+                    Text(explanation)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .frame(maxWidth: 560, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if isAnswered {
                     HStack(spacing: 6) {
                         Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.system(size: 12))
                         Text(lastCorrect
                              ? (wasOverridden ? "Marked correct" : "Correct")
-                             : (question.code == nil ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
+                             : (question.code == nil && question.problem == nil
+                                ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
                             .graspType(.body)
                     }
                     .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)

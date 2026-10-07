@@ -388,7 +388,7 @@ struct DeckDetailView: View {
             }
         }
         .sheet(isPresented: $showingCodeQuestions) {
-            CodeQuestionBankSheet(deckIds: scopeDeckIds, scopeName: deckName, courseId: courseId)
+            PracticeProblemsSheet(deckIds: scopeDeckIds, scopeName: deckName, courseId: courseId)
         }
         .sheet(item: $refineConfirmation) { scope in
             RefineDeckConfirmationSheet(
@@ -501,6 +501,7 @@ struct DeckDetailView: View {
     private var cardActionButtons: some View {
         addMenuButton
         filesButton
+        problemsButton
         if contentTab == .cards, isGeneratorAvailable {
             refineButton(.everything)
         }
@@ -599,11 +600,6 @@ struct DeckDetailView: View {
                 }
                 Divider()
             }
-            Button {
-                showingCodeQuestions = true
-            } label: {
-                Label("Code Questions for Tests…", systemImage: "chevron.left.forwardslash.chevron.right")
-            }
             Button("Add Files to \(noun)…") { onAddFiles() }
                 .disabled(store.isImporting)
         } label: {
@@ -632,6 +628,13 @@ struct DeckDetailView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Add a card, generate cards with AI, or add files to this \(noun.lowercased())")
+    }
+
+    /// The deck's saved practice problems, and writing more: code, matrix and
+    /// calculation problems, scenario questions that tests mix in.
+    private var problemsButton: some View {
+        modeButton("Problems", "function", prominent: false) { showingCodeQuestions = true }
+            .help("Practice problems written from this deck's notes, for tests")
     }
 
     /// Which files are behind this deck (or course).

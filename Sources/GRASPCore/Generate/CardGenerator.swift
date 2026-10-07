@@ -208,6 +208,18 @@ public protocol CardGenerator: Sendable {
         language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
     ) async -> [GeneratedCodeQuestion]
 
+    /// Worked problems that aren't code (matrices, calculations, scenario
+    /// questions), checked afterwards by `ProblemBuilder`. Requirements,
+    /// not extension-only methods, so each generator's own is called.
+    func generateProblems(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        subject: ProblemSubject, kinds: [ProblemKind], count: Int
+    ) async -> [GeneratedProblem]
+
+    /// A cold answer to a multiple-choice problem (0-based), the second
+    /// opinion on its answer key; nil when this generator can't say.
+    func solveMultipleChoice(prompt: String, choices: [String]) async -> Int?
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -216,6 +228,13 @@ public protocol CardGenerator: Sendable {
 }
 
 public extension CardGenerator {
+    func generateProblems(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        subject: ProblemSubject, kinds: [ProblemKind], count: Int
+    ) async -> [GeneratedProblem] { [] }
+
+    func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
+
     /// A generator that can't write code questions says so with nothing.
     func generateCodeQuestions(
         deckName: String, courseName: String, noteContext: String, cardTerms: [String],
