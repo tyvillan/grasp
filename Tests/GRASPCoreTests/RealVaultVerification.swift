@@ -86,6 +86,7 @@ struct RealVaultVerificationTests {
         // non-semester pseudo-course branch "Side Lectures" already uses.
         // 22, not 21: a "cpp-hello" folder appeared the same way, holding
         // one importable file with nothing card-worthy in it.
-        #expect(summary.courseCount == 22)
+        // 21 again: the "cpp-hello" folder is gone from the vault.
+        #expect(summary.courseCount == 21)
     }
 }

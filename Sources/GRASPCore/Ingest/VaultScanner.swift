@@ -234,7 +234,10 @@ public actor VaultScanner {
                 continue
             }
             let ext = fileURL.pathExtension.lowercased()
-            guard let kind = Self.importableKinds[ext] else { continue }
+            // Plain text and RTF are only imported when picked by name: a
+            // folder full of program input files, driver readmes and
+            // transcripts shouldn't turn into notes on its own.
+            guard let kind = Self.importableKinds[ext], !Self.explicitOnlyExtensions.contains(ext) else { continue }
 
             summary.filesScanned += 1
             do {
@@ -266,9 +269,14 @@ public actor VaultScanner {
         }
     }
 
+    /// Extensions imported only when the file itself is chosen, not found
+    /// while scanning a folder.
+    static let explicitOnlyExtensions: Set<String> = ["txt", "text", "rtf"]
+
     private static let importableKinds: [String: MaterialKind] = [
         // Plain text and RTF are read as notes: `.txt` is valid Markdown and
         // `.rtf` is converted to plain text first (see `PlainTextReader`).
+        // They are `explicitOnlyExtensions`: never picked up by folder scans.
         "md": .markdown, "txt": .markdown, "text": .markdown, "rtf": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
         "pptx": .pptx, "png": .image, "jpg": .image, "jpeg": .image,
     ]
@@ -431,6 +439,9 @@ public actor VaultScanner {
                 }
                 continue
             }
+            // Text and RTF files are skipped inside a folder (see
+            // `explicitOnlyExtensions`); naming one picks it.
+            if Self.explicitOnlyExtensions.contains(fileURL.pathExtension.lowercased()) { continue }
             try importSingleFile(fileURL, courseId: courseId, db: db, summary: &summary)
         }
     }

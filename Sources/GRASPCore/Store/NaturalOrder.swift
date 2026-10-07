@@ -33,13 +33,32 @@ public enum NaturalOrder {
 }
 
 public extension Deck {
+    /// Lecture-style decks (Lecture, Week, Module, Chapter, Unit...) come
+    /// before work that goes with them (labs, assignments...). Alphabetical
+    /// order put "Lab 1" ahead of "Lecture 1" and "Week 1".
+    private static let supportingKinds: Set<String> = [
+        "lab", "labs", "assignment", "assignments", "homework", "hw", "recitation", "discussion", "project",
+    ]
+
+    /// 1 for a lab-like deck, 0 for everything else. Read from the first
+    /// word of the chapter label, or of the name when there is no chapter.
+    internal var supportingRank: Int {
+        let label = (chapter ?? name).trimmingCharacters(in: .whitespaces).lowercased()
+        let first = label.split(whereSeparator: { !$0.isLetter }).first.map(String.init) ?? ""
+        return Self.supportingKinds.contains(first) ? 1 : 0
+    }
+
     /// The order decks are listed in: `sortIndex` first (hand-made decks
-    /// are appended with a rising one), then the chapter and name in
-    /// natural order. Stable, so equal decks keep their fetched order.
+    /// are appended with a rising one), then lecture-style decks before
+    /// lab-style ones, then the chapter and name in natural order. Stable,
+    /// so equal decks keep their fetched order.
     static func ordered(_ decks: [Deck]) -> [Deck] {
         decks.enumerated().sorted { lhs, rhs in
             let (a, b) = (lhs.element, rhs.element)
             if a.sortIndex != b.sortIndex { return a.sortIndex < b.sortIndex }
+            if a.chapter != nil, b.chapter != nil, a.supportingRank != b.supportingRank {
+                return a.supportingRank < b.supportingRank
+            }
             let chapter = NaturalOrder.compare(a.chapter, b.chapter)
             if chapter != .orderedSame { return chapter == .orderedAscending }
             let name = NaturalOrder.compare(a.name, b.name)

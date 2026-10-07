@@ -16,6 +16,16 @@ struct NaturalOrderTests {
         ])
     }
 
+    @Test("weeks, lectures and modules come before labs; decks with no chapter stay last")
+    func lecturesBeforeLabs() {
+        let labels = ["Lab 2", "Week 2", "Lab 1", "Week 1", "Module 1", "Lecture 1", "Week 10", "Lab 10"]
+        var decks = labels.map { Deck(courseId: "c", name: $0, chapter: $0) }
+        decks.append(Deck(courseId: "c", name: "General"))
+        #expect(names(Deck.ordered(decks)) == [
+            "Lecture 1", "Module 1", "Week 1", "Week 2", "Week 10", "Lab 1", "Lab 2", "Lab 10", "General",
+        ])
+    }
+
     @Test("case and accents are ignored, like localeCompare with sensitivity base")
     func ignoresCaseAndAccents() {
         #expect(NaturalOrder.compare("lecture 2", "Lecture 2") == .orderedSame)

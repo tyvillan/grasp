@@ -279,3 +279,5 @@ Mac and iPhone only; Windows should follow the same layout when convenient. No c
 
 ## `.txt` / `.rtf` imports (Tyler asked 2026-10-07)
 `VaultScanner.importableKinds` now maps `txt`, `text` and `rtf` to `.markdown`, and both markdown paths read through the new `PlainTextReader.read` (GRASPCore, pure Swift): UTF-8 first, then Windows-1252, and `.rtf` is converted to plain text. Windows only needs to allow those extensions in its file picker / drop handling; no schema change.
+
+Follow-up (2026-10-07): `.txt`/`.rtf`/`.text` are `VaultScanner.explicitOnlyExtensions` -- imported only when the file itself is chosen, never found inside a scanned or picked folder (a vault holds program input files, driver readmes and transcripts). Also `Deck.ordered` now puts lecture-style decks (Lecture, Week, Module, Chapter...) before lab-like ones (Lab, Assignment, Homework, HW, Recitation, Discussion, Project) via `Deck.supportingRank`; decks with no chapter stay last. Windows `Library.swift` should keep using `Deck.ordered`.

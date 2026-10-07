@@ -50,7 +50,7 @@ struct PlainTextReaderTests {
 
 @Suite("Text and RTF import")
 struct TextImportTests {
-    @Test("a .txt and an .rtf dropped into a course become notes with their text")
+    @Test("a .txt and an .rtf chosen by name become notes; a folder scan skips them")
     func importsTextAndRtf() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -71,6 +71,9 @@ struct TextImportTests {
         }
         let summary = try await VaultScanner(database: db).importPaths([txt, rtf], intoCourse: courseId)
         #expect(summary.filesScanned == 2)
+        // A folder scan leaves the same kind of files alone.
+        let folder = try await VaultScanner(database: db).importPaths([dir], intoCourse: courseId)
+        #expect(folder.filesScanned == 0)
         let titles = try await db.queue.read { conn in
             try Material.filter(Column("courseId") == courseId).fetchAll(conn).map(\.title).sorted()
         }
