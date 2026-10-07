@@ -267,7 +267,9 @@ public actor VaultScanner {
     }
 
     private static let importableKinds: [String: MaterialKind] = [
-        "md": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
+        // Plain text and RTF are read as notes: `.txt` is valid Markdown and
+        // `.rtf` is converted to plain text first (see `PlainTextReader`).
+        "md": .markdown, "txt": .markdown, "text": .markdown, "rtf": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
         "pptx": .pptx, "png": .image, "jpg": .image, "jpeg": .image,
     ]
 
@@ -276,7 +278,7 @@ public actor VaultScanner {
         fallbackSemesterFolderName: String, resolvedCourseId: inout String?,
         db: Database, summary: inout ImportSummary
     ) throws {
-        let raw = try String(contentsOf: fileURL, encoding: .utf8)
+        let raw = try PlainTextReader.read(fileURL)
         let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
         let relativePath = key(fileURL)
 
@@ -441,7 +443,7 @@ public actor VaultScanner {
         summary.filesScanned += 1
         do {
             if kind == .markdown {
-                let raw = try String(contentsOf: fileURL, encoding: .utf8)
+                let raw = try PlainTextReader.read(fileURL)
                 let contentHash = SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
                 let relativePath = key(fileURL)
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),

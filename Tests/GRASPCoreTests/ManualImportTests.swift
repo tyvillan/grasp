@@ -186,7 +186,7 @@ struct ManualImportTests {
         let db = try GRASPDatabase.inMemory()
         let courseId = try await makeCourse(db)
         let dir = try makeTempDir()
-        try "not a note".write(to: dir.appendingPathComponent("readme.txt"), atomically: false, encoding: .utf8)
+        try "not a note".write(to: dir.appendingPathComponent("readme.pages"), atomically: false, encoding: .utf8)
         try "Term\nA definition long enough to actually count as one, honestly"
             .write(to: dir.appendingPathComponent("Note.md"), atomically: false, encoding: .utf8)
 

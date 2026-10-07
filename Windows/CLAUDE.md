@@ -276,3 +276,6 @@ Mac and iPhone only; Windows should follow the same layout when convenient. No c
 - **Deck screen:** one "Add" menu (New Card…, Generate Cards with AI, Add Files…) plus a separate "Files" button; the old New Card / Files menus are gone. The deck-list header's graduation-cap icon is now a labeled "Add Guide".
 - **Study guide Download** is one flat menu: Answer Key / Practice Sheet, each with PDF / Word / Markdown.
 - **iPhone:** back to 5 tabs; "Study Guides" is the first row of Courses; archived courses are in Settings → Library; deck rows swipe to set a lecture date.
+
+## `.txt` / `.rtf` imports (Tyler asked 2026-10-07)
+`VaultScanner.importableKinds` now maps `txt`, `text` and `rtf` to `.markdown`, and both markdown paths read through the new `PlainTextReader.read` (GRASPCore, pure Swift): UTF-8 first, then Windows-1252, and `.rtf` is converted to plain text. Windows only needs to allow those extensions in its file picker / drop handling; no schema change.

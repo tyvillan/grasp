@@ -21,7 +21,7 @@ struct ImportScreen: View {
     @State private var result: String?
 
     private static let types: [UTType] = [
-        UTType(filenameExtension: "md") ?? .plainText, .plainText, .pdf,
+        UTType(filenameExtension: "md") ?? .plainText, .plainText, .rtf, .pdf,
         UTType(filenameExtension: "docx") ?? .data, UTType(filenameExtension: "pptx") ?? .data,
         UTType(filenameExtension: "ipynb") ?? .json, .png, .jpeg, .folder,
     ]
