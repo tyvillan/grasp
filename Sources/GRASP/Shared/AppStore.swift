@@ -389,8 +389,8 @@ final class AppStore {
     /// removes or rewrites what isn't a real definition), then wording
     /// cleanup on what survives -- in that order, so an off-topic card isn't
     /// just polished.
-    func refineDeckWithAI(inDecks deckIds: [String]) async -> RefineDeckSummary {
-        let summary = await CardAI.refineDeck(inDecks: deckIds, using: await CardGenerators.select(),
+    func refineDeckWithAI(inDecks deckIds: [String], includeApproved: Bool = false) async -> RefineDeckSummary {
+        let summary = await CardAI.refineDeck(inDecks: deckIds, includeApproved: includeApproved, using: await CardGenerators.select(),
                                               database: database)
         reload()
         return summary

@@ -80,3 +80,29 @@ struct TextImportTests {
         #expect(titles.count == 2)
     }
 }
+
+@Suite("Refinable cards")
+struct RefinableCardsTests {
+    @Test("refining everything includes approved cards but never suspended or deleted ones")
+    func refinableCardsScope() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "C"); try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "D"); try deck.insert(conn)
+            for (index, status) in [CardStatus.draft, .active, .suspended].enumerated() {
+                let card = Card(materialId: nil, front: "f\(index)", back: "b\(index)", origin: .parser, status: status)
+                try card.insert(conn)
+                try DeckCard(deckId: deck.id, cardId: card.id).insert(conn)
+            }
+            var gone = Card(materialId: nil, front: "gone", back: "b", origin: .parser, status: .active)
+            gone.deletedAt = Date()
+            try gone.insert(conn)
+            try DeckCard(deckId: deck.id, cardId: gone.id).insert(conn)
+            return deck.id
+        }
+        let drafts = await CardAI.refinableCards(inDecks: [deckId], includeApproved: false, database: db)
+        let all = await CardAI.refinableCards(inDecks: [deckId], includeApproved: true, database: db)
+        #expect(drafts.map(\.front) == ["f0"])
+        #expect(all.map(\.front).sorted() == ["f0", "f1"])
+    }
+}

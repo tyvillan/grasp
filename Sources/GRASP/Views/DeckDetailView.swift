@@ -63,7 +63,13 @@ struct DeckDetailView: View {
     /// as a strip under the header. One at a time: they both work through
     /// the same drafts.
     @State private var refineDeckResult: AppStore.RefineDeckSummary?
-    @State private var showingRefineDeckConfirmation = false
+    /// Which refine the confirmation sheet is open for: only the drafts
+    /// (from the awaiting-review strip) or every card in the deck.
+    @State private var refineConfirmation: RefineScope?
+    private enum RefineScope: String, Identifiable {
+        case drafts, everything
+        var id: String { rawValue }
+    }
     @State private var fillGapsResult: Int?
     @State private var showingGenerateSheet = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
@@ -380,13 +386,19 @@ struct DeckDetailView: View {
                 )
             }
         }
+        .sheet(item: $refineConfirmation) { scope in
+            RefineDeckConfirmationSheet(
+                cardCount: refineCount(scope), includesApproved: scope == .everything,
+                onConfirm: { startRefineDeckWithAI(includeApproved: scope == .everything) }
+            )
+        }
         .sheet(isPresented: Binding(get: { refineDeckResult != nil }, set: { if !$0 { refineDeckResult = nil } })) {
             if let refineDeckResult {
                 ResultSheet(
                     icon: "checkmark.seal",
                     title: "Refine Deck with AI Complete",
                     leadText: refineDeckResult.isEmpty
-                        ? "Every draft checked out fine -- nothing looked like assignment text or an off-topic fragment, and nothing needed a wording cleanup."
+                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment, and nothing needed a wording cleanup."
                         : (refineDeckResult.wordingRefinedCount > 0
                            ? "Cleaned up wording on \(refineDeckResult.wordingRefinedCount) other card\(refineDeckResult.wordingRefinedCount == 1 ? "" : "s")."
                            : nil),
@@ -485,6 +497,9 @@ struct DeckDetailView: View {
     private var cardActionButtons: some View {
         addMenuButton
         filesButton
+        if contentTab == .cards, isGeneratorAvailable {
+            refineButton(.everything)
+        }
     }
 
     /// The Cards / Overview switch: two large, labelled buttons rather than
@@ -629,9 +644,14 @@ struct DeckDetailView: View {
     /// here with the other AI actions rather than down in the draft
     /// notice strip, so it's always visible near the deck's own header --
     /// not just when drafts happen to be showing.
-    private var refineDeckWithAIButton: some View {
-        Button {
-            showingRefineDeckConfirmation = true
+    private var refineDeckWithAIButton: some View { refineButton(.drafts) }
+
+    /// `.drafts` is the strip's button, enabled only while drafts exist;
+    /// `.everything` is the header's, which also re-checks approved cards.
+    private func refineButton(_ scope: RefineScope) -> some View {
+        let count = refineCount(scope)
+        return Button {
+            refineConfirmation = scope
         } label: {
             HStack(spacing: 5) {
                 if isRefiningDeck {
@@ -639,26 +659,29 @@ struct DeckDetailView: View {
                 } else {
                     Image(systemName: "checkmark.seal").font(.system(size: 11))
                 }
-                Text("Refine Deck with AI")
+                Text(scope == .drafts ? "Refine Deck with AI" : "Refine with AI")
             }
         }
         .buttonStyle(GRASPQuietButton())
-        .disabled(isRefiningDeck || aiActivity != nil || draftCount == 0)
-        .help(draftCount == 0
-              ? "No draft cards to refine right now"
-              : "Checks each draft against its own note -- rewrites or removes off-topic definitions, then cleans up wording on the rest")
-        .sheet(isPresented: $showingRefineDeckConfirmation) {
-            RefineDeckConfirmationSheet(draftCount: draftCount, onConfirm: startRefineDeckWithAI)
-        }
+        .disabled(isRefiningDeck || aiActivity != nil || count == 0)
+        .help(count == 0
+              ? "No cards to refine right now"
+              : scope == .drafts
+                ? "Checks each draft against its own note -- rewrites or removes off-topic definitions, then cleans up wording on the rest"
+                : "Checks every card in this deck, drafts and approved, against its own note and cleans up wording")
     }
 
-    private func startRefineDeckWithAI() {
+    private func refineCount(_ scope: RefineScope) -> Int {
+        scope == .drafts ? draftCount : draftCount + activeCount
+    }
+
+    private func startRefineDeckWithAI(includeApproved: Bool) {
         let generation = scopeGeneration
         let deckIds = scopeDeckIds
         let run = AIActivity(headline: "Refining \(deckName) with AI", purpose: "refine")
         store.runAIJob(cardJobKey, activity: run) { [store] run in
             let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
-                await store.refineDeckWithAI(inDecks: deckIds)
+                await store.refineDeckWithAI(inDecks: deckIds, includeApproved: includeApproved)
             }
             // Same guard as `runGenerate`: don't let a run started on a
             // deck the user has since switched away from overwrite the
@@ -1049,7 +1072,8 @@ private struct CardRefineMessage: Identifiable {
 /// three short labeled rows than as one dense paragraph.
 private struct RefineDeckConfirmationSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let draftCount: Int
+    let cardCount: Int
+    let includesApproved: Bool
     let onConfirm: () -> Void
 
     var body: some View {
@@ -1058,11 +1082,15 @@ private struct RefineDeckConfirmationSheet: View {
                 Image(systemName: "checkmark.seal")
                     .font(.system(size: 26))
                     .foregroundStyle(GRASPColor.accent)
-                Text("Refine \(draftCount) Draft Card\(draftCount == 1 ? "" : "s") with AI?")
+                Text(includesApproved
+                     ? "Refine \(cardCount) Card\(cardCount == 1 ? "" : "s") with AI?"
+                     : "Refine \(cardCount) Draft Card\(cardCount == 1 ? "" : "s") with AI?")
                     .font(.system(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
-                Text("Checks every draft against its own note and this course.")
+                Text(includesApproved
+                     ? "Checks every card in this deck, drafts and approved, against its own note and this course. Review history is kept."
+                     : "Checks every draft against its own note and this course.")
                     .graspType(.body)
                     .foregroundStyle(GRASPColor.textSecondary)
             }
@@ -1091,8 +1119,8 @@ private struct RefineDeckConfirmationSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if let quotaWarning = AIQuotaEstimate.warning(
-                needed: AIQuotaEstimate.contextCheckRequests(cards: draftCount)
-                    + AIQuotaEstimate.refineRequests(cards: draftCount),
+                needed: AIQuotaEstimate.contextCheckRequests(cards: cardCount)
+                    + AIQuotaEstimate.refineRequests(cards: cardCount),
                 mode: AIPreferences.mode
             ), AIKeyStore.read() != nil {
                 Label(quotaWarning, systemImage: "gauge.with.dots.needle.67percent")

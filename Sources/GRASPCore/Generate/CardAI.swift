@@ -67,6 +67,26 @@ public enum CardAI {
         }
     }
 
+    /// Every card in these decks that AI refinement can act on: drafts, and
+    /// optionally the approved ones too (never suspended or deleted ones).
+    public static func refinableCards(inDecks deckIds: [String], includeApproved: Bool,
+                                      database: GRASPDatabase) async -> [Card] {
+        guard includeApproved else { return await draftCards(inDecks: deckIds, database: database) }
+        do {
+            let ids = try await cardIds(inDecks: deckIds, database: database)
+            guard !ids.isEmpty else { return [] }
+            return try await database.queue.read { db in
+                try Card
+                    .filter(ids.contains(Column("id")))
+                    .filter([CardStatus.draft.rawValue, CardStatus.active.rawValue].contains(Column("status")))
+                    .filter(Column("deletedAt") == nil)
+                    .fetchAll(db)
+            }
+        } catch {
+            return []
+        }
+    }
+
     private static func noteText(_ materialId: String, database: GRASPDatabase) async -> String? {
         (try? await database.queue.read { try NoteText.fetchOne($0, key: materialId) })?.reflowed
     }
@@ -75,9 +95,13 @@ public enum CardAI {
 
     /// Rewords the drafts in these decks, note by note. Returns how many
     /// changed.
-    public static func refineDraftCards(inDecks deckIds: [String], using generator: any CardGenerator,
+    public static func refineDraftCards(inDecks deckIds: [String], includeApproved: Bool = false,
+                                        using generator: any CardGenerator,
                                         database: GRASPDatabase) async -> Int {
-        await refineWording(of: draftCards(inDecks: deckIds, database: database), using: generator, database: database)
+        await refineWording(
+            of: refinableCards(inDecks: deckIds, includeApproved: includeApproved, database: database),
+            using: generator, database: database
+        )
     }
 
     public static func refineWording(of cards: [Card], using generator: any CardGenerator,
@@ -211,9 +235,10 @@ public enum CardAI {
 
     /// "Refine Deck with AI": the context check on every draft, then the
     /// rewording pass on what's left.
-    public static func refineDeck(inDecks deckIds: [String], using generator: any CardGenerator,
+    public static func refineDeck(inDecks deckIds: [String], includeApproved: Bool = false,
+                                  using generator: any CardGenerator,
                                   database: GRASPDatabase) async -> RefineDeckSummary {
-        let drafts = await draftCards(inDecks: deckIds, database: database)
+        let drafts = await refinableCards(inDecks: deckIds, includeApproved: includeApproved, database: database)
         // Counted up front for both passes -- a call per draft, then one per
         // note -- so the bar runs once from start to end.
         if let progress = AIProgress.current {
@@ -222,7 +247,8 @@ public enum CardAI {
         }
         let context = await verifyContext(of: drafts, using: generator, database: database)
         if Task.isCancelled { return RefineDeckSummary(context: context) }
-        let reworded = await refineDraftCards(inDecks: deckIds, using: generator, database: database)
+        let reworded = await refineDraftCards(inDecks: deckIds, includeApproved: includeApproved,
+                                              using: generator, database: database)
         return RefineDeckSummary(wordingRefinedCount: reworded, context: context)
     }
 
