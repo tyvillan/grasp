@@ -266,7 +266,14 @@ public enum StudyGuideActions {
         var result: [HubCourse] = []
         for course in courses {
             let guides = try guides(forCourse: course.id, db: db)
-            guard !guides.isEmpty else { continue }
+            // Exams still ahead are listed even before they have a guide,
+            // so there is somewhere to add one.
+            let upcomingExams = try CalendarEvent
+                .filter(Column("courseId") == course.id)
+                .filter(CalendarEventKind.examLike.map(\.rawValue).contains(Column("kind")))
+                .filter(Column("startsAt") >= startOfToday)
+                .fetchAll(db)
+            guard !guides.isEmpty || !upcomingExams.isEmpty else { continue }
             var byExam: [String: [StudyGuide]] = [:]
             var loose: [StudyGuide] = []
             for guide in guides {
@@ -276,6 +283,9 @@ public enum StudyGuideActions {
             for (examId, examGuides) in byExam {
                 guard let exam = try CalendarEvent.fetchOne(db, key: examId) else { loose += examGuides; continue }
                 exams.append(HubExam(exam: exam, guides: examGuides, isPast: exam.startsAt < startOfToday))
+            }
+            for exam in upcomingExams where byExam[exam.id] == nil {
+                exams.append(HubExam(exam: exam, guides: [], isPast: false))
             }
             exams.sort { a, b in
                 if a.isPast != b.isPast { return !a.isPast }

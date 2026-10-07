@@ -366,4 +366,20 @@ struct StudyGuideGenerationTests {
         #expect(course.exams.map(\.isPast) == [false, true])
         #expect(course.practiceSets.map(\.title) == ["Loose guide"])
     }
+
+    @Test("an upcoming exam with no guide yet is listed, so a guide can be added to it")
+    func hubListsExamsWithoutGuides() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let now = Date()
+        try await db.queue.write { conn in
+            let course = Course(semesterId: nil, name: "Systems"); try course.insert(conn)
+            try CalendarEvent(courseId: course.id, kind: .exam, title: "Midterm", startsAt: now.addingTimeInterval(5 * 86_400)).insert(conn)
+            try CalendarEvent(courseId: course.id, kind: .study, title: "Review class", startsAt: now.addingTimeInterval(3 * 86_400)).insert(conn)
+            try CalendarEvent(courseId: course.id, kind: .exam, title: "Old exam", startsAt: now.addingTimeInterval(-9 * 86_400)).insert(conn)
+        }
+        let hub = try await db.queue.read { try StudyGuideActions.hub(now: now, db: $0) }
+        let course = try #require(hub.first)
+        #expect(course.exams.map(\.exam.title) == ["Midterm"])
+        #expect(course.exams.first?.guides.isEmpty == true)
+    }
 }

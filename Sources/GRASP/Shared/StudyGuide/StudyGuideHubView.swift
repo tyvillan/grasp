@@ -145,7 +145,9 @@ struct StudyGuideHubView<Destination: View>: View {
         return row(
             icon: "graduationcap" + (entry.isPast ? "" : ".fill"),
             title: entry.exam.title,
-            subtitle: "\(when) · \(entry.guides.count) guide\(entry.guides.count == 1 ? "" : "s")",
+            subtitle: entry.guides.isEmpty
+                ? "\(when) · no study guide yet"
+                : "\(when) · \(entry.guides.count) guide\(entry.guides.count == 1 ? "" : "s")",
             target: .exam(courseId: course.id, examEventId: entry.exam.id),
             dimmed: entry.isPast
         )
