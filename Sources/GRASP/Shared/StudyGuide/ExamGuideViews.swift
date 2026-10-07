@@ -392,11 +392,7 @@ private struct PracticeProblem: View {
                 }
                 .buttonStyle(.borderless)
             }
-            Text(example.question)
-                .graspType(.prose)
-                .foregroundStyle(GRASPColor.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            GuideText(text: example.question, style: .prose, color: GRASPColor.textPrimary)
             if example.isPractice {
                 if revealed {
                     VStack(alignment: .leading, spacing: 8) {
@@ -407,10 +403,7 @@ private struct PracticeProblem: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if let answer = example.answer {
-                            Text(answer)
-                                .graspType(.body)
-                                .foregroundStyle(GRASPColor.textPrimary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            GuideText(text: answer, style: .body, color: GRASPColor.textPrimary)
                         }
                     }
                     .textSelection(.enabled)
@@ -492,3 +485,76 @@ private struct PDFPageView: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {}
 }
 #endif
+
+
+// MARK: - Text with code in it
+
+/// A question or answer that may hold C++ (or any code): prose lines are set
+/// as text, runs of code lines in a monospaced block with their line
+/// breaks kept, so a function reads as a function.
+struct GuideText: View {
+    let text: String
+    let style: GRASPType
+    let color: Color
+
+    private struct Segment: Identifiable {
+        let id: Int
+        let isCode: Bool
+        let text: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Self.segments(text)) { segment in
+                if segment.isCode {
+                    Text(segment.text)
+                        .font(.system(size: 12.5, design: .monospaced))
+                        .foregroundStyle(color)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(segment.text)
+                        .graspType(style)
+                        .foregroundStyle(color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private static let codeStarts = ["//", "#include", "#define", "if ", "if(", "for ", "for(", "while ", "while(",
+                                     "else", "do", "return", "cout", "cin", "int ", "double ", "string ", "bool ",
+                                     "char ", "void ", "class ", "struct ", "public:", "private:", "using ",
+                                     "ifstream", "ofstream", "const ", "}", "{"]
+
+    static func isCode(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return false }
+        if t == "{" || t == "}" || t.hasPrefix("}") { return true }
+        let startsLikeCode = codeStarts.contains { t.hasPrefix($0) }
+        let hasCodeShape = t.contains(";") || t.contains("{") || t.contains("<<") || t.contains(">>")
+            || t.hasSuffix(")") || t.contains("==") || t.contains("+=")
+        return startsLikeCode && hasCodeShape || t.hasPrefix("//") || t.hasSuffix(";")
+    }
+
+    private static func segments(_ text: String) -> [Segment] {
+        var result: [Segment] = []
+        var lines: [String] = []
+        var code = false
+        func flush() {
+            let joined = lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !joined.isEmpty { result.append(Segment(id: result.count, isCode: code, text: joined)) }
+            lines = []
+        }
+        for line in text.components(separatedBy: "\n") {
+            let lineIsCode = isCode(line) || (code && line.trimmingCharacters(in: .whitespaces).isEmpty)
+            if lineIsCode != code { flush(); code = lineIsCode }
+            lines.append(line)
+        }
+        flush()
+        return result
+    }
+}

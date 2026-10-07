@@ -108,7 +108,38 @@ extension AppStore {
     func importStudyGuides(_ urls: [URL], intoCourse courseId: String,
                            examEventId: String? = nil) async -> ImportSummary {
         let before = Set(studyGuides(inCourse: courseId).map(\.id))
-        let summary = await importFiles(urls, intoCourse: courseId)
+        // A folder of review material -- practice questions beside a review
+        // sheet -- becomes one guide (see `ExamPack`); anything else in the
+        // batch goes through the ordinary import.
+        let packURLs = ExamPack.packFiles(in: urls) { $0.deletingPathExtension().lastPathComponent }
+        var packSummary = ImportSummary()
+        var remaining = urls
+        if !packURLs.isEmpty {
+            let files = packURLs.compactMap { url -> ExamPack.SourceFile? in
+                let title = url.deletingPathExtension().lastPathComponent
+                let pages: [String]?
+                if url.pathExtension.lowercased() == "pdf" {
+                    pages = PDFExtractor.extractPages(from: url)
+                } else {
+                    pages = (try? PlainTextReader.read(url)).map { [$0] }
+                }
+                return pages.map { ExamPack.SourceFile(title: title, pages: $0) }
+            }
+            if let document = ExamPack.build(files) {
+                try? await database.queue.write { db in
+                    try StudyGuideActions.importExamPack(courseId: courseId, examEventId: examEventId,
+                                                         document: document, db: db)
+                }
+                packSummary.studyGuidesImported = 1
+                packSummary.filesScanned = packURLs.count
+                let packed = Set(packURLs)
+                remaining = urls.filter { !packed.contains($0) }
+                reload()
+            }
+        }
+        var summary = remaining.isEmpty ? ImportSummary() : await importFiles(remaining, intoCourse: courseId)
+        summary.studyGuidesImported += packSummary.studyGuidesImported
+        summary.filesScanned += packSummary.filesScanned
         if let examEventId {
             let paths = Set(urls.map { $0.standardizedFileURL.path })
             try? await database.queue.write { db in
