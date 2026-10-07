@@ -199,6 +199,15 @@ public protocol CardGenerator: Sendable {
         deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int
     ) async -> GeneratedGuidePart
 
+    /// Code questions written from one deck's notes (see
+    /// `CodeQuestionBuilder`, which runs them before keeping any). Declared
+    /// here, like `generateStudyGuidePart`, so each generator's own version
+    /// is the one called.
+    func generateCodeQuestions(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
+    ) async -> [GeneratedCodeQuestion]
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -207,6 +216,12 @@ public protocol CardGenerator: Sendable {
 }
 
 public extension CardGenerator {
+    /// A generator that can't write code questions says so with nothing.
+    func generateCodeQuestions(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
+    ) async -> [GeneratedCodeQuestion] { [] }
+
     /// A generator that can't write study guides says so with nothing.
     func generateStudyGuidePart(
         deckName: String, courseName: String, noteContext: String, cardTerms: [String], problemCount: Int

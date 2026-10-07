@@ -880,6 +880,17 @@ final class AppStore {
         var failure: String?
     }
 
+    /// What the last code-question run did, for the bank sheet to report.
+    var lastCodeQuestionRun: CodeQuestionRunResult?
+    struct CodeQuestionRunResult: Equatable {
+        var saved: Int
+        var rejected: Int
+        var wasStopped: Bool
+        var failure: String?
+        /// The most common reason drafts were dropped.
+        var topReason: String?
+    }
+
     func aiJob(_ key: String) -> AIJob? { aiJobs[key] }
 
     /// Starts `work` under `key` unless a job with that key is already
@@ -939,9 +950,22 @@ final class AppStore {
         // Its own task, so "Skip" can cancel just the AI questions and still
         // start the test -- cancelling the caller would also cancel the
         // database writes below that create the attempt.
-        let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)
-        if config.allowWritten && isAITestQuestionsEnabled {
+        // Saved code questions come first: they were checked by running
+        // them, which the one-line questions written on the spot weren't.
+        var codeQuestions: [LearnEngine.RoundQuestion] = []
+        var codeBudgetUsed = 0
+        if isAITestQuestionsEnabled && config.allowWritten {
             let budget = Study.aiQuestionBudget(for: config.questionCount)
+            codeQuestions = (try? await database.queue.read { db in
+                var rng = SystemRandomNumberGenerator()
+                return try CodeQuestionBank.pick(count: budget, inDecks: deckIds, using: &rng, db: db)
+            })?.map { $0.roundQuestion() } ?? []
+            codeBudgetUsed = codeQuestions.count
+        }
+        let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)
+        if config.allowWritten && isAITestQuestionsEnabled,
+           Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed > 0 {
+            let budget = Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed
             let database = database
             let skipped = aiTestQuestionsSkipped
             let task = Task {
@@ -957,7 +981,7 @@ final class AppStore {
             aiResult = ([], nil)
         }
 
-        let aiQuestions = aiResult.questions
+        let aiQuestions = aiResult.questions + codeQuestions
         let started = try await database.queue.write { db in
             var rng = SystemRandomNumberGenerator()
             return try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions,

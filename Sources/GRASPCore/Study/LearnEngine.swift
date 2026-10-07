@@ -25,9 +25,14 @@ public enum LearnEngine {
         public var choices: [String]?       // multipleChoice only, includes correctAnswer, shuffled
         public var statement: String?       // trueFalse only: the (possibly false) statement shown
         public var statementIsTrue: Bool?   // trueFalse only
+        /// A code question from the saved bank (see `CodeQuestionBank`):
+        /// shown and graded as code, with `type` left as `.written`.
+        public var code: CodeQuestion?
 
         public init(id: String? = nil, cardId: String?, prompt: String, correctAnswer: String, type: QuestionType,
-                    choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil) {
+                    choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil,
+                    code: CodeQuestion? = nil) {
+            self.code = code
             self.id = id ?? cardId ?? UUID().uuidString
             self.cardId = cardId; self.prompt = prompt; self.correctAnswer = correctAnswer; self.type = type
             self.choices = choices; self.statement = statement; self.statementIsTrue = statementIsTrue

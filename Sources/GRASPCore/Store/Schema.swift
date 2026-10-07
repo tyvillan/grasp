@@ -417,6 +417,33 @@ enum Schema {
             }
         }
 
+        // A saved bank of AI-written code questions, checked by running them
+        // (see `CodeQuestionBuilder`), and the payload a test keeps for each
+        // one it asked. `testQuestion` syncs like the rest.
+        migrator.registerMigration("v13_test_question") { db in
+            try db.create(table: "testQuestion") { t in
+                t.column("id", .text).primaryKey()
+                t.column("courseId", .text).notNull().indexed()
+                    .references("course", onDelete: .cascade)
+                t.column("deckId", .text).notNull().indexed()
+                    .references("deck", onDelete: .cascade)
+                t.column("materialId", .text)
+                    .references("material", onDelete: .setNull)
+                t.column("kind", .text).notNull()
+                t.column("language", .text).notNull()
+                t.column("bodyJSON", .text).notNull()
+                t.column("sourceContentHash", .text)
+                t.column("verifiedBy", .text).notNull()
+                t.column("model", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            try db.alter(table: "testItem") { t in
+                t.add(column: "payloadJSON", .text)
+            }
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 }

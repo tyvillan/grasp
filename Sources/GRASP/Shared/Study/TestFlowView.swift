@@ -84,6 +84,19 @@ struct TestSetupSheet: View {
 
             Toggle("Shuffle order", isOn: $shuffle)
             Toggle("Only cards I haven't marked as known", isOn: $excludeMastered)
+            Toggle("Include AI-written questions", isOn: Binding(
+                get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
+            ))
+            if store.isAITestQuestionsEnabled {
+                let saved = store.codeQuestionCount(inDecks: deckIds)
+                Text(saved > 0
+                     ? "\(saved) saved code question\(saved == 1 ? "" : "s") for this deck, each checked by running it, "
+                       + "are mixed in, up to a third of the test."
+                     : "Short questions are written from your notes as the test starts. Code questions can be saved ahead of time from a deck's Add menu on the Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                 Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
@@ -267,7 +280,13 @@ struct TestRunView: View {
     @ViewBuilder
     private func questionBody(_ question: LearnEngine.RoundQuestion) -> some View {
         VStack(spacing: 0) {
-            if question.cardId == nil {
+            if let code = question.code {
+                Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(GRASPColor.accent)
+                    .help("Written by AI, then compiled and run to check the answer")
+                    .padding(.top, 42)
+            } else if question.cardId == nil {
                 Label("AI-generated", systemImage: "sparkles")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(GRASPColor.accent)
@@ -282,6 +301,7 @@ struct TestRunView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: 560)
                 .padding(.top, question.cardId == nil ? 10 : 42)
+                .padding(.bottom, question.code == nil ? 0 : 6)
 
             Spacer(minLength: 28)
 
@@ -303,6 +323,14 @@ struct TestRunView: View {
                         }
                         .frame(maxWidth: 340)
                     }
+                case .written where question.code != nil:
+                    ScrollView {
+                        CodeQuestionView(question: question.code!, isAnswered: isAnswered) { given, correct in
+                            submit(correct, given: given, question: question)
+                        }
+                        .id(question.id)
+                    }
+                    .frame(maxHeight: 380)
                 case .written:
                     TextField("Type the answer", text: $writtenAnswer)
                         .textFieldStyle(.plain)
@@ -337,7 +365,7 @@ struct TestRunView: View {
                             .font(.system(size: 12))
                         Text(lastCorrect
                              ? (wasOverridden ? "Marked correct" : "Correct")
-                             : "Not quite -- \(question.correctAnswer)")
+                             : (question.code == nil ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
                             .graspType(.body)
                     }
                     .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)
@@ -567,7 +595,8 @@ struct TestResultsView: View {
                         }
                     }
                     if !item.isCorrect {
-                        Text("You answered: \(item.givenAnswer)")
+                        Text("You answered: \(item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer)")
+                            .font(item.question.code == nil ? nil : .system(size: 12, design: .monospaced))
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)

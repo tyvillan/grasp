@@ -778,6 +778,11 @@ public struct OllamaGenerator: CardGenerator {
     /// `maxTokens` caps how much one answer can write. Generation is where
     /// the time and heat go on a local model, which occasionally runs on far
     /// past what was asked for. Each cap is about twice a normal answer.
+    /// Plain-text (not JSON) completion, for what JSON mode breaks: code.
+    func chatText(prompt: String, maxTokens: Int?) async throws -> String {
+        try await transport.complete(prompt: prompt, json: false, maxTokens: maxTokens)
+    }
+
     private func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
         try await transport.complete(prompt: prompt, json: json, maxTokens: maxTokens)
     }

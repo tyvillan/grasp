@@ -72,6 +72,7 @@ struct DeckDetailView: View {
     }
     @State private var fillGapsResult: Int?
     @State private var showingGenerateSheet = false
+    @State private var showingCodeQuestions = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
     @State private var masteryFilter: MasteryFilter = .all
     @AppStorage("cardSortOption") private var cardSortOption: CardSortOption = .deckOrder
@@ -386,6 +387,9 @@ struct DeckDetailView: View {
                 )
             }
         }
+        .sheet(isPresented: $showingCodeQuestions) {
+            CodeQuestionBankSheet(deckIds: scopeDeckIds, scopeName: deckName, courseId: courseId)
+        }
         .sheet(item: $refineConfirmation) { scope in
             RefineDeckConfirmationSheet(
                 cardCount: refineCount(scope), includesApproved: scope == .everything,
@@ -594,6 +598,11 @@ struct DeckDetailView: View {
                     .disabled(isGeneratingCards || aiActivity != nil)
                 }
                 Divider()
+            }
+            Button {
+                showingCodeQuestions = true
+            } label: {
+                Label("Code Questions for Tests…", systemImage: "chevron.left.forwardslash.chevron.right")
             }
             Button("Add Files to \(noun)…") { onAddFiles() }
                 .disabled(store.isImporting)

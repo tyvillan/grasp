@@ -419,11 +419,15 @@ public struct TestItem: Codable, FetchableRecord, PersistableRecord, Identifiabl
     /// card-backed item whose `cardId` went nil because its `Card` was
     /// later deleted -- `cardId == nil` alone can't tell those apart.
     public var isAIGenerated: Bool
+    /// A `CodeQuestion` as JSON, for a code question (`questionType`
+    /// "code"); nil for the rest.
+    public var payloadJSON: String?
 
     public init(id: String = UUID().uuidString, attemptId: String, cardId: String?, ordinal: Int,
                 questionType: String, promptText: String, choicesJSON: String? = nil,
                 correctAnswer: String? = nil, givenAnswer: String? = nil, isCorrect: Bool? = nil,
-                isAIGenerated: Bool = false) {
+                isAIGenerated: Bool = false, payloadJSON: String? = nil) {
+        self.payloadJSON = payloadJSON
         self.id = id; self.attemptId = attemptId; self.cardId = cardId; self.ordinal = ordinal
         self.questionType = questionType; self.promptText = promptText; self.choicesJSON = choicesJSON
         self.correctAnswer = correctAnswer; self.givenAnswer = givenAnswer; self.isCorrect = isCorrect

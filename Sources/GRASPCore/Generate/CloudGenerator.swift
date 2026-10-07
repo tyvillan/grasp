@@ -96,6 +96,16 @@ public struct CloudGenerator: CardGenerator {
         )
     }
 
+    public func generateCodeQuestions(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
+    ) async -> [GeneratedCodeQuestion] {
+        await pipeline.generateCodeQuestions(
+            deckName: deckName, courseName: courseName, noteContext: noteContext, cardTerms: cardTerms,
+            language: language, kinds: kinds, count: count
+        )
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -344,6 +354,23 @@ public struct FallbackGenerator: CardGenerator {
             local: {
                 await local.generateStudyGuidePart(deckName: deckName, courseName: courseName, noteContext: noteContext,
                                                    cardTerms: cardTerms, problemCount: problemCount)
+            }
+        )
+    }
+
+    public func generateCodeQuestions(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
+    ) async -> [GeneratedCodeQuestion] {
+        await run(
+            keep: { !$0.isEmpty },
+            cloud: {
+                await cloud.generateCodeQuestions(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                                  cardTerms: cardTerms, language: language, kinds: kinds, count: count)
+            },
+            local: {
+                await local.generateCodeQuestions(deckName: deckName, courseName: courseName, noteContext: noteContext,
+                                                  cardTerms: cardTerms, language: language, kinds: kinds, count: count)
             }
         )
     }
