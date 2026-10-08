@@ -246,4 +246,31 @@ extension AppStore {
         try? database.queue.write { db in try StudyGuideActions.delete(guideId: guideId, db: db) }
         reload()
     }
+
+    // MARK: - Skill explanations
+
+    func savedSkillExplanation(guideId: String, skillId: String) -> String? {
+        (try? database.queue.read { db in
+            try String.fetchOne(db, sql: "SELECT body FROM skillExplanation WHERE guideId = ? AND skillId = ?",
+                                arguments: [guideId, skillId])
+        }) ?? nil
+    }
+
+    /// What a skill means: the saved explanation, else one written now by
+    /// whichever model is set up (and saved). nil when none is available.
+    func skillExplanation(guideId: String, skillId: String, skill: String, subject: String,
+                          context: String) async -> String? {
+        if let saved = savedSkillExplanation(guideId: guideId, skillId: skillId) { return saved }
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable,
+              let text = await generator.explainSkill(skill, subject: subject, context: context) else { return nil }
+        let model = generatorStatus
+        try? await database.queue.write { db in
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO skillExplanation (guideId, skillId, body, model, createdAt)
+                VALUES (?, ?, ?, ?, ?)
+                """, arguments: [guideId, skillId, text, model, Date()])
+        }
+        return text
+    }
 }

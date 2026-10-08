@@ -89,4 +89,16 @@ public enum ExamLayout {
         }
         return .topics
     }
+
+    /// A definition the guide already gives for this skill: a term whose
+    /// name appears in the skill's wording, or the other way round. The
+    /// longest match wins, so "default constructor" beats "constructor".
+    public static func definition(for skill: String,
+                                  terms: [StudyGuideDocument.Term]) -> StudyGuideDocument.Term? {
+        let text = skill.lowercased()
+        return terms
+            .filter { !$0.definition.isEmpty && $0.term.count >= 4 }
+            .filter { text.contains($0.term.lowercased()) || $0.term.lowercased().contains(text) }
+            .max { $0.term.count < $1.term.count }
+    }
 }

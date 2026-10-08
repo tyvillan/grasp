@@ -188,6 +188,20 @@ extension OllamaGenerator {
         return []
     }
 
+    /// What a study-guide skill means, in two or three plain sentences.
+    public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
+        let prompt = """
+        A student is checking whether they are ready for an exam in "\(subject)". The study guide says they should be able to:
+        "\(skill)"
+
+        Explain in two or three short, plain sentences what that means: define the idea in basic terms, then say what \
+        they would be asked to do on the exam. No headings, no bullet points, no preamble.\(context.isEmpty ? "" : "\n\nMaterial from the guide, for context:\n\(context.prefix(1500))")
+        """
+        guard let reply = try? await chatText(prompt: prompt, maxTokens: 400) else { return nil }
+        let text = PlainMath.clean(reply.trimmingCharacters(in: .whitespacesAndNewlines))
+        return text.isEmpty || text.count > 900 ? nil : text
+    }
+
     /// Answers a multiple-choice problem cold, without being told which
     /// option the writer chose: a second opinion on the answer key.
     public func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {

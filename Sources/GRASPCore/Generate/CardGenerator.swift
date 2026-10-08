@@ -220,6 +220,11 @@ public protocol CardGenerator: Sendable {
     /// opinion on its answer key; nil when this generator can't say.
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int?
 
+    /// A plain explanation of one study-guide skill ("loops (for, while)"):
+    /// what it is and what the student would be asked to do. nil when this
+    /// generator can't say.
+    func explainSkill(_ skill: String, subject: String, context: String) async -> String?
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -234,6 +239,8 @@ public extension CardGenerator {
     ) async -> [GeneratedProblem] { [] }
 
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
+
+    func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
 
     /// A generator that can't write code questions says so with nothing.
     func generateCodeQuestions(

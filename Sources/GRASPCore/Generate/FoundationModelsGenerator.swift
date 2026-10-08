@@ -47,6 +47,11 @@ public struct FoundationModelsGenerator: CardGenerator {
         return await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
     }
 
+    public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
+        guard await isAvailable else { return nil }
+        return await pipeline.explainSkill(skill, subject: subject, context: context)
+    }
+
     public var isAvailable: Bool {
         get async {
             #if canImport(FoundationModels)

@@ -47,3 +47,16 @@ struct ExamLayoutTests {
         #expect(ExamLayout.band(for: part("Call-by-reference")) == .topics)
     }
 }
+
+@Suite("Skill definitions")
+struct SkillDefinitionTests {
+    @Test("the guide's own term is used, longest match first")
+    func matches() {
+        let terms = [
+            StudyGuideDocument.Term(term: "constructor", definition: "Runs when an object is made."),
+            StudyGuideDocument.Term(term: "default constructor", definition: "A constructor with no parameters."),
+        ]
+        #expect(ExamLayout.definition(for: "Default constructor", terms: terms)?.term == "default constructor")
+        #expect(ExamLayout.definition(for: "loops", terms: terms) == nil)
+    }
+}

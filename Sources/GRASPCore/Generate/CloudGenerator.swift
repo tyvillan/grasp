@@ -120,6 +120,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
     }
 
+    public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
+        await pipeline.explainSkill(skill, subject: subject, context: context)
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -410,6 +414,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { $0 != nil },
                   cloud: { await cloud.solveMultipleChoice(prompt: prompt, choices: choices) },
                   local: { await local.solveMultipleChoice(prompt: prompt, choices: choices) })
+    }
+
+    public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
+        await run(keep: { $0 != nil },
+                  cloud: { await cloud.explainSkill(skill, subject: subject, context: context) },
+                  local: { await local.explainSkill(skill, subject: subject, context: context) })
     }
 
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {

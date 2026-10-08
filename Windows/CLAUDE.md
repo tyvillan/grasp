@@ -298,3 +298,4 @@ Follow-up (2026-10-07): the code-question bank became **practice problems**. `te
 - Exam plan: `ExamPlan.steps(daysAway:standing:)` is pure core; the Mac builds `Standing` in `AppStore.examPlan(for:)` (due cards, weak cards, saved problems, days since last test) and shows "Today: ..." under an exam within 14 days.
 - Schema: migration `v14_test_item_indexes` (indexes on `testItem.attemptId`/`cardId`); `Dashboard.decks` no longer joins `review` per row.
 - `GuideText.splitMatrices` draws plain-notation matrices (`[ 1  2 ]` lines) as a grid; port if the Windows UI shows study guides or overviews.
+- Study-guide skills: `ExamLayout` (core) buckets skills by topic and finds a guide definition for a skill; `CardGenerator.explainSkill` writes a short explanation on request; migration `v15_skill_explanation` (local-only table `skillExplanation`, not synced) caches it.

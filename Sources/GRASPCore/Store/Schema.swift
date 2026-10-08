@@ -451,6 +451,20 @@ enum Schema {
             try db.create(index: "ix_testitem_card", on: "testItem", columns: ["cardId"])
         }
 
+        // A short explanation of a study-guide skill, written on request and
+        // kept so it isn't paid for twice. Local to this device (not synced):
+        // it can always be written again.
+        migrator.registerMigration("v15_skill_explanation") { db in
+            try db.create(table: "skillExplanation") { t in
+                t.column("guideId", .text).notNull()
+                t.column("skillId", .text).notNull()
+                t.column("body", .text).notNull()
+                t.column("model", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["guideId", "skillId"])
+            }
+        }
+
         return migrator
     }
 

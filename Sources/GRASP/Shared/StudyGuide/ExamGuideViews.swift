@@ -30,7 +30,7 @@ struct ExamGuideContent: View {
             }
             let buckets = ExamLayout.bucketSkills(page.parts)
             if let buckets {
-                SkillsByTopic(buckets: buckets, onRate: { skill, rating in
+                SkillsByTopic(buckets: buckets, terms: page.parts.flatMap(\.terms), subject: page.exam.title, onRate: { skill, rating in
                     store.rateSkill(guideId: skill.guideId, skillId: skill.skillId, rating: rating)
                 })
             }
@@ -52,6 +52,8 @@ struct ExamGuideContent: View {
             total: page.questionCount,
             decks: decks,
             showsSkills: showsSkills,
+            allTerms: page.parts.flatMap(\.terms),
+            subject: page.exam.title,
             onSetDecks: { deckIds in
                 for source in part.sources {
                     store.setGuideDecks(guideId: source.guideId, partIndex: source.partIndex, deckIds: deckIds)
@@ -76,6 +78,8 @@ struct ExamGuideContent: View {
 /// at-a-glance answer to "what do I still need to learn".
 private struct SkillsByTopic: View {
     let buckets: [ExamLayout.Bucket]
+    let terms: [StudyGuideDocument.Term]
+    let subject: String
     let onRate: (StudyGuideActions.Skill, SkillConfidence?) -> Void
     @State private var open: Set<ExamLayout.Topic> = []
 
@@ -118,7 +122,7 @@ private struct SkillsByTopic: View {
                         if open.contains(bucket.topic) {
                             VStack(alignment: .leading, spacing: 14) {
                                 ForEach(bucket.skills) { skill in
-                                    SkillRow(skill: skill, onRate: { onRate(skill, $0) })
+                                    SkillRow(skill: skill, terms: terms, subject: subject, onRate: { onRate(skill, $0) })
                                 }
                             }
                             .padding(.top, 14).padding(.leading, 22)
@@ -217,6 +221,8 @@ private struct PartSection: View {
     let total: Int?
     let decks: [Deck]
     let showsSkills: Bool
+    let allTerms: [StudyGuideDocument.Term]
+    let subject: String
     let onSetDecks: ([String]) -> Void
     let onRate: (StudyGuideActions.Skill, SkillConfidence?) -> Void
     let onOpenPage: (String, Int) -> Void
@@ -269,7 +275,7 @@ private struct PartSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("You should be able to")
                     ForEach(part.skills) { skill in
-                        SkillRow(skill: skill, onRate: { onRate(skill, $0) })
+                        SkillRow(skill: skill, terms: allTerms, subject: subject, onRate: { onRate(skill, $0) })
                     }
                 }
             }
@@ -449,8 +455,15 @@ private struct BulletList: View {
 // MARK: - Skills
 
 private struct SkillRow: View {
+    @Environment(AppStore.self) private var store
     let skill: StudyGuideActions.Skill
+    let terms: [StudyGuideDocument.Term]
+    let subject: String
     let onRate: (SkillConfidence?) -> Void
+
+    private enum Meaning { case none, loading, found(String, fromGuide: Bool), unavailable }
+    @State private var shown = false
+    @State private var meaning: Meaning = .none
 
     // The rating sits under the skill, not beside it: beside it, a narrow
     // window squeezed the skill itself into a column a few words wide.
@@ -473,8 +486,62 @@ private struct SkillRow: View {
                         .background(selected ? rating.tint.opacity(0.14) : Color.clear, in: Capsule())
                         .overlay(Capsule().stroke(selected ? rating.tint.opacity(0.5) : GRASPColor.hairline))
                 }
+                Button(shown ? "Hide meaning" : "What is this?") { toggle() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(GRASPColor.accent)
+                    .padding(.leading, 8)
             }
             .fixedSize()
+            if shown { meaningView }
+        }
+    }
+
+    @ViewBuilder
+    private var meaningView: some View {
+        Group {
+            switch meaning {
+            case .none, .loading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Writing a short explanation…").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                }
+            case .found(let text, let fromGuide):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(text)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Text(fromGuide ? "From the guide" : "Written by AI")
+                        .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                }
+            case .unavailable:
+                Text("No AI model is set up to explain this. Settings → AI has the setup.")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GRASPColor.canvas, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func toggle() {
+        shown.toggle()
+        guard shown, case .none = meaning else { return }
+        if let term = ExamLayout.definition(for: skill.text, terms: terms) {
+            meaning = .found(term.term + ": " + term.definition, fromGuide: true)
+            return
+        }
+        meaning = .loading
+        let context = terms.prefix(12).map { "\($0.term): \($0.definition)" }.joined(separator: "\n")
+        Task {
+            if let text = await store.skillExplanation(guideId: skill.guideId, skillId: skill.skillId,
+                                                       skill: skill.text, subject: subject, context: context) {
+                meaning = .found(text, fromGuide: false)
+            } else {
+                meaning = .unavailable
+            }
         }
     }
 }
