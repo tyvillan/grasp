@@ -100,13 +100,29 @@ extension Study {
         if config.excludeMastered {
             cards = cards.filter { $0.level != .mastered }
         }
+        if config.weakSpotsOnly {
+            let weak = try weakCardIds(forDecks: deckIds, db: db)
+            cards = cards.filter { weak.contains($0.cardId) }
+        }
         let pool = cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
         var cardConfig = config
         cardConfig.questionCount = max(0, config.questionCount - aiQuestions.count)
         var questions = TestBuilder.build(from: pool, config: cardConfig, using: &rng) + aiQuestions
         if config.shuffle { questions.shuffle(using: &rng) }
         guard !questions.isEmpty else { return ("", []) }
+        return (try insertAttempt(questions: questions, deckIds: deckIds, db: db), questions)
+    }
 
+    /// A new test over exactly these questions -- "retry what I missed".
+    /// Returns an empty attempt id when there are none.
+    public static func startRetry(questions: [LearnEngine.RoundQuestion], deckIds: [String],
+                                  db: Database) throws -> String {
+        guard !questions.isEmpty else { return "" }
+        return try insertAttempt(questions: questions, deckIds: deckIds, db: db)
+    }
+
+    private static func insertAttempt(questions: [LearnEngine.RoundQuestion], deckIds: [String],
+                                      db: Database) throws -> String {
         let attempt = TestAttempt(deckId: deckIds.count == 1 ? deckIds.first : nil, configJSON: "{}", startedAt: Date())
         try attempt.insert(db)
         for (index, question) in questions.enumerated() {
@@ -120,7 +136,85 @@ extension Study {
                 payloadJSON: question.code?.encoded() ?? question.problem?.encoded()
             ).insert(db)
         }
-        return (attempt.id, questions)
+        return attempt.id
+    }
+
+    // MARK: - Test history
+
+    /// Cards worth drilling: the last time a test asked about them the
+    /// answer was wrong, or they've lapsed in flashcards twice or more.
+    public static func weakCardIds(forDecks deckIds: [String], db: Database) throws -> Set<String> {
+        let cardIds = try activeCardIds(inDecks: deckIds, db: db)
+        guard !cardIds.isEmpty else { return [] }
+        var weak = Set(try Card.filter(cardIds.contains(Column("id"))).filter(Column("lapses") >= 2)
+            .fetchAll(db).map(\.id))
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT i.cardId AS cardId, i.isCorrect AS isCorrect FROM testItem i
+            JOIN testAttempt a ON a.id = i.attemptId
+            WHERE a.finishedAt IS NOT NULL AND i.isCorrect IS NOT NULL AND i.cardId IS NOT NULL
+            ORDER BY a.startedAt ASC, i.ordinal ASC
+            """)
+        var lastWrong: [String: Bool] = [:]
+        for row in rows {
+            let id: String = row["cardId"]
+            guard cardIds.contains(id) else { continue }
+            lastWrong[id] = !(row["isCorrect"] as Bool)
+        }
+        for (id, wrong) in lastWrong where wrong { weak.insert(id) }
+        return weak
+    }
+
+    private static func activeCardIds(inDecks deckIds: [String], db: Database) throws -> Set<String> {
+        let linked = try DeckCard.filter(deckIds.contains(Column("deckId"))).fetchAll(db).map(\.cardId)
+        guard !linked.isEmpty else { return [] }
+        return Set(try Card.filter(linked.contains(Column("id"))).filter(Column("deletedAt") == nil)
+            .filter(Column("status") == CardStatus.active.rawValue).fetchAll(db).map(\.id))
+    }
+
+    public struct TestHistoryEntry: Sendable, Identifiable, Equatable {
+        public var id: String
+        public var startedAt: Date
+        public var correct: Int
+        public var total: Int
+        public var fraction: Double { total == 0 ? 0 : Double(correct) / Double(total) }
+    }
+
+    /// Finished tests that asked about these decks' cards, oldest first.
+    public static func testHistory(forDecks deckIds: [String], limit: Int = 12,
+                                   db: Database) throws -> [TestHistoryEntry] {
+        let cardIds = Array(try activeCardIds(inDecks: deckIds, db: db))
+        guard !cardIds.isEmpty else { return [] }
+        var attemptIds = Set<String>()
+        for chunk in stride(from: 0, to: cardIds.count, by: 500).map({ Array(cardIds[$0..<min($0 + 500, cardIds.count)]) }) {
+            attemptIds.formUnion(try TestItem.filter(chunk.contains(Column("cardId"))).fetchAll(db).map(\.attemptId))
+        }
+        let attempts = try TestAttempt.filter(attemptIds.contains(Column("id")))
+            .filter(Column("finishedAt") != nil).order(Column("startedAt").desc).limit(limit).fetchAll(db)
+        return attempts.reversed().map {
+            TestHistoryEntry(id: $0.id, startedAt: $0.startedAt, correct: $0.scoreNumerator ?? 0,
+                             total: $0.scoreDenominator ?? 0)
+        }
+    }
+
+    /// Cards missed most often across finished tests, most missed first.
+    public static func mostMissed(forDecks deckIds: [String], limit: Int = 5,
+                                  db: Database) throws -> [(front: String, misses: Int)] {
+        let cardIds = try activeCardIds(inDecks: deckIds, db: db)
+        guard !cardIds.isEmpty else { return [] }
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT i.cardId AS cardId, COUNT(*) AS misses FROM testItem i
+            JOIN testAttempt a ON a.id = i.attemptId
+            WHERE a.finishedAt IS NOT NULL AND i.isCorrect = 0 AND i.cardId IS NOT NULL
+            GROUP BY i.cardId ORDER BY misses DESC
+            """)
+        var result: [(front: String, misses: Int)] = []
+        for row in rows {
+            let id: String = row["cardId"]
+            guard cardIds.contains(id), let card = try Card.fetchOne(db, key: id) else { continue }
+            result.append((card.front, row["misses"]))
+            if result.count == limit { break }
+        }
+        return result
     }
 
     public static func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool,

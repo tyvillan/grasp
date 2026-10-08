@@ -22,12 +22,16 @@ public enum TestBuilder {
         /// `build`, since mastery isn't part of the deterministic,
         /// model-free data this type otherwise works with.
         public var excludeMastered: Bool
+        /// Draw only from cards the student keeps missing (see
+        /// `Study.weakCardIds`).
+        public var weakSpotsOnly: Bool
 
         public init(
             questionCount: Int = 20, allowMultipleChoice: Bool = true, allowWritten: Bool = true,
             allowTrueFalse: Bool = true, shuffle: Bool = true, timeLimitSeconds: Int? = nil,
-            excludeMastered: Bool = false
+            excludeMastered: Bool = false, weakSpotsOnly: Bool = false
         ) {
+            self.weakSpotsOnly = weakSpotsOnly
             self.questionCount = questionCount
             self.allowMultipleChoice = allowMultipleChoice
             self.allowWritten = allowWritten

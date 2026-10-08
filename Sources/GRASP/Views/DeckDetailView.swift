@@ -339,7 +339,9 @@ struct DeckDetailView: View {
                     testPhase = .results(attemptId: attemptId, graded: graded)
                 }
             case .results(let attemptId, let graded):
-                TestResultsView(deckName: deckName, attemptId: attemptId, graded: graded)
+                TestResultsView(deckName: deckName, attemptId: attemptId, graded: graded, deckIds: scopeDeckIds) { id, questions in
+                    testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+                }
             }
         }
         .sheet(item: $editingCard) { card in

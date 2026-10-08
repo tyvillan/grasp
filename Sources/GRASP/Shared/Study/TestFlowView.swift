@@ -55,6 +55,10 @@ struct TestSetupSheet: View {
     @State private var allowTrueFalse = true
     @State private var shuffle = true
     @State private var excludeMastered = false
+    @State private var weakSpotsOnly = false
+    @State private var history: [Study.TestHistoryEntry] = []
+    @State private var mostMissed: [(front: String, misses: Int)] = []
+    @State private var weakCount = 0
     /// True while `startTest` is in flight -- worth surfacing explicitly
     /// since, with AI test questions on, this can take a few seconds
     /// (a real network round trip to a local model) rather than the
@@ -102,6 +106,11 @@ struct TestSetupSheet: View {
 
             Toggle("Shuffle order", isOn: $shuffle)
             Toggle("Only cards I haven't marked as known", isOn: $excludeMastered)
+            Toggle(weakCount > 0 ? "Focus on my weak spots (\(weakCount) cards)" : "Focus on my weak spots",
+                   isOn: $weakSpotsOnly)
+                .disabled(weakCount == 0)
+                .help("Cards you missed the last time a test asked about them, or lapsed twice in flashcards")
+            historyBlock
             Toggle("Include AI-written questions", isOn: Binding(
                 get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
             ))
@@ -118,7 +127,9 @@ struct TestSetupSheet: View {
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                 Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
             } else if noQuestions {
-                Text(excludeMastered
+                Text(weakSpotsOnly
+                     ? "No weak spots found with these settings. Turn off \"Focus on my weak spots\" to test on every card."
+                     : excludeMastered
                      ? "No cards match -- every card here is marked as known. Turn off \"Only cards I haven't marked as known\" to test on them anyway."
                      : "No cards match these settings, so there's nothing to test.")
                     .font(.caption).foregroundStyle(.red)
@@ -149,7 +160,7 @@ struct TestSetupSheet: View {
                     let config = TestBuilder.Config(
                         questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
                         allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
-                        excludeMastered: excludeMastered
+                        excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
                     )
                     isStarting = true
                     noQuestions = false
@@ -184,6 +195,49 @@ struct TestSetupSheet: View {
         .padding(24)
         .macSheetFrame(width: 420)
         .background(GRASPColor.canvas)
+        .task {
+            history = store.testHistory(forDecks: deckIds)
+            mostMissed = store.mostMissedCards(forDecks: deckIds)
+            weakCount = store.weakSpotCount(forDecks: deckIds)
+        }
+    }
+
+    /// Recent scores as bars, and the cards missed most -- shown once there
+    /// is something to show.
+    @ViewBuilder
+    private var historyBlock: some View {
+        if !history.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Recent scores")
+                    .graspType(.eyebrow)
+                    .textCase(.uppercase)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(history) { entry in
+                        VStack(spacing: 3) {
+                            Text("\(Int((entry.fraction * 100).rounded()))")
+                                .font(.system(size: 9)).monospacedDigit()
+                                .foregroundStyle(GRASPColor.textTertiary)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(entry.fraction >= 0.8 ? GRASPColor.success : GRASPColor.accent)
+                                .frame(width: 18, height: max(4, 44 * entry.fraction))
+                        }
+                        .help("\(entry.correct) of \(entry.total), \(entry.startedAt.formatted(date: .abbreviated, time: .omitted))")
+                    }
+                    Spacer()
+                }
+                .frame(height: 62, alignment: .bottom)
+                if !mostMissed.isEmpty {
+                    Text("Missed most: " + mostMissed.prefix(3).map { "\($0.front) (\($0.misses)x)" }.joined(separator: ", "))
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
     }
 }
 
@@ -561,10 +615,16 @@ struct TestResultsView: View {
     @Environment(\.dismiss) private var dismiss
     let deckName: String
     let attemptId: String
+    /// Starts a new test over the misses; nil hides the button.
+    let onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)?
+    let deckIds: [String]
     @State private var graded: [GradedQuestion]
 
-    init(deckName: String, attemptId: String, graded: [GradedQuestion]) {
+    init(deckName: String, attemptId: String, graded: [GradedQuestion], deckIds: [String] = [],
+         onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
         self.deckName = deckName
+        self.deckIds = deckIds
+        self.onRetry = onRetry
         self.attemptId = attemptId
         self._graded = State(initialValue: graded)
     }
@@ -670,6 +730,15 @@ struct TestResultsView: View {
 
             HStack {
                 Spacer()
+                if let onRetry, graded.contains(where: { !$0.isCorrect }) {
+                    Button("Retry \(graded.filter { !$0.isCorrect }.count) Missed") {
+                        let missed = graded.filter { !$0.isCorrect }.map(\.question)
+                        if let id = try? store.startRetryTest(questions: missed, deckIds: deckIds), !id.isEmpty {
+                            onRetry(id, missed)
+                        }
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                }
                 Button("Done") { dismiss() }
                     .buttonStyle(GRASPProminentButton())
                     .keyboardShortcut(.defaultAction)

@@ -993,6 +993,23 @@ final class AppStore {
         return (started.attemptId, started.questions, aiResult.warning)
     }
 
+    /// A new test over just these questions (the ones missed last time).
+    func startRetryTest(questions: [LearnEngine.RoundQuestion], deckIds: [String]) throws -> String {
+        try database.queue.write { db in try Study.startRetry(questions: questions, deckIds: deckIds, db: db) }
+    }
+
+    func testHistory(forDecks deckIds: [String]) -> [Study.TestHistoryEntry] {
+        (try? database.queue.read { db in try Study.testHistory(forDecks: deckIds, db: db) }) ?? []
+    }
+
+    func mostMissedCards(forDecks deckIds: [String]) -> [(front: String, misses: Int)] {
+        (try? database.queue.read { db in try Study.mostMissed(forDecks: deckIds, db: db) }) ?? []
+    }
+
+    func weakSpotCount(forDecks deckIds: [String]) -> Int {
+        (try? database.queue.read { db in try Study.weakCardIds(forDecks: deckIds, db: db).count }) ?? 0
+    }
+
     /// Records one answer to a test item. Keyed by `ordinal` rather than
     /// `cardId` -- an AI-generated question has no `cardId` at all.
     func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) throws {

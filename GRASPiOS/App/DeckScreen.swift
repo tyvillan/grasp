@@ -263,7 +263,9 @@ struct DeckScreen: View {
                 testPhase = .results(attemptId: attemptId, graded: graded)
             }
         case .results(let attemptId, let graded):
-            TestResultsView(deckName: route.name, attemptId: attemptId, graded: graded)
+            TestResultsView(deckName: route.name, attemptId: attemptId, graded: graded, deckIds: deckIds) { id, questions in
+                testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+            }
         }
     }
 

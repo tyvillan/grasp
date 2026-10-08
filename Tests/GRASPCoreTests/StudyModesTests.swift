@@ -109,6 +109,44 @@ struct StudyModesTests {
         }
     }
 
+    @Test("a missed card is a weak spot until a later test gets it right; history and most-missed follow")
+    func weakSpotsAndHistory() async throws {
+        let (db, deckId, _) = try await makeDeck()
+        let config = TestBuilder.Config(questionCount: 5, allowMultipleChoice: true, allowWritten: false,
+                                        allowTrueFalse: false, shuffle: false)
+        let (first, questions) = try await db.queue.write { var rng2 = SystemRandomNumberGenerator()
+            return try Study.startTest(deckIds: [deckId], config: config, using: &rng2, db: $0) }
+        let missed = try #require(questions[0].cardId)
+        try await db.queue.write { db in
+            for (index, _) in questions.enumerated() {
+                try Study.submitTestAnswer(attemptId: first, ordinal: index, given: "x", isCorrect: index != 0, db: db)
+            }
+            _ = try Study.finishTest(attemptId: first, db: db)
+        }
+        let weak = try await db.queue.read { try Study.weakCardIds(forDecks: [deckId], db: $0) }
+        #expect(weak == [missed])
+        let history = try await db.queue.read { try Study.testHistory(forDecks: [deckId], db: $0) }
+        #expect(history.count == 1 && history[0].correct == 4 && history[0].total == 5)
+        let top = try await db.queue.read { try Study.mostMissed(forDecks: [deckId], db: $0) }
+        #expect(top.count == 1 && top[0].misses == 1)
+
+        // Retrying just that question gets it right: no longer weak.
+        let retry = try await db.queue.write { try Study.startRetry(questions: [questions[0]], deckIds: [deckId], db: $0) }
+        try await db.queue.write { db in
+            try Study.submitTestAnswer(attemptId: retry, ordinal: 0, given: "x", isCorrect: true, db: db)
+            _ = try Study.finishTest(attemptId: retry, db: db)
+        }
+        let after = try await db.queue.read { try Study.weakCardIds(forDecks: [deckId], db: $0) }
+        #expect(after.isEmpty)
+
+        // A weak-spots-only test over a deck with none writes nothing.
+        var focusedVar = config; focusedVar.weakSpotsOnly = true
+        let focused = focusedVar
+        let none = try await db.queue.write { var rng2 = SystemRandomNumberGenerator()
+            return try Study.startTest(deckIds: [deckId], config: focused, using: &rng2, db: $0) }
+        #expect(none.questions.isEmpty)
+    }
+
     @Test("a test with every card excluded writes nothing")
     func emptyTest() async throws {
         let (db, deckId, cards) = try await makeDeck()
