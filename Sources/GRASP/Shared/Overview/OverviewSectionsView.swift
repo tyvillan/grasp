@@ -227,10 +227,18 @@ private struct LessonSectionView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             ForEach(Array(section.paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                Text(overviewInline(section.isMath ? MathNotation.prettify(paragraph) : paragraph))
-                    .graspType(.prose)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                let text = section.isMath ? MathNotation.prettify(paragraph) : paragraph
+                // A matrix written in plain notation is drawn as one.
+                ForEach(Array(GuideText.splitMatrices(text).enumerated()), id: \.offset) { _, piece in
+                    if let matrix = piece.matrix {
+                        ScrollView(.horizontal, showsIndicators: false) { MatrixGrid(matrix: matrix, compact: true) }
+                    } else {
+                        Text(overviewInline(piece.text))
+                            .graspType(.prose)
+                            .foregroundStyle(GRASPColor.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
 
             if let code = section.code {

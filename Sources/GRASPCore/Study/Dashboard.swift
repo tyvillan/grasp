@@ -35,15 +35,18 @@ public enum Dashboard {
     public static func decks(now: Date = Date(), db: Database) throws -> [DeckSummary] {
         try Row.fetchAll(db, sql: """
             SELECT deck.id AS deckId, deck.name AS deckName, course.id AS courseId, course.name AS courseName,
-                   COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status != 'suspended' THEN card.id END) AS cardCount,
-                   COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.status = 'active' AND card.due <= ? THEN card.id END) AS dueCount,
-                   COUNT(DISTINCT CASE WHEN card.deletedAt IS NULL AND card.reps > 0 THEN card.id END) AS reviewedCount,
-                   MAX(review.reviewedAt) AS lastReviewedAt
+                   COUNT(CASE WHEN card.deletedAt IS NULL AND card.status != 'suspended' THEN 1 END) AS cardCount,
+                   COUNT(CASE WHEN card.deletedAt IS NULL AND card.status = 'active' AND card.due <= ? THEN 1 END) AS dueCount,
+                   COUNT(CASE WHEN card.deletedAt IS NULL AND card.reps > 0 THEN 1 END) AS reviewedCount,
+                   MAX(lastReview.reviewedAt) AS lastReviewedAt
             FROM deck
             JOIN course ON course.id = deck.courseId
             LEFT JOIN deckCard ON deckCard.deckId = deck.id
             LEFT JOIN card ON card.id = deckCard.cardId
-            LEFT JOIN review ON review.cardId = card.id
+            -- One row per card, so a long review history can't multiply the
+            -- join (it used to, and the counts needed DISTINCT to undo it).
+            LEFT JOIN (SELECT cardId, MAX(reviewedAt) AS reviewedAt FROM review GROUP BY cardId) AS lastReview
+                   ON lastReview.cardId = card.id
             -- Archived courses are hidden everywhere else; counting them
             -- here made Home's totals disagree with the course list.
             WHERE deck.deletedAt IS NULL AND course.isArchived = 0

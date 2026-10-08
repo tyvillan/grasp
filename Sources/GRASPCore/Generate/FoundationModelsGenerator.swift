@@ -13,6 +13,40 @@ import FoundationModels
 public struct FoundationModelsGenerator: CardGenerator {
     public init() {}
 
+    /// Said first in every session: GRASP can't typeset LaTeX.
+    static let plainRule = OllamaGenerator.plainNotationRule
+
+    /// Code questions, problems and second opinions are written by the same
+    /// prompts as the other models, run over this model.
+    private var pipeline: OllamaGenerator {
+        OllamaGenerator(transport: FoundationModelsTransport(), model: "Apple on-device", wordBudget: 600)
+    }
+
+    public func generateCodeQuestions(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        language: CodeLanguage, kinds: [CodeQuestionKind], count: Int
+    ) async -> [GeneratedCodeQuestion] {
+        guard await isAvailable else { return [] }
+        return await pipeline.generateCodeQuestions(
+            deckName: deckName, courseName: courseName, noteContext: noteContext, cardTerms: cardTerms,
+            language: language, kinds: kinds, count: count)
+    }
+
+    public func generateProblems(
+        deckName: String, courseName: String, noteContext: String, cardTerms: [String],
+        subject: ProblemSubject, kinds: [ProblemKind], count: Int
+    ) async -> [GeneratedProblem] {
+        guard await isAvailable else { return [] }
+        return await pipeline.generateProblems(
+            deckName: deckName, courseName: courseName, noteContext: noteContext, cardTerms: cardTerms,
+            subject: subject, kinds: kinds, count: count)
+    }
+
+    public func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
+        guard await isAvailable else { return nil }
+        return await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
+    }
+
     public var isAvailable: Bool {
         get async {
             #if canImport(FoundationModels)
@@ -47,7 +81,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             // and answer in its transcript, and once that filled the
             // on-device context window every remaining card failed.
             let session = LanguageModelSession(
-                instructions: """
+                instructions: Self.plainRule + """
                     You clean up flashcards auto-extracted from lecture notes. If a front is garbled, \
                     truncated, or mislabeled -- it doesn't actually name the concept the back describes -- \
                     replace it entirely with the correct short term or question, grounded only in the note \
@@ -64,7 +98,7 @@ public struct FoundationModelsGenerator: CardGenerator {
                 results.append(GeneratedCard(front: candidate.front, back: candidate.back))
                 continue
             }
-            results.append(GeneratedCard(front: response.content.front, back: response.content.back))
+            results.append(GeneratedCard(front: PlainMath.clean(response.content.front), back: PlainMath.clean(response.content.back)))
         }
         return results
         #else
@@ -180,7 +214,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             "raises; the rest is being handled separately.\n"
         } ?? ""
         let session = LanguageModelSession(
-            instructions: """
+            instructions: Self.plainRule + """
                 You are writing a short lesson for the course "\(courseName)", in the style of \
                 3Blue1Brown: curious, visual, and built so the reader discovers each idea instead \
                 of being told it. Start from a concrete question. Show a concrete case with real \
@@ -212,7 +246,7 @@ public struct FoundationModelsGenerator: CardGenerator {
         // "absent" sentinel, since `@Generable` handles optionals poorly.
         func optional(_ text: String) -> String? {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return trimmed.isEmpty ? nil : PlainMath.clean(trimmed)
         }
 
         let sections = draft.sections.compactMap { entry -> OverviewSection? in
@@ -304,7 +338,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             text -- never add outside knowledge or invent an example, number, or date the note doesn't \
             contain. An empty result is normal and expected when the note has no such gap.
             """
-        let session = LanguageModelSession(instructions: instructions)
+        let session = LanguageModelSession(instructions: Self.plainRule + instructions)
         let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")
         let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
         let focusLine = (trimmedTopic?.isEmpty == false) ? "Focus especially on: \(trimmedTopic!).\n" : ""
@@ -317,7 +351,7 @@ public struct FoundationModelsGenerator: CardGenerator {
         guard let response = try? await session.respond(to: prompt, generating: AdditionalCards.self) else {
             return []
         }
-        return response.content.cards.prefix(maxCount).map { GeneratedCard(front: $0.front, back: $0.back) }
+        return response.content.cards.prefix(maxCount).map { GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back)) }
         #else
         return []
         #endif
@@ -353,7 +387,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             knowledge or invent an example, number, or date the note doesn't contain. An empty result \
             is normal and expected when the note has nothing more worth asking.
             """
-        let session = LanguageModelSession(instructions: instructions)
+        let session = LanguageModelSession(instructions: Self.plainRule + instructions)
         let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")
         let prompt = """
         Note: \(noteContext.prefix(1500))
@@ -365,7 +399,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             return []
         }
         return response.content.questions.prefix(maxCount)
-            .map { GeneratedTestQuestion(prompt: $0.prompt, correctAnswer: $0.correctAnswer) }
+            .map { GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.correctAnswer)) }
         #else
         return []
         #endif
@@ -403,7 +437,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             example -- state what the term actually means in general, even if that differs from what \
             the specific extracted text or note said.
             """
-        let session = LanguageModelSession(instructions: instructions)
+        let session = LanguageModelSession(instructions: Self.plainRule + instructions)
         let prompt = """
         Term: \(front)
         Extracted definition: \(back)
@@ -470,7 +504,7 @@ public struct FoundationModelsGenerator: CardGenerator {
             terms and common mistakes. Use concrete numbers; every fact must come from the note -- \
             never add outside knowledge. Anything the note doesn't support is left empty.
             """
-        let session = LanguageModelSession(instructions: instructions)
+        let session = LanguageModelSession(instructions: Self.plainRule + instructions)
         let prompt = """
         Course: \(courseName). This part covers: \(deckName).
         Note: \(noteContext.prefix(2200))
@@ -482,7 +516,7 @@ public struct FoundationModelsGenerator: CardGenerator {
         let draft = response.content
         func clean(_ text: String) -> String? {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return trimmed.isEmpty ? nil : PlainMath.clean(trimmed)
         }
         var examples: [StudyGuideDocument.Example] = []
         for problem in draft.problems.prefix(problemCount) {
@@ -511,5 +545,22 @@ public struct FoundationModelsGenerator: CardGenerator {
         // model round trip for this generator; Ollama's version does the
         // model-backed variant.
         Array(deckContext.filter { $0 != correctAnswer }.shuffled().prefix(count))
+    }
+}
+
+/// The on-device model as a plain-text `ChatTransport`, so the prompts the
+/// other generators use for code questions and problems run on it too.
+/// Its small context window means long prompts fail and come back empty,
+/// which the builders treat as "nothing written".
+@available(macOS 26.0, iOS 26.0, *)
+struct FoundationModelsTransport: ChatTransport {
+    func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
+        #if canImport(FoundationModels)
+        let session = LanguageModelSession(
+            instructions: json ? "Reply with a single JSON object and nothing else." : "Reply with only what was asked for.")
+        return try await session.respond(to: prompt).content
+        #else
+        throw URLError(.unsupportedURL)
+        #endif
     }
 }

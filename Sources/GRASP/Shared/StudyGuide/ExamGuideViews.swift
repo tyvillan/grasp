@@ -501,12 +501,18 @@ struct GuideText: View {
         let id: Int
         let isCode: Bool
         let text: String
+        var matrix: RationalMatrix?
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Self.segments(text)) { segment in
-                if segment.isCode {
+                if let matrix = segment.matrix {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        MatrixGrid(matrix: matrix, compact: true)
+                    }
+                    .padding(.vertical, 2)
+                } else if segment.isCode {
                     Text(segment.text)
                         .font(.system(size: 12.5, design: .monospaced))
                         .foregroundStyle(color)
@@ -544,20 +550,93 @@ struct GuideText: View {
         return startsLikeCode && hasCodeShape || t.hasPrefix("//") || t.hasSuffix(";")
     }
 
+    /// One row of a plain-notation matrix, "[ 1  2/3  -4 ]", as numbers; nil
+    /// for anything else.
+    private static func matrixRow(_ line: String) -> [Rational]? {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        guard t.hasPrefix("["), t.hasSuffix("]") else { return nil }
+        let entries = t.dropFirst().dropLast().split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\t" }).map(String.init)
+        guard !entries.isEmpty, entries.count <= 8 else { return nil }
+        var row: [Rational] = []
+        for entry in entries {
+            if let n = Int(entry) { row.append(Rational(n)); continue }
+            let parts = entry.split(separator: "/", omittingEmptySubsequences: false)
+            if parts.count == 2, let n = Int(parts[0]), let d = Int(parts[1]), let r = Rational(n, d) { row.append(r); continue }
+            if let d = Double(entry), let r = Rational(approximating: d) { row.append(r); continue }
+            return nil
+        }
+        return row
+    }
+
+    /// Prose with any plain-notation matrices cut out: text pieces carry a nil
+    /// matrix, matrix pieces an empty string.
+    static func splitMatrices(_ text: String) -> [(text: String, matrix: RationalMatrix?)] {
+        var pieces: [(text: String, matrix: RationalMatrix?)] = []
+        var prose: [String] = []
+        var rows: [[Rational]] = []
+        var rowLines: [String] = []
+        func flushProse() {
+            let joined = prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty { pieces.append((joined, nil)) }
+            prose = []
+        }
+        func flushRows() {
+            if let matrix = RationalMatrix(rows: rows), matrix.rowCount > 1 || matrix.columnCount > 1 {
+                flushProse()
+                pieces.append(("", matrix))
+            } else {
+                prose.append(contentsOf: rowLines)
+            }
+            rows = []; rowLines = []
+        }
+        for line in text.components(separatedBy: "\n") {
+            if let row = matrixRow(line), rows.isEmpty || rows[0].count == row.count {
+                rows.append(row); rowLines.append(line)
+            } else {
+                if !rows.isEmpty { flushRows() }
+                prose.append(line)
+            }
+        }
+        if !rows.isEmpty { flushRows() }
+        flushProse()
+        return pieces
+    }
+
     private static func segments(_ text: String) -> [Segment] {
         var result: [Segment] = []
         var lines: [String] = []
         var code = false
+        var matrixRows: [[Rational]] = []
+        var matrixLines: [String] = []
         func flush() {
             let joined = lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
             if !joined.isEmpty { result.append(Segment(id: result.count, isCode: code, text: joined)) }
             lines = []
         }
+        func flushMatrix() {
+            defer { matrixRows = []; matrixLines = [] }
+            guard !matrixRows.isEmpty else { return }
+            if let matrix = RationalMatrix(rows: matrixRows), matrix.rowCount > 1 || matrix.columnCount > 1 {
+                result.append(Segment(id: result.count, isCode: false, text: "", matrix: matrix))
+            } else {
+                // A lone "[ 5 ]" is just text.
+                code = false
+                lines = matrixLines
+            }
+        }
         for line in text.components(separatedBy: "\n") {
+            if let row = matrixRow(line), matrixRows.isEmpty || matrixRows[0].count == row.count {
+                if matrixRows.isEmpty { flush() }
+                matrixRows.append(row)
+                matrixLines.append(line)
+                continue
+            }
+            if !matrixRows.isEmpty { flushMatrix() }
             let lineIsCode = isCode(line) || (code && line.trimmingCharacters(in: .whitespaces).isEmpty)
             if lineIsCode != code { flush(); code = lineIsCode }
             lines.append(line)
         }
+        flushMatrix()
         flush()
         return result
     }

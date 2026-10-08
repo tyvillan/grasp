@@ -444,6 +444,13 @@ enum Schema {
             try SyncSchema.installTriggers(db)
         }
 
+        // Test history and weak-spot lookups read `testItem` by card and by
+        // attempt; neither had an index.
+        migrator.registerMigration("v14_test_item_indexes") { db in
+            try db.create(index: "ix_testitem_attempt", on: "testItem", columns: ["attemptId"])
+            try db.create(index: "ix_testitem_card", on: "testItem", columns: ["cardId"])
+        }
+
         return migrator
     }
 }
