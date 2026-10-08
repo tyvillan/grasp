@@ -287,7 +287,7 @@ struct HomeView: View {
             }
             VStack(spacing: 8) {
                 ForEach(upcoming) { item in
-                    ExamAlertRow(item: item) { study(item) }
+                    ExamAlertRow(item: item, plan: store.examPlan(for: item.event)) { study(item) }
                 }
             }
         }
@@ -470,6 +470,7 @@ private struct StatFigure: View {
 /// urgency at a glance rather than as four identical rows.
 private struct ExamAlertRow: View {
     let item: AppStore.UpcomingEvent
+    let plan: [ExamPlan.Step]
     let onStudy: () -> Void
 
     private var daysAway: Int { item.daysAway(from: Date()) }
@@ -481,46 +482,55 @@ private struct ExamAlertRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.event.kind.icon)
-                .font(.system(size: 13))
-                .foregroundStyle(urgencyTint)
-                .frame(width: 20)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: item.event.kind.icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(urgencyTint)
+                    .frame(width: 20)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.event.title.isEmpty ? item.event.kind.label : item.event.title)
-                    .graspType(.rowTitle)
-                    .foregroundStyle(GRASPColor.textPrimary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.event.title.isEmpty ? item.event.kind.label : item.event.title)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let courseName = item.courseName {
+                            Text(courseName)
+                            Text("·").foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        Text(item.event.startsAt.formatted(date: .abbreviated, time: .omitted))
+                        if let timeText = item.event.timeText {
+                            Text("·").foregroundStyle(GRASPColor.textTertiary)
+                            Text(timeText)
+                        }
+                    }
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
                     .lineLimit(1)
-                HStack(spacing: 5) {
-                    if let courseName = item.courseName {
-                        Text(courseName)
-                        Text("·").foregroundStyle(GRASPColor.textTertiary)
-                    }
-                    Text(item.event.startsAt.formatted(date: .abbreviated, time: .omitted))
-                    if let timeText = item.event.timeText {
-                        Text("·").foregroundStyle(GRASPColor.textTertiary)
-                        Text(timeText)
-                    }
                 }
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textSecondary)
-                .lineLimit(1)
+
+                Spacer(minLength: 10)
+
+                Text(item.event.countdownText())
+                    .graspType(.meta)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(urgencyTint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(urgencyTint.opacity(0.12), in: Capsule())
+
+                if item.event.courseId != nil {
+                    Button("Study", action: onStudy)
+                        .buttonStyle(GRASPQuietButton())
+                }
             }
-
-            Spacer(minLength: 10)
-
-            Text(item.event.countdownText())
-                .graspType(.meta)
-                .fontWeight(.semibold)
-                .foregroundStyle(urgencyTint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(urgencyTint.opacity(0.12), in: Capsule())
-
-            if item.event.courseId != nil {
-                Button("Study", action: onStudy)
-                    .buttonStyle(GRASPQuietButton())
+            if !plan.isEmpty {
+                Text("Today: " + plan.map(\.text).joined(separator: " · "))
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 32)
             }
         }
         .padding(.horizontal, 14)
@@ -530,6 +540,7 @@ private struct ExamAlertRow: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(urgencyTint.opacity(daysAway <= 7 ? 0.35 : 0.12), lineWidth: 1)
         }
+
     }
 }
 

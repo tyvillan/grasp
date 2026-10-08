@@ -134,6 +134,8 @@ struct TodayView: View {
     }
 
     private func examLine(_ upcoming: AppStore.UpcomingEvent, hasGuide: Bool) -> some View {
+        let plan = store.examPlan(for: upcoming.event)
+        return VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 12) {
                         Image(systemName: upcoming.event.kind == .quiz ? "questionmark.circle" : "graduationcap")
                             .foregroundStyle(GRASPColor.accent)
@@ -155,6 +157,14 @@ struct TodayView: View {
                         }
                     }
                     .contentShape(Rectangle())
+            if !plan.isEmpty {
+                Text("Today: " + plan.map(\.text).joined(separator: " · "))
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 34)
+            }
+        }
     }
 
     @ViewBuilder
