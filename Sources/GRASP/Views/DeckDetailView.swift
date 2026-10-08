@@ -132,6 +132,7 @@ struct DeckDetailView: View {
     /// Refreshed in `load()`. As a computed property it ran the whole due
     /// query four times per render -- on every selection click.
     @State private var dueCount = 0
+    @State private var problemCount = 0
 
     /// The New Card sheet's default target: the current deck when scoped
     /// to one, or no default at all in the "All Cards" master category --
@@ -387,7 +388,7 @@ struct DeckDetailView: View {
                 )
             }
         }
-        .sheet(isPresented: $showingCodeQuestions) {
+        .sheet(isPresented: $showingCodeQuestions, onDismiss: load) {
             PracticeProblemsSheet(deckIds: scopeDeckIds, scopeName: deckName, courseId: courseId)
         }
         .sheet(item: $refineConfirmation) { scope in
@@ -495,6 +496,7 @@ struct DeckDetailView: View {
         .disabled(activeCount == 0)
         modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
             .disabled(activeCount == 0)
+            .help("A graded quiz on this deck's cards")
     }
 
     @ViewBuilder
@@ -633,8 +635,10 @@ struct DeckDetailView: View {
     /// The deck's saved practice problems, and writing more: code, matrix and
     /// calculation problems, scenario questions that tests mix in.
     private var problemsButton: some View {
-        modeButton("Problems", "function", prominent: false) { showingCodeQuestions = true }
-            .help("Practice problems written from this deck's notes, for tests")
+        modeButton(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", "function", prominent: false) {
+            showingCodeQuestions = true
+        }
+        .help("Saved and new practice problems: worked code and calculation questions, separate from Test")
     }
 
     /// Which files are behind this deck (or course).
@@ -1041,6 +1045,7 @@ struct DeckDetailView: View {
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
         dueCount = (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0
+        problemCount = store.codeQuestionCount(inDecks: scopeDeckIds)
         if let courseId {
             let allDecksInCourse = (try? store.decks(inCourse: courseId)) ?? []
             switch scope {

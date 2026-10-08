@@ -69,18 +69,36 @@ struct TestSetupSheet: View {
     @State private var noQuestions = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Test: \(deckName)").font(.headline)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 26))
+                    .foregroundStyle(GRASPColor.accent)
+                Text("Test: \(deckName)")
+                    .font(.system(size: 18, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text("A graded quiz on this deck's cards: multiple choice, written, and true / false. "
+                     + "Worked problems with code or calculations live under Problems instead.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Stepper("Questions: \(questionCount)", value: $questionCount, in: 5...100, step: 5)
 
-            GroupBox("Question Types") {
-                VStack(alignment: .leading) {
-                    Toggle("Multiple choice", isOn: $allowMultipleChoice)
-                    Toggle("Written", isOn: $allowWritten)
-                    Toggle("True / False", isOn: $allowTrueFalse)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Question types")
+                    .graspType(.eyebrow)
+                    .textCase(.uppercase)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                Toggle("Multiple choice", isOn: $allowMultipleChoice)
+                Toggle("Written", isOn: $allowWritten)
+                Toggle("True / False", isOn: $allowTrueFalse)
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Toggle("Shuffle order", isOn: $shuffle)
             Toggle("Only cards I haven't marked as known", isOn: $excludeMastered)
@@ -90,11 +108,10 @@ struct TestSetupSheet: View {
             if store.isAITestQuestionsEnabled {
                 let saved = store.codeQuestionCount(inDecks: deckIds)
                 Text(saved > 0
-                     ? "\(saved) saved practice problem\(saved == 1 ? "" : "s") for this deck, each checked before it was kept, "
-                       + "are mixed in, up to a third of the test."
+                     ? "Also mixes in some of this deck's \(saved) saved practice problem\(saved == 1 ? "" : "s"), up to a third of the test."
                      : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -159,12 +176,14 @@ struct TestSetupSheet: View {
                         onStart(attemptId, questions, aiWarning)
                     }
                 }
+                .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse))
             }
         }
-        .padding(20)
-        .macSheetFrame(width: 380)
+        .padding(24)
+        .macSheetFrame(width: 420)
+        .background(GRASPColor.canvas)
     }
 }
 

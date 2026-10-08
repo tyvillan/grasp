@@ -20,6 +20,8 @@ struct PracticeProblemsSheet: View {
     @State private var codeKinds: Set<CodeQuestionKind> = Set(CodeQuestionKind.allCases)
     @State private var problemKinds: Set<ProblemKind> = Set(ProblemKind.allCases)
     @State private var expanded: Set<String> = []
+    private enum Tab { case saved, write }
+    @State private var tab: Tab = .saved
 
     private var jobKey: String { store.codeQuestionJobKey(courseId: courseId) }
     private var job: AppStore.AIJob? { store.aiJob(jobKey) }
@@ -29,17 +31,30 @@ struct PracticeProblemsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Practice Problems: \(scopeName)").font(.headline)
-                Text("Written from your notes and checked before they're kept: code is compiled and run, calculations are "
-                     + "recomputed by a script, and multiple choice needs a second opinion on its answer. They're mixed "
-                     + "into tests when \"Include AI-written questions\" is on.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: "function")
+                    .font(.system(size: 26))
+                    .foregroundStyle(GRASPColor.accent)
+                Text("Practice Problems: \(scopeName)")
+                    .font(.system(size: 18, weight: .semibold))
+                    .tracking(-0.3)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text("Worked problems written from your notes: code to complete, calculations, matrices. Not flashcards, and "
+                     + "separate from Test, which quizzes you on your cards. Each is checked before it's kept, and tests mix "
+                     + "in some when \"Include AI-written questions\" is on.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Picker("", selection: $tab) {
+                    Text("Saved (\(questions.count))").tag(Tab.saved)
+                    Text("Write New").tag(Tab.write)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.top, 4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(24)
             Divider()
 
             if let job {
@@ -49,22 +64,42 @@ struct PracticeProblemsSheet: View {
                 banner(run)
             }
 
-            List {
+            if tab == .saved {
                 if questions.isEmpty {
-                    Text("No saved problems yet.").foregroundStyle(.secondary)
+                    VStack(spacing: 10) {
+                        Text("No saved problems yet.").foregroundStyle(GRASPColor.textSecondary)
+                        Button("Write Some") { tab = .write }.buttonStyle(GRASPQuietButton())
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(questions) { record in
+                                row(record)
+                                    .padding(14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                        }
+                        .padding(20)
+                    }
                 }
-                ForEach(questions) { record in
-                    row(record)
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
                 }
+                .padding(.horizontal, 24).padding(.vertical, 14)
+            } else {
+                ScrollView { writeControls }
             }
-            .listStyle(.inset)
-            .scrollContentBackground(.hidden)
-
-            Divider()
-            writeControls
         }
-        .macSheetFrame(width: 640)
-        .task { load() }
+        .macSheetFrame(width: 640, height: 600)
+        .background(GRASPColor.canvas)
+        .task {
+            load()
+            if questions.isEmpty { tab = .write }
+        }
         .onChange(of: store.revision) { load() }
     }
 
@@ -129,7 +164,6 @@ struct PracticeProblemsSheet: View {
                 footer(record)
             }
         }
-        .padding(.vertical, 3)
     }
 
     private func answerLine(_ text: String) -> some View {
@@ -207,6 +241,7 @@ struct PracticeProblemsSheet: View {
                 Spacer()
                 Button("Done") { dismiss() }
                 Button("Write Problems") {
+                    tab = .saved
                     store.writePractice(
                         PracticeBuilder.Request(
                             deckIds: deckIds, style: style,
@@ -214,13 +249,14 @@ struct PracticeProblemsSheet: View {
                             problemKinds: ProblemKind.allCases.filter(problemKinds.contains), count: count),
                         courseId: courseId)
                 }
+                .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(job != nil || !store.canWriteCodeQuestions
                           || (showsCodeKinds && codeKinds.isEmpty && !showsProblemKinds)
                           || (showsProblemKinds && problemKinds.isEmpty && !showsCodeKinds))
             }
         }
-        .padding(20)
+        .padding(24)
     }
 
     private func kindRow<Kind: Hashable>(_ title: String, _ kinds: [Kind], selection: Binding<Set<Kind>>,
