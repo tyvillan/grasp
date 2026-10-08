@@ -28,26 +28,106 @@ struct ExamGuideContent: View {
                     description: Text("GRASP couldn't find parts like \"Part 1 · Title\" in this exam's guides yet.")
                 )
             }
-            ForEach(page.parts) { part in
-                PartSection(
-                    part: part,
-                    total: page.questionCount,
-                    decks: decks,
-                    onSetDecks: { deckIds in
-                        for source in part.sources {
-                            store.setGuideDecks(guideId: source.guideId, partIndex: source.partIndex, deckIds: deckIds)
-                        }
-                    },
-                    onRate: { skill, rating in
-                        store.rateSkill(guideId: skill.guideId, skillId: skill.skillId, rating: rating)
-                    },
-                    onOpenPage: { guideId, pageNumber in
-                        guard let guide = page.guides.first(where: { $0.id == guideId }),
-                              let url = store.fileURL(ofGuide: guide)
-                        else { return }
-                        onOpenPage(PDFPageTarget(url: url, page: pageNumber, title: guide.title))
+            let buckets = ExamLayout.bucketSkills(page.parts)
+            if let buckets {
+                SkillsByTopic(buckets: buckets, onRate: { skill, rating in
+                    store.rateSkill(guideId: skill.guideId, skillId: skill.skillId, rating: rating)
+                })
+            }
+            ForEach(ExamLayout.Band.allCases, id: \.self) { band in
+                let parts = page.parts.filter { ExamLayout.band(for: $0) == band }
+                if !parts.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionLabel(band == .topics && buckets != nil ? "Details by part" : band.label)
+                        ForEach(parts) { part in partView(part, showsSkills: buckets == nil) }
                     }
-                )
+                }
+            }
+        }
+    }
+
+    private func partView(_ part: StudyGuideActions.PagePart, showsSkills: Bool) -> some View {
+        PartSection(
+            part: part,
+            total: page.questionCount,
+            decks: decks,
+            showsSkills: showsSkills,
+            onSetDecks: { deckIds in
+                for source in part.sources {
+                    store.setGuideDecks(guideId: source.guideId, partIndex: source.partIndex, deckIds: deckIds)
+                }
+            },
+            onRate: { skill, rating in
+                store.rateSkill(guideId: skill.guideId, skillId: skill.skillId, rating: rating)
+            },
+            onOpenPage: { guideId, pageNumber in
+                guard let guide = page.guides.first(where: { $0.id == guideId }),
+                      let url = store.fileURL(ofGuide: guide)
+                else { return }
+                onOpenPage(PDFPageTarget(url: url, page: pageNumber, title: guide.title))
+            }
+        )
+    }
+}
+
+// MARK: - Skills by topic
+
+/// Every skill once, grouped by topic, with progress -- the page's
+/// at-a-glance answer to "what do I still need to learn".
+private struct SkillsByTopic: View {
+    let buckets: [ExamLayout.Bucket]
+    let onRate: (StudyGuideActions.Skill, SkillConfidence?) -> Void
+    @State private var open: Set<ExamLayout.Topic> = []
+
+    private var all: [StudyGuideActions.Skill] { buckets.flatMap(\.skills) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                SectionLabel("Skills")
+                Spacer()
+                Text("\(all.filter { $0.rating == .canDoCold }.count) of \(all.count) ready")
+                    .graspType(.meta).monospacedDigit()
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+            VStack(spacing: 8) {
+                ForEach(buckets, id: \.topic) { bucket in
+                    let ready = bucket.skills.filter { $0.rating == .canDoCold }.count
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            if open.contains(bucket.topic) { open.remove(bucket.topic) } else { open.insert(bucket.topic) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: open.contains(bucket.topic) ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(GRASPColor.textTertiary)
+                                    .frame(width: 12)
+                                Text(bucket.topic.label)
+                                    .graspType(.rowTitle)
+                                    .foregroundStyle(GRASPColor.textPrimary)
+                                Spacer()
+                                ProgressBar(value: ready, total: bucket.skills.count, tint: GRASPColor.success)
+                                    .frame(width: 70)
+                                Text("\(ready)/\(bucket.skills.count)")
+                                    .graspType(.meta).monospacedDigit()
+                                    .foregroundStyle(GRASPColor.textSecondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if open.contains(bucket.topic) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                ForEach(bucket.skills) { skill in
+                                    SkillRow(skill: skill, onRate: { onRate(skill, $0) })
+                                }
+                            }
+                            .padding(.top, 14).padding(.leading, 22)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(GRASPColor.hairline))
+                }
             }
         }
     }
@@ -136,15 +216,56 @@ private struct PartSection: View {
     let part: StudyGuideActions.PagePart
     let total: Int?
     let decks: [Deck]
+    let showsSkills: Bool
     let onSetDecks: ([String]) -> Void
     let onRate: (StudyGuideActions.Skill, SkillConfidence?) -> Void
     let onOpenPage: (String, Int) -> Void
+    @State private var isOpen = false
+
+    /// One line saying what's inside, so a closed part still tells you
+    /// whether it's worth opening.
+    private var summary: String {
+        var pieces: [String] = []
+        let practice = part.examples.filter { $0.example.isPractice }.count
+        if practice > 0 { pieces.append("\(practice) practice") }
+        let examples = part.examples.count - practice
+        if examples > 0 { pieces.append("\(examples) example\(examples == 1 ? "" : "s")") }
+        if showsSkills, !part.skills.isEmpty { pieces.append("\(part.skills.count) skills") }
+        if !part.terms.isEmpty { pieces.append("\(part.terms.count) terms") }
+        if !part.traps.isEmpty { pieces.append("\(part.traps.count) traps") }
+        if !part.formulas.isEmpty { pieces.append("\(part.formulas.count) formulas") }
+        if pieces.isEmpty, !part.notes.isEmpty { pieces.append("notes") }
+        return pieces.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            header
+            Button { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .frame(width: 12)
+                    header
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if !isOpen, !summary.isEmpty {
+                Text(summary).graspType(.meta).foregroundStyle(GRASPColor.textTertiary).padding(.leading, 22)
+            }
+            if isOpen { details }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 16)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(GRASPColor.hairline))
+    }
+
+    @ViewBuilder
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 16) {
             coverage
-            if !part.skills.isEmpty {
+            if showsSkills, !part.skills.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("You should be able to")
                     ForEach(part.skills) { skill in
@@ -153,12 +274,12 @@ private struct PartSection: View {
                 }
             }
             if !part.traps.isEmpty {
-                Callout(label: "Traps the wrong answers are built on", tint: GRASPColor.rejected) {
+                QuietBlock(label: "Traps the wrong answers are built on") {
                     BulletList(items: part.traps)
                 }
             }
             if !part.terms.isEmpty {
-                Callout(label: "Key terms", tint: GRASPColor.accent) {
+                QuietBlock(label: "Key terms") {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(part.terms.enumerated()), id: \.offset) { _, term in
                             (Text(term.term).fontWeight(.semibold) + Text(term.definition.isEmpty ? "" : ": " + term.definition))
@@ -171,7 +292,7 @@ private struct PartSection: View {
                 }
             }
             if !part.formulas.isEmpty {
-                Callout(label: "Formulas", tint: GRASPColor.textSecondary) {
+                QuietBlock(label: "Formulas") {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(part.formulas, id: \.self) { formula in
                             Text(formula)
@@ -184,7 +305,7 @@ private struct PartSection: View {
                 }
             }
             if !part.remember.isEmpty {
-                Callout(label: "Remember", tint: GRASPColor.success) {
+                QuietBlock(label: "Remember") {
                     BulletList(items: part.remember)
                 }
             }
@@ -216,9 +337,6 @@ private struct PartSection: View {
                 }
             }
         }
-        .padding(20)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(GRASPColor.hairline))
     }
 
     private var header: some View {
@@ -287,6 +405,26 @@ private struct PartSection: View {
             .fixedSize()
             .help("Choose which lecture decks this part covers")
         }
+    }
+}
+
+/// One calm style for the small blocks inside a part, instead of a colour
+/// per kind.
+private struct QuietBlock<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .graspType(.eyebrow)
+                .textCase(.uppercase)
+                .foregroundStyle(GRASPColor.textTertiary)
+            content
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GRASPColor.canvas, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -377,12 +515,6 @@ private struct PracticeProblem: View {
                     .graspType(.rowTitle)
                     .foregroundStyle(GRASPColor.textSecondary)
                 Spacer()
-                if let page = example.page {
-                    Button("Page \(page)") { onOpenPage(item.guideId, page) }
-                        .buttonStyle(.borderless)
-                        .graspType(.meta)
-                        .help("Open the guide at this page, for its tables and figures")
-                }
             }
             if example.usesFigure == true, let page = example.page {
                 Button { onOpenPage(item.guideId, page) } label: {
