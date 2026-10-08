@@ -501,17 +501,14 @@ struct GuideText: View {
         let id: Int
         let isCode: Bool
         let text: String
-        var matrix: RationalMatrix?
+        var matrix: TextMatrix?
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(Self.segments(text)) { segment in
                 if let matrix = segment.matrix {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        MatrixGrid(matrix: matrix, compact: true)
-                    }
-                    .padding(.vertical, 2)
+                    TextMatrixView(matrix: matrix).padding(.vertical, 2)
                 } else if segment.isCode {
                     Text(segment.text)
                         .font(.system(size: 12.5, design: .monospaced))
@@ -550,30 +547,34 @@ struct GuideText: View {
         return startsLikeCode && hasCodeShape || t.hasPrefix("//") || t.hasSuffix(";")
     }
 
-    /// One row of a plain-notation matrix, "[ 1  2/3  -4 ]", as numbers; nil
-    /// for anything else.
-    private static func matrixRow(_ line: String) -> [Rational]? {
-        let t = line.trimmingCharacters(in: .whitespaces)
+    /// One row of a plain-notation matrix, "[ 1  2/3  -4 ]" or "A = [ 1 2 h ]":
+    /// an optional name, then the entries. Entries may be numbers or short
+    /// symbols like h or 2x; nil for anything else.
+    private static func matrixRow(_ line: String) -> (label: String?, entries: [String])? {
+        var t = line.trimmingCharacters(in: .whitespaces)
+        var label: String?
+        if let eq = t.range(of: " = [") ?? t.range(of: "=[") {
+            let name = t[..<eq.lowerBound].trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, name.count <= 3, name.allSatisfy({ $0.isLetter }) else { return nil }
+            label = name
+            t = "[" + t[eq.upperBound...]
+        }
         guard t.hasPrefix("["), t.hasSuffix("]") else { return nil }
         let entries = t.dropFirst().dropLast().split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\t" }).map(String.init)
         guard !entries.isEmpty, entries.count <= 8 else { return nil }
-        var row: [Rational] = []
         for entry in entries {
-            if let n = Int(entry) { row.append(Rational(n)); continue }
-            let parts = entry.split(separator: "/", omittingEmptySubsequences: false)
-            if parts.count == 2, let n = Int(parts[0]), let d = Int(parts[1]), let r = Rational(n, d) { row.append(r); continue }
-            if let d = Double(entry), let r = Rational(approximating: d) { row.append(r); continue }
-            return nil
+            guard entry.count <= 8, entry.allSatisfy({ $0.isNumber || $0.isLetter || "+-*/.^_()".contains($0) }) else { return nil }
         }
-        return row
+        return (label, entries)
     }
 
     /// Prose with any plain-notation matrices cut out: text pieces carry a nil
     /// matrix, matrix pieces an empty string.
-    static func splitMatrices(_ text: String) -> [(text: String, matrix: RationalMatrix?)] {
-        var pieces: [(text: String, matrix: RationalMatrix?)] = []
+    static func splitMatrices(_ text: String) -> [(text: String, matrix: TextMatrix?)] {
+        var pieces: [(text: String, matrix: TextMatrix?)] = []
         var prose: [String] = []
-        var rows: [[Rational]] = []
+        var rows: [[String]] = []
+        var label: String?
         var rowLines: [String] = []
         func flushProse() {
             let joined = prose.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -581,17 +582,18 @@ struct GuideText: View {
             prose = []
         }
         func flushRows() {
-            if let matrix = RationalMatrix(rows: rows), matrix.rowCount > 1 || matrix.columnCount > 1 {
+            if rows.count > 1 || (rows.first?.count ?? 0) > 1 {
                 flushProse()
-                pieces.append(("", matrix))
+                pieces.append(("", TextMatrix(label: label, rows: rows)))
             } else {
                 prose.append(contentsOf: rowLines)
             }
-            rows = []; rowLines = []
+            rows = []; rowLines = []; label = nil
         }
         for line in text.components(separatedBy: "\n") {
-            if let row = matrixRow(line), rows.isEmpty || rows[0].count == row.count {
-                rows.append(row); rowLines.append(line)
+            if let row = matrixRow(line), rows.isEmpty || (rows[0].count == row.entries.count && row.label == nil) {
+                if rows.isEmpty { label = row.label }
+                rows.append(row.entries); rowLines.append(line)
             } else {
                 if !rows.isEmpty { flushRows() }
                 prose.append(line)
@@ -606,38 +608,76 @@ struct GuideText: View {
         var result: [Segment] = []
         var lines: [String] = []
         var code = false
-        var matrixRows: [[Rational]] = []
-        var matrixLines: [String] = []
         func flush() {
             let joined = lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
             if !joined.isEmpty { result.append(Segment(id: result.count, isCode: code, text: joined)) }
             lines = []
         }
-        func flushMatrix() {
-            defer { matrixRows = []; matrixLines = [] }
-            guard !matrixRows.isEmpty else { return }
-            if let matrix = RationalMatrix(rows: matrixRows), matrix.rowCount > 1 || matrix.columnCount > 1 {
-                result.append(Segment(id: result.count, isCode: false, text: "", matrix: matrix))
-            } else {
-                // A lone "[ 5 ]" is just text.
-                code = false
-                lines = matrixLines
-            }
-        }
         for line in text.components(separatedBy: "\n") {
-            if let row = matrixRow(line), matrixRows.isEmpty || matrixRows[0].count == row.count {
-                if matrixRows.isEmpty { flush() }
-                matrixRows.append(row)
-                matrixLines.append(line)
-                continue
-            }
-            if !matrixRows.isEmpty { flushMatrix() }
             let lineIsCode = isCode(line) || (code && line.trimmingCharacters(in: .whitespaces).isEmpty)
             if lineIsCode != code { flush(); code = lineIsCode }
             lines.append(line)
         }
-        flushMatrix()
         flush()
         return result
+    }
+}
+
+/// A matrix as plain text entries, kept as written -- numbers, fractions
+/// or symbols like h -- with an optional name ("A =") in front.
+struct TextMatrix: Equatable {
+    var label: String?
+    var rows: [[String]]
+}
+
+/// Draws a `TextMatrix` with brackets, columns lined up.
+struct TextMatrixView: View {
+    let matrix: TextMatrix
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if let label = matrix.label {
+                Text(label + " =").font(.system(size: 15, design: .serif)).foregroundStyle(GRASPColor.textPrimary)
+            }
+            HStack(spacing: 6) {
+                bracket(open: true)
+                Grid(horizontalSpacing: 14, verticalSpacing: 6) {
+                    ForEach(Array(matrix.rows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            ForEach(Array(row.enumerated()), id: \.offset) { _, entry in
+                                Text(entry)
+                                    .font(.system(size: 15, design: .serif)).monospacedDigit()
+                                    .foregroundStyle(GRASPColor.textPrimary)
+                                    .frame(minWidth: 18)
+                            }
+                        }
+                    }
+                }
+                bracket(open: false)
+            }
+            .fixedSize()
+        }
+        .fixedSize()
+    }
+
+    private func bracket(open: Bool) -> some View {
+        BracketShape(open: open)
+            .stroke(GRASPColor.textSecondary, lineWidth: 1.4)
+            .frame(width: 7)
+    }
+}
+
+private nonisolated struct BracketShape: Shape {
+    let open: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let near = open ? rect.maxX : rect.minX
+        let far = open ? rect.minX : rect.maxX
+        path.move(to: CGPoint(x: near, y: rect.minY))
+        path.addLine(to: CGPoint(x: far, y: rect.minY))
+        path.addLine(to: CGPoint(x: far, y: rect.maxY))
+        path.addLine(to: CGPoint(x: near, y: rect.maxY))
+        return path
     }
 }

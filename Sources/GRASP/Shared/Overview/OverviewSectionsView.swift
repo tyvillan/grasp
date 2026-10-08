@@ -231,7 +231,7 @@ private struct LessonSectionView: View {
                 // A matrix written in plain notation is drawn as one.
                 ForEach(Array(GuideText.splitMatrices(text).enumerated()), id: \.offset) { _, piece in
                     if let matrix = piece.matrix {
-                        ScrollView(.horizontal, showsIndicators: false) { MatrixGrid(matrix: matrix, compact: true) }
+                        TextMatrixView(matrix: matrix)
                     } else {
                         Text(overviewInline(piece.text))
                             .graspType(.prose)
