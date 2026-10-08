@@ -787,7 +787,7 @@ public struct OllamaGenerator: CardGenerator {
         try await transport.complete(prompt: Self.plainNotationRule + prompt, json: false, maxTokens: maxTokens)
     }
 
-    private func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
+    func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
         try await transport.complete(prompt: Self.plainNotationRule + prompt, json: json, maxTokens: maxTokens)
     }
 

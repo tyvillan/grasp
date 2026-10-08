@@ -44,6 +44,11 @@ struct ExamGuideContent: View {
                 }
             }
         }
+        // Write the skills' explanations in the background, so "What is this?" is instant.
+        .task(id: page.exam.id) {
+            store.prefetchSkillExplanations(skills: page.parts.flatMap(\.skills),
+                                            terms: page.parts.flatMap(\.terms), subject: page.exam.title)
+        }
     }
 
     private func partView(_ part: StudyGuideActions.PagePart, showsSkills: Bool) -> some View {

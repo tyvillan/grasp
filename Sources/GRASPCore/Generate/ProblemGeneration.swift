@@ -194,12 +194,39 @@ extension OllamaGenerator {
         A student is checking whether they are ready for an exam in "\(subject)". The study guide says they should be able to:
         "\(skill)"
 
-        Explain in two or three short, plain sentences what that means: define the idea in basic terms, then say what \
+        Explain in two short, plain sentences what that means: define the idea in basic terms, then say what \
         they would be asked to do on the exam. No headings, no bullet points, no preamble.\(context.isEmpty ? "" : "\n\nMaterial from the guide, for context:\n\(context.prefix(1500))")
         """
-        guard let reply = try? await chatText(prompt: prompt, maxTokens: 400) else { return nil }
+        guard let reply = try? await chatText(prompt: prompt, maxTokens: 220) else { return nil }
         let text = PlainMath.clean(reply.trimmingCharacters(in: .whitespacesAndNewlines))
         return text.isEmpty || text.count > 900 ? nil : text
+    }
+
+    /// Explains a handful of skills in one request. Anything the reply
+    /// doesn't cover is left for the caller to ask about one at a time.
+    public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
+        guard !skills.isEmpty else { return [:] }
+        let list = skills.enumerated().map { "\($0 + 1). \($1)" }.joined(separator: "\n")
+        let prompt = """
+        A student is checking whether they are ready for an exam in "\(subject)". The study guide says they should be able to do each of these:
+        \(list)
+
+        For each one, write two short, plain sentences: define the idea in basic terms, then say what they would be asked \
+        to do on the exam. Reply with JSON only: {"meanings": ["...", "..."]} with exactly \(skills.count) strings, in the \
+        same order as the list.\(context.isEmpty ? "" : "\n\nMaterial from the guide, for context:\n\(context.prefix(1200))")
+        """
+        guard let reply = try? await chat(prompt: prompt, maxTokens: 260 * skills.count),
+              let data = Self.salvageJSON(reply).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let meanings = object["meanings"] as? [Any], meanings.count == skills.count
+        else { return [:] }
+        var result: [String: String] = [:]
+        for (skill, meaning) in zip(skills, meanings) {
+            guard let text = (meaning as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty, text.count <= 900 else { continue }
+            result[skill] = PlainMath.clean(text)
+        }
+        return result
     }
 
     /// Answers a multiple-choice problem cold, without being told which

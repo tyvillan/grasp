@@ -124,6 +124,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.explainSkill(skill, subject: subject, context: context)
     }
 
+    public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
+        await pipeline.explainSkills(skills, subject: subject, context: context)
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -420,6 +424,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { $0 != nil },
                   cloud: { await cloud.explainSkill(skill, subject: subject, context: context) },
                   local: { await local.explainSkill(skill, subject: subject, context: context) })
+    }
+
+    public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
+        await run(keep: { !$0.isEmpty },
+                  cloud: { await cloud.explainSkills(skills, subject: subject, context: context) },
+                  local: { await local.explainSkills(skills, subject: subject, context: context) })
     }
 
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {

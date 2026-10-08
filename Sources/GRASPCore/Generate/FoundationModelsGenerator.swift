@@ -52,6 +52,11 @@ public struct FoundationModelsGenerator: CardGenerator {
         return await pipeline.explainSkill(skill, subject: subject, context: context)
     }
 
+    public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
+        guard await isAvailable else { return [:] }
+        return await pipeline.explainSkills(skills, subject: subject, context: context)
+    }
+
     public var isAvailable: Bool {
         get async {
             #if canImport(FoundationModels)

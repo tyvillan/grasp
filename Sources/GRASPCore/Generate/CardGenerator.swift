@@ -225,6 +225,11 @@ public protocol CardGenerator: Sendable {
     /// generator can't say.
     func explainSkill(_ skill: String, subject: String, context: String) async -> String?
 
+    /// Several skills explained in one request, which is much faster than
+    /// one request each. Keyed by the skill text; skills it couldn't
+    /// explain are left out.
+    func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String]
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -241,6 +246,14 @@ public extension CardGenerator {
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
 
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
+
+    func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
+        var result: [String: String] = [:]
+        for skill in skills {
+            if let text = await explainSkill(skill, subject: subject, context: context) { result[skill] = text }
+        }
+        return result
+    }
 
     /// A generator that can't write code questions says so with nothing.
     func generateCodeQuestions(

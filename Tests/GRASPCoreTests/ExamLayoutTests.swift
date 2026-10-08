@@ -60,3 +60,28 @@ struct SkillDefinitionTests {
         #expect(ExamLayout.definition(for: "loops", terms: terms) == nil)
     }
 }
+
+private struct CannedTransport: ChatTransport {
+    let reply: String
+    func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String { reply }
+}
+
+@Suite("Batched skill explanations")
+struct BatchedExplanationTests {
+    @Test("one reply explains every skill, in order, with LaTeX cleaned")
+    func batch() async {
+        let generator = OllamaGenerator(
+            transport: CannedTransport(reply: #"{"meanings": ["A loop repeats code.", "Passing by reference lets $x_1$ change."]}"#),
+            model: "m", wordBudget: 600)
+        let result = await generator.explainSkills(["loops", "references"], subject: "COP", context: "")
+        #expect(result["loops"] == "A loop repeats code.")
+        #expect(result["references"] == "Passing by reference lets x₁ change.")
+    }
+
+    @Test("a reply with the wrong number of answers is ignored, not misaligned")
+    func wrongCount() async {
+        let generator = OllamaGenerator(transport: CannedTransport(reply: #"{"meanings": ["only one"]}"#),
+                                        model: "m", wordBudget: 600)
+        #expect(await generator.explainSkills(["a", "b"], subject: "s", context: "").isEmpty)
+    }
+}

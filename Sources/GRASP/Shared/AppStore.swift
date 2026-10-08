@@ -882,6 +882,10 @@ final class AppStore {
 
     /// What the last code-question run did, for the bank sheet to report.
     var lastCodeQuestionRun: CodeQuestionRunResult?
+
+    /// The batch writing a guide's skill explanations, and the skills still waiting on it.
+    @ObservationIgnored var skillPrefetch: Task<Void, Never>?
+    @ObservationIgnored var skillPrefetchPending: Set<String> = []
     struct CodeQuestionRunResult: Equatable {
         var saved: Int
         var rejected: Int

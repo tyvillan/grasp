@@ -260,6 +260,8 @@ extension AppStore {
     /// whichever model is set up (and saved). nil when none is available.
     func skillExplanation(guideId: String, skillId: String, skill: String, subject: String,
                           context: String) async -> String? {
+        // A batch already writing it is faster than starting another request.
+        if skillPrefetchPending.contains(skillId) { await skillPrefetch?.value }
         if let saved = savedSkillExplanation(guideId: guideId, skillId: skillId) { return saved }
         let generator = await CardGenerators.select()
         guard await generator.isAvailable,
@@ -272,5 +274,42 @@ extension AppStore {
                 """, arguments: [guideId, skillId, text, model, Date()])
         }
         return text
+    }
+
+    /// Writes the explanations for a guide's skills ahead of time, several
+    /// per request, so a tap on "What is this?" finds them already there.
+    /// Skills the guide defines itself, or that are saved, are skipped.
+    func prefetchSkillExplanations(skills: [StudyGuideActions.Skill], terms: [StudyGuideDocument.Term],
+                                   subject: String) {
+        guard skillPrefetch == nil else { return }
+        let todo = skills.filter {
+            ExamLayout.definition(for: $0.text, terms: terms) == nil
+                && savedSkillExplanation(guideId: $0.guideId, skillId: $0.skillId) == nil
+        }
+        guard !todo.isEmpty else { return }
+        skillPrefetchPending = Set(todo.map(\.skillId))
+        let context = terms.prefix(12).map { "\($0.term): \($0.definition)" }.joined(separator: "\n")
+        let database = database
+        let model = generatorStatus
+        skillPrefetch = Task { [weak self] in
+            defer { self?.skillPrefetchPending = []; self?.skillPrefetch = nil }
+            let generator = await CardGenerators.select()
+            guard await generator.isAvailable else { return }
+            for start in stride(from: 0, to: todo.count, by: 8) {
+                if Task.isCancelled { return }
+                let chunk = Array(todo[start..<min(start + 8, todo.count)])
+                let texts = await generator.explainSkills(chunk.map(\.text), subject: subject, context: context)
+                try? await database.queue.write { db in
+                    for skill in chunk {
+                        guard let text = texts[skill.text] else { continue }
+                        try db.execute(sql: """
+                            INSERT OR REPLACE INTO skillExplanation (guideId, skillId, body, model, createdAt)
+                            VALUES (?, ?, ?, ?, ?)
+                            """, arguments: [skill.guideId, skill.skillId, text, model, Date()])
+                    }
+                }
+                self?.skillPrefetchPending.subtract(chunk.map(\.skillId))
+            }
+        }
     }
 }
