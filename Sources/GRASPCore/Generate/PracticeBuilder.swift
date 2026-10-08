@@ -29,7 +29,10 @@ public enum ProblemBuilder {
 
     static func check(_ draft: GeneratedProblem, subject: ProblemSubject, using generator: any CardGenerator,
                       executor: (any CodeExecuting)?) async throws -> ProblemQuestion {
-        let prompt = draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = PlainMath.clean(draft.prompt).trimmingCharacters(in: .whitespacesAndNewlines)
+        var draft = draft
+        draft.choices = PlainMath.clean(draft.choices)
+        draft.explanation = draft.explanation.map(PlainMath.clean)
         // The problem has to say what to find: some words outside the
         // matrices and equations, not just a bare matrix.
         let words = prompt.components(separatedBy: "\n")

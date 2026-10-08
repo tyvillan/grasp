@@ -78,8 +78,10 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
     }
 
     public static func decode(_ json: String?) -> CodeQuestion? {
-        guard let data = json?.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(CodeQuestion.self, from: data)
+        guard let data = json?.data(using: .utf8),
+              var question = try? JSONDecoder().decode(CodeQuestion.self, from: data) else { return nil }
+        question.explanation = question.explanation.map(PlainMath.clean)
+        return question
     }
 
     // MARK: Blanks

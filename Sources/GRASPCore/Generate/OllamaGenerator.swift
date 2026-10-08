@@ -105,7 +105,7 @@ public struct OllamaGenerator: CardGenerator {
               let decoded = Self.decodeList(RefinedPairDTO.self, from: content),
               decoded.count == candidates.count
         else { return [] }
-        return decoded.map { GeneratedCard(front: $0.front, back: $0.back) }
+        return decoded.map { GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back)) }
     }
 
     public func generateAdditional(
@@ -118,7 +118,9 @@ public struct OllamaGenerator: CardGenerator {
         guard let content = try? await chat(prompt: prompt),
               let decoded = Self.decodeList(RefinedPairDTO.self, from: content)
         else { return [] }
-        return Array(decoded.prefix(maxCount)).map { GeneratedCard(front: $0.front, back: $0.back) }
+        return Array(decoded.prefix(maxCount)).map {
+            GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back))
+        }
     }
 
     public func generateTestQuestions(
@@ -129,7 +131,9 @@ public struct OllamaGenerator: CardGenerator {
         guard let content = try? await chat(prompt: prompt),
               let decoded = Self.decodeList(TestQuestionDTO.self, from: content)
         else { return [] }
-        return Array(decoded.prefix(maxCount)).map { GeneratedTestQuestion(prompt: $0.prompt, correctAnswer: $0.answer) }
+        return Array(decoded.prefix(maxCount)).map {
+            GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.answer))
+        }
     }
 
     public func validateContext(
@@ -780,12 +784,22 @@ public struct OllamaGenerator: CardGenerator {
     /// past what was asked for. Each cap is about twice a normal answer.
     /// Plain-text (not JSON) completion, for what JSON mode breaks: code.
     func chatText(prompt: String, maxTokens: Int?) async throws -> String {
-        try await transport.complete(prompt: prompt, json: false, maxTokens: maxTokens)
+        try await transport.complete(prompt: Self.plainNotationRule + prompt, json: false, maxTokens: maxTokens)
     }
 
     private func chat(prompt: String, json: Bool = true, maxTokens: Int? = nil) async throws -> String {
-        try await transport.complete(prompt: prompt, json: json, maxTokens: maxTokens)
+        try await transport.complete(prompt: Self.plainNotationRule + prompt, json: json, maxTokens: maxTokens)
     }
+
+    /// GRASP shows text as it is: it can't typeset LaTeX, so a `$x_3$` or a
+    /// `\frac` reaches the student as raw symbols. Said first, so it
+    /// outweighs the habit; `PlainMath` cleans what slips through.
+    static let plainNotationRule = """
+    Write all mathematics in plain text, never LaTeX: no dollar signs around math and no backslash commands such as \\frac, \\times or \\begin. \
+    Write subscripts as x_3, powers as x^2, square roots as sqrt(x), and fractions as (a)/(b). Keep dollar signs for money only.
+
+
+    """
 
     // MARK: - Salvage
 

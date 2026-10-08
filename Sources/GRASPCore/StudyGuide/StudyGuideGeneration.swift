@@ -116,7 +116,7 @@ extension OllamaGenerator {
 
         func clean(_ text: String?) -> String? {
             guard let text else { return nil }
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = PlainMath.clean(text).trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
         func cleaned(_ list: FlexibleList?) -> [String] { (list?.items ?? []).compactMap(clean) }

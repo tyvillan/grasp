@@ -78,8 +78,13 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
     }
 
     public static func decode(_ json: String?) -> ProblemQuestion? {
-        guard let data = json?.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(ProblemQuestion.self, from: data)
+        guard let data = json?.data(using: .utf8),
+              var problem = try? JSONDecoder().decode(ProblemQuestion.self, from: data) else { return nil }
+        // Problems saved before the model was told to avoid LaTeX.
+        problem.prompt = PlainMath.clean(problem.prompt)
+        problem.choices = problem.choices.map(PlainMath.clean)
+        problem.explanation = problem.explanation.map(PlainMath.clean)
+        return problem
     }
 
     /// The right answer in words, for the results screen.

@@ -370,6 +370,8 @@ public enum OverviewCoding {
     /// exactly like one that was never written.
     public static func decode(_ json: String) -> OverviewDocument? {
         guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(OverviewDocument.self, from: data)
+        // Plain notation on the way out, so lessons written before the model
+        // was told to avoid LaTeX read cleanly too, wherever they're shown.
+        return (try? JSONDecoder().decode(OverviewDocument.self, from: data))?.plainNotation()
     }
 }
