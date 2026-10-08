@@ -29,7 +29,7 @@ public final class GRASPDatabase: Sendable {
         config.busyMode = .timeout(5)
         config.foreignKeysEnabled = true
         queue = try DatabaseQueue(path: dbURL.path, configuration: config)
-        try Schema.migrator().migrate(queue)
+        try Schema.migrateRemovingOrphans(queue)
     }
 
     /// `~/Library/Application Support/GRASP` -- shared by every profile;

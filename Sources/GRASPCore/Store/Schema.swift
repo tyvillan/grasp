@@ -453,4 +453,24 @@ enum Schema {
 
         return migrator
     }
+
+    /// Migrates, first dropping rows whose parent is gone. A migration is
+    /// followed by a foreign-key check of the whole database, so one orphan
+    /// -- say a skill rating synced in for a study guide this device never
+    /// had -- would otherwise make every pending migration fail and leave
+    /// the library unopenable.
+    static func migrateRemovingOrphans(_ queue: DatabaseQueue) throws {
+        let migrator = migrator()
+        if try queue.read({ try migrator.hasCompletedMigrations($0) }) == false {
+            try queue.write { db in
+                for violation in try Row.fetchAll(db, sql: "PRAGMA foreign_key_check") {
+                    let table: String = violation["table"]
+                    if let rowid: Int64 = violation["rowid"] {
+                        try db.execute(sql: "DELETE FROM \"\(table)\" WHERE rowid = ?", arguments: [rowid])
+                    }
+                }
+            }
+        }
+        try migrator.migrate(queue)
+    }
 }

@@ -160,3 +160,25 @@ struct StudyModesTests {
         #expect(try await db.queue.read { try TestAttempt.fetchCount($0) } == 0)
     }
 }
+
+@Suite("Migration with orphans")
+struct MigrationOrphanTests {
+    @Test("a row whose parent is gone doesn't stop a pending migration")
+    func orphanDoesNotBlockMigration() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("orph-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("l.sqlite")
+        do { _ = try GRASPDatabase(path: url) }
+        let raw = try DatabaseQueue(path: url.path)
+        try raw.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA foreign_keys = OFF")
+            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v14_test_item_indexes'")
+            try db.execute(sql: "DROP INDEX ix_testitem_attempt")
+            try db.execute(sql: "DROP INDEX ix_testitem_card")
+            try db.execute(sql: "INSERT INTO skillRating (guideId, skillId, rating, ratedAt) VALUES ('gone', 's', 'canDoCold', datetime('now'))")
+        }
+        let reopened = try GRASPDatabase(path: url)
+        let n = try reopened.queue.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM skillRating") }
+        #expect(n == 0)
+    }
+}
