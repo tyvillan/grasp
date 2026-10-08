@@ -315,4 +315,41 @@ extension AppStore {
             }
         }
     }
+
+    // MARK: - Rewritten parts
+
+    func savedPartRewrite(guideId: String, partIndex: Int) -> [RewrittenBlock]? {
+        let json: String? = (try? database.queue.read { db in
+            try String.fetchOne(db, sql: "SELECT bodyJSON FROM partRewrite WHERE guideId = ? AND partIndex = ?",
+                                arguments: [guideId, partIndex])
+        }) ?? nil
+        return json.flatMap { try? JSONDecoder().decode([RewrittenBlock].self, from: Data($0.utf8)) }
+    }
+
+    /// The saved rewrite of a part's notes, else one written now and saved.
+    func partRewrite(guideId: String, partIndex: Int, title: String, subject: String,
+                     text: String) async -> [RewrittenBlock]? {
+        if let saved = savedPartRewrite(guideId: guideId, partIndex: partIndex) { return saved }
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable else { return nil }
+        let blocks = await generator.rewritePart(title: title, subject: subject, text: text)
+        guard !blocks.isEmpty, let data = try? JSONEncoder().encode(blocks),
+              let json = String(data: data, encoding: .utf8) else { return nil }
+        let model = generatorStatus
+        try? await database.queue.write { db in
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO partRewrite (guideId, partIndex, bodyJSON, model, createdAt)
+                VALUES (?, ?, ?, ?, ?)
+                """, arguments: [guideId, partIndex, json, model, Date()])
+        }
+        return blocks
+    }
+
+    /// Drops a saved rewrite so the next open writes a fresh one.
+    func clearPartRewrite(guideId: String, partIndex: Int) {
+        try? database.queue.write { db in
+            try db.execute(sql: "DELETE FROM partRewrite WHERE guideId = ? AND partIndex = ?",
+                           arguments: [guideId, partIndex])
+        }
+    }
 }

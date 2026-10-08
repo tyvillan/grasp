@@ -230,6 +230,10 @@ public protocol CardGenerator: Sendable {
     /// explain are left out.
     func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String]
 
+    /// A study-guide part's raw notes rewritten as titled, explained blocks.
+    /// Empty when this generator can't, or the reply was unusable.
+    func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock]
+
     /// Roughly how many words of note text this generator can be handed in
     /// one call and still answer well -- what `OverviewChunker` sizes its
     /// chunks against. Words rather than tokens because nothing in this
@@ -246,6 +250,8 @@ public extension CardGenerator {
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
 
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
+
+    func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] { [] }
 
     func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
         var result: [String: String] = [:]

@@ -85,3 +85,24 @@ struct BatchedExplanationTests {
         #expect(await generator.explainSkills(["a", "b"], subject: "s", context: "").isEmpty)
     }
 }
+
+@Suite("Part rewrite")
+struct PartRewriteTests {
+    @Test("blocks keep their code, drop empty ones, and clean LaTeX in prose")
+    func parses() async {
+        let reply = ##"{"blocks": [{"heading": "Libraries", "explanation": "Lets you use $x_1$ things.", "code": "#include<iostream>\nusing namespace std;"}, {"heading": "", "explanation": "no heading"}, {"heading": "Types", "explanation": "Basic types.", "code": ""}]}"##
+        let generator = OllamaGenerator(transport: CannedTransport(reply: reply), model: "m", wordBudget: 600)
+        let blocks = await generator.rewritePart(title: "Syntax", subject: "COP",
+                                                 text: String(repeating: "some notes here ", count: 6))
+        #expect(blocks.count == 2)
+        #expect(blocks[0].code == "#include<iostream>\nusing namespace std;")
+        #expect(blocks[0].explanation == "Lets you use x₁ things.")
+        #expect(blocks[1].code == nil)
+    }
+
+    @Test("too little text writes nothing")
+    func tooShort() async {
+        let generator = OllamaGenerator(transport: CannedTransport(reply: "{}"), model: "m", wordBudget: 600)
+        #expect(await generator.rewritePart(title: "t", subject: "s", text: "short").isEmpty)
+    }
+}

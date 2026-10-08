@@ -320,12 +320,8 @@ private struct PartSection: View {
                     BulletList(items: part.remember)
                 }
             }
-            ForEach(part.notes, id: \.self) { note in
-                Text(note)
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            if !part.notes.isEmpty {
+                PartNotes(part: part, subject: subject)
             }
             // Problems to try first; then the guide's illustrations, which
             // ask nothing, so they don't read as questions missing answers.
@@ -415,6 +411,109 @@ private struct PartSection: View {
             .graspType(.meta)
             .fixedSize()
             .help("Choose which lecture decks this part covers")
+        }
+    }
+}
+
+/// A part's notes, rewritten into titled, explained blocks when they are
+/// long enough to need it (a handout's run of code lines and comments),
+/// with the original one tap away.
+private struct PartNotes: View {
+    @Environment(AppStore.self) private var store
+    let part: StudyGuideActions.PagePart
+    let subject: String
+
+    private enum Phase { case idle, writing, ready([RewrittenBlock]), failed }
+    @State private var phase: Phase = .idle
+    @State private var showsOriginal = false
+
+    private var text: String { part.notes.joined(separator: "\n") }
+    private var needsRewrite: Bool { text.count >= 160 && part.sources.first != nil }
+
+    var body: some View {
+        Group {
+            if !needsRewrite {
+                original
+            } else {
+                switch phase {
+                case .idle, .writing:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Rewriting these notes so they're easier to read…")
+                            .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                    }
+                case .ready(let blocks):
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(block.heading).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
+                                Text(block.explanation)
+                                    .graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let code = block.code {
+                                    Text(code)
+                                        .font(.system(size: 12.5, design: .monospaced))
+                                        .foregroundStyle(GRASPColor.textPrimary)
+                                        .textSelection(.enabled)
+                                        .padding(10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(GRASPColor.canvas, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        HStack(spacing: 14) {
+                            Text("Rewritten by AI").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                            Button(showsOriginal ? "Hide original" : "Show original") { showsOriginal.toggle() }
+                            Button("Rewrite again") { rewrite(fresh: true) }
+                        }
+                        .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(GRASPColor.accent)
+                        if showsOriginal { original }
+                    }
+                case .failed:
+                    VStack(alignment: .leading, spacing: 8) {
+                        original
+                        HStack(spacing: 10) {
+                            Text(store.isGeneratorAvailable
+                                 ? "Couldn't rewrite these just now."
+                                 : "An AI model could make these easier to read. Settings → AI has the setup.")
+                                .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                            if store.isGeneratorAvailable {
+                                Button("Try Again") { rewrite(fresh: true) }.buttonStyle(GRASPQuietButton())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .task { if needsRewrite, case .idle = phase { rewrite(fresh: false) } }
+    }
+
+    private var original: some View {
+        GuideText(text: text, style: .body, color: GRASPColor.textSecondary)
+    }
+
+    /// Reads the saved rewrite or writes one, giving up after two minutes.
+    private func rewrite(fresh: Bool) {
+        guard let source = part.sources.first else { return }
+        phase = .writing
+        let (store, title, subject, text) = (self.store, part.title, self.subject, self.text)
+        Task {
+            if fresh { store.clearPartRewrite(guideId: source.guideId, partIndex: source.partIndex) }
+            let blocks: [RewrittenBlock]? = await withTaskGroup(of: [RewrittenBlock]?.self) { group in
+                group.addTask {
+                    await store.partRewrite(guideId: source.guideId, partIndex: source.partIndex,
+                                            title: title, subject: subject, text: text)
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 120_000_000_000)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
+            }
+            phase = blocks.map { .ready($0) } ?? .failed
         }
     }
 }

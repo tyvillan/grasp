@@ -57,6 +57,11 @@ public struct FoundationModelsGenerator: CardGenerator {
         return await pipeline.explainSkills(skills, subject: subject, context: context)
     }
 
+    public func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] {
+        guard await isAvailable else { return [] }
+        return await pipeline.rewritePart(title: title, subject: subject, text: text)
+    }
+
     public var isAvailable: Bool {
         get async {
             #if canImport(FoundationModels)

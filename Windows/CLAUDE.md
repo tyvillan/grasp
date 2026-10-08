@@ -299,3 +299,4 @@ Follow-up (2026-10-07): the code-question bank became **practice problems**. `te
 - Schema: migration `v14_test_item_indexes` (indexes on `testItem.attemptId`/`cardId`); `Dashboard.decks` no longer joins `review` per row.
 - `GuideText.splitMatrices` draws plain-notation matrices (`[ 1  2 ]` lines) as a grid; port if the Windows UI shows study guides or overviews.
 - Study-guide skills: `ExamLayout` (core) buckets skills by topic and finds a guide definition for a skill; `CardGenerator.explainSkill` writes a short explanation on request; migration `v15_skill_explanation` (local-only table `skillExplanation`, not synced) caches it.
+- Study-guide parts: `CardGenerator.rewritePart` rewrites a part's raw notes into titled blocks; cached in local-only table `partRewrite` (migration v16).

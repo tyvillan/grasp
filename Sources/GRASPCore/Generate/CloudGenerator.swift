@@ -128,6 +128,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.explainSkills(skills, subject: subject, context: context)
     }
 
+    public func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] {
+        await pipeline.rewritePart(title: title, subject: subject, text: text)
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -430,6 +434,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { !$0.isEmpty },
                   cloud: { await cloud.explainSkills(skills, subject: subject, context: context) },
                   local: { await local.explainSkills(skills, subject: subject, context: context) })
+    }
+
+    public func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] {
+        await run(keep: { !$0.isEmpty },
+                  cloud: { await cloud.rewritePart(title: title, subject: subject, text: text) },
+                  local: { await local.rewritePart(title: title, subject: subject, text: text) })
     }
 
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {

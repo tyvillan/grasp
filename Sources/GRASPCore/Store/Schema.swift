@@ -465,6 +465,19 @@ enum Schema {
             }
         }
 
+        // A study-guide part's notes rewritten as readable blocks, kept per
+        // device so it isn't written twice (it can always be written again).
+        migrator.registerMigration("v16_part_rewrite") { db in
+            try db.create(table: "partRewrite") { t in
+                t.column("guideId", .text).notNull()
+                t.column("partIndex", .integer).notNull()
+                t.column("bodyJSON", .text).notNull()
+                t.column("model", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["guideId", "partIndex"])
+            }
+        }
+
         return migrator
     }
 
