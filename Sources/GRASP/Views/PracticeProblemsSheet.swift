@@ -95,7 +95,13 @@ struct PracticeProblemsSheet: View {
                 .help("Delete this problem")
             }
             if !expanded.contains(record.id) {
-                Text(record.promptText).font(.callout).lineLimit(2)
+                // A problem's matrix is part of the question, so it is
+                // shown whole; only the answer waits behind "Show".
+                if let problem = record.problem {
+                    GuideText(text: problem.prompt, style: .body, color: GRASPColor.textPrimary)
+                } else {
+                    Text(record.promptText).font(.callout).lineLimit(3)
+                }
             } else if let question = record.question {
                 Text(question.prompt).font(.callout)
                 Text(question.code)
