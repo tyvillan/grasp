@@ -522,8 +522,15 @@ private struct SkillRow: View {
                         .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
                 }
             case .unavailable:
-                Text("No AI model is set up to explain this. Settings → AI has the setup.")
-                    .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.isGeneratorAvailable
+                         ? "That took too long or failed. The model may be busy or slow."
+                         : "No AI model is set up to explain this. Settings → AI has the setup.")
+                        .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                    if store.isGeneratorAvailable {
+                        Button("Try Again") { generate() }.buttonStyle(GRASPQuietButton())
+                    }
+                }
             }
         }
         .padding(10)
@@ -538,15 +545,30 @@ private struct SkillRow: View {
             meaning = .found(term.term + ": " + term.definition, fromGuide: true)
             return
         }
+        generate()
+    }
+
+    /// Asks the model, giving up after a minute and a half so a stuck
+    /// model shows a message and a retry instead of spinning for ever.
+    private func generate() {
         meaning = .loading
         let context = terms.prefix(12).map { "\($0.term): \($0.definition)" }.joined(separator: "\n")
+        let (store, skill, subject) = (self.store, self.skill, self.subject)
         Task {
-            if let text = await store.skillExplanation(guideId: skill.guideId, skillId: skill.skillId,
-                                                       skill: skill.text, subject: subject, context: context) {
-                meaning = .found(text, fromGuide: false)
-            } else {
-                meaning = .unavailable
+            let text: String? = await withTaskGroup(of: String?.self) { group in
+                group.addTask {
+                    await store.skillExplanation(guideId: skill.guideId, skillId: skill.skillId,
+                                                 skill: skill.text, subject: subject, context: context)
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 90_000_000_000)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
             }
+            meaning = text.map { .found($0, fromGuide: false) } ?? .unavailable
         }
     }
 }

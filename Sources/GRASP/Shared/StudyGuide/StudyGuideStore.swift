@@ -260,8 +260,9 @@ extension AppStore {
     /// whichever model is set up (and saved). nil when none is available.
     func skillExplanation(guideId: String, skillId: String, skill: String, subject: String,
                           context: String) async -> String? {
-        // A batch already writing it is faster than starting another request.
-        if skillPrefetchPending.contains(skillId) { await skillPrefetch?.value }
+        // Someone is waiting on this one: stop the background batch rather
+        // than queue behind it.
+        if skillPrefetchPending.contains(skillId) { skillPrefetch?.cancel() }
         if let saved = savedSkillExplanation(guideId: guideId, skillId: skillId) { return saved }
         let generator = await CardGenerators.select()
         guard await generator.isAvailable,
@@ -281,7 +282,9 @@ extension AppStore {
     /// Skills the guide defines itself, or that are saved, are skipped.
     func prefetchSkillExplanations(skills: [StudyGuideActions.Skill], terms: [StudyGuideDocument.Term],
                                    subject: String) {
-        guard skillPrefetch == nil else { return }
+        // Only worth it with a cloud model: a local one writes slowly, and a
+        // batch would hold it up when a tap needs one skill now.
+        guard skillPrefetch == nil, aiMode.usesCloud, hasCloudKey else { return }
         let todo = skills.filter {
             ExamLayout.definition(for: $0.text, terms: terms) == nil
                 && savedSkillExplanation(guideId: $0.guideId, skillId: $0.skillId) == nil
