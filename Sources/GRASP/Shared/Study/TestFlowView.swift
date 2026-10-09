@@ -53,12 +53,12 @@ struct TestSetupSheet: View {
     @State private var allowMultipleChoice = true
     @State private var allowWritten = true
     @State private var allowTrueFalse = true
-    @State private var shuffle = true
-    @State private var excludeMastered = false
-    @State private var weakSpotsOnly = false
+    // Fixed defaults: tests shuffle, and ask about every card.
+    private let shuffle = true
+    private let excludeMastered = false
+    private let weakSpotsOnly = false
     @State private var history: [Study.TestHistoryEntry] = []
     @State private var mostMissed: [(front: String, misses: Int)] = []
-    @State private var weakCount = 0
     /// True while `startTest` is in flight -- worth surfacing explicitly
     /// since, with AI test questions on, this can take a few seconds
     /// (a real network round trip to a local model) rather than the
@@ -104,12 +104,6 @@ struct TestSetupSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Toggle("Shuffle order", isOn: $shuffle)
-            Toggle("Only cards I haven't marked as known", isOn: $excludeMastered)
-            Toggle(weakCount > 0 ? "Focus on my weak spots (\(weakCount) cards)" : "Focus on my weak spots",
-                   isOn: $weakSpotsOnly)
-                .disabled(weakCount == 0)
-                .help("Cards you missed the last time a test asked about them, or lapsed twice in flashcards")
             historyBlock
             Toggle("Include AI-written questions", isOn: Binding(
                 get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
@@ -127,11 +121,7 @@ struct TestSetupSheet: View {
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                 Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
             } else if noQuestions {
-                Text(weakSpotsOnly
-                     ? "No weak spots found with these settings. Turn off \"Focus on my weak spots\" to test on every card."
-                     : excludeMastered
-                     ? "No cards match -- every card here is marked as known. Turn off \"Only cards I haven't marked as known\" to test on them anyway."
-                     : "No cards match these settings, so there's nothing to test.")
+                Text("No cards match these settings, so there's nothing to test.")
                     .font(.caption).foregroundStyle(.red)
             }
 
@@ -198,7 +188,6 @@ struct TestSetupSheet: View {
         .task {
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
-            weakCount = store.weakSpotCount(forDecks: deckIds)
         }
     }
 
