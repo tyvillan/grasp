@@ -97,6 +97,7 @@ struct PracticeProblemsSheet: View {
         .macSheetFrame(width: 640, height: 600)
         .background(GRASPColor.canvas)
         .task {
+            store.addMissingChoicesInBackground()
             load()
             if questions.isEmpty { tab = .write }
         }

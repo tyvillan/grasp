@@ -123,20 +123,114 @@ extension Study {
 
     private static func insertAttempt(questions: [LearnEngine.RoundQuestion], deckIds: [String],
                                       db: Database) throws -> String {
-        let attempt = TestAttempt(deckId: deckIds.count == 1 ? deckIds.first : nil, configJSON: "{}", startedAt: Date())
+        let attempt = TestAttempt(deckId: deckIds.count == 1 ? deckIds.first : nil,
+                                  configJSON: AttemptConfig(deckIds: deckIds).encoded(), startedAt: Date())
         try attempt.insert(db)
         for (index, question) in questions.enumerated() {
+            // A true/false item keeps its statement where a choice list would
+            // go, so an unfinished test can be picked up again.
+            let options = question.type == .trueFalse ? question.statement.map { [$0] } : question.choices
             try TestItem(
                 id: question.id + "-" + attempt.id, attemptId: attempt.id, cardId: question.cardId,
                 ordinal: index,
                 questionType: question.code != nil ? "code" : (question.problem != nil ? "problem" : question.type.rawValue),
                 promptText: question.prompt,
-                choicesJSON: question.choices.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
+                choicesJSON: options.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
                 correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil,
                 payloadJSON: question.code?.encoded() ?? question.problem?.encoded()
             ).insert(db)
         }
         return attempt.id
+    }
+
+    // MARK: - Unfinished tests
+
+    /// What a test was started over, kept on its attempt so an unfinished
+    /// one can be found from the same decks.
+    public struct AttemptConfig: Codable, Sendable {
+        public var deckIds: [String]
+
+        func encoded() -> String {
+            (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        }
+
+        static func decode(_ json: String) -> AttemptConfig? {
+            try? JSONDecoder().decode(AttemptConfig.self, from: Data(json.utf8))
+        }
+    }
+
+    public struct UnfinishedTest: Sendable, Equatable {
+        public var attemptId: String
+        public var answered: Int
+        public var total: Int
+        public var startedAt: Date
+    }
+
+    /// The most recent test over exactly these decks that was left before
+    /// its end, if any.
+    public static func unfinishedTest(forDecks deckIds: [String], db: Database) throws -> UnfinishedTest? {
+        let wanted = Set(deckIds)
+        let attempts = try TestAttempt.filter(Column("finishedAt") == nil)
+            .order(Column("startedAt").desc).fetchAll(db)
+        for attempt in attempts {
+            guard let config = AttemptConfig.decode(attempt.configJSON), Set(config.deckIds) == wanted else { continue }
+            let items = try TestItem.filter(Column("attemptId") == attempt.id).fetchAll(db)
+            guard !items.isEmpty else { continue }
+            let answered = items.filter { $0.isCorrect != nil }.count
+            guard answered < items.count else { continue }
+            return UnfinishedTest(attemptId: attempt.id, answered: answered, total: items.count,
+                                  startedAt: attempt.startedAt)
+        }
+        return nil
+    }
+
+    /// An unfinished test rebuilt from what was saved: every question in
+    /// order, and the answers already given (in order, from the start).
+    public static func resumeTest(attemptId: String, db: Database) throws
+        -> (questions: [LearnEngine.RoundQuestion], answers: [(given: String, isCorrect: Bool)]) {
+        let items = try TestItem.filter(Column("attemptId") == attemptId).order(Column("ordinal")).fetchAll(db)
+        var questions: [LearnEngine.RoundQuestion] = []
+        var answers: [(given: String, isCorrect: Bool)] = []
+        for item in items {
+            let options = item.choicesJSON.flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) }
+            let id = item.cardId ?? item.id
+            var question: LearnEngine.RoundQuestion
+            switch item.questionType {
+            case "code":
+                let code = CodeQuestion.decode(item.payloadJSON)
+                question = LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: item.promptText,
+                                                     correctAnswer: item.correctAnswer ?? "",
+                                                     type: options == nil ? .written : .multipleChoice,
+                                                     choices: options, code: code)
+            case "problem":
+                let problem = ProblemQuestion.decode(item.payloadJSON)
+                question = LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: item.promptText,
+                                                     correctAnswer: item.correctAnswer ?? "",
+                                                     type: options == nil ? .written : .multipleChoice,
+                                                     choices: options, problem: problem)
+            default:
+                let type = LearnEngine.QuestionType(rawValue: item.questionType) ?? .written
+                let statement = type == .trueFalse ? options?.first : nil
+                question = LearnEngine.RoundQuestion(
+                    id: id, cardId: item.cardId, prompt: item.promptText, correctAnswer: item.correctAnswer ?? "",
+                    type: statement == nil && type == .trueFalse ? .written : type,
+                    choices: type == .multipleChoice ? options : nil, statement: statement,
+                    statementIsTrue: statement == nil ? nil : item.correctAnswer == "True")
+            }
+            questions.append(question)
+            // Answers are given in order, so the first unanswered one is
+            // where the test picks up.
+            if let correct = item.isCorrect, answers.count == questions.count - 1 {
+                answers.append((item.givenAnswer ?? "", correct))
+            }
+        }
+        return (questions, answers)
+    }
+
+    /// Throws away an unfinished test, answers and all.
+    public static func discardTest(attemptId: String, db: Database) throws {
+        try TestItem.filter(Column("attemptId") == attemptId).deleteAll(db)
+        _ = try TestAttempt.deleteOne(db, key: attemptId)
     }
 
     // MARK: - Test history

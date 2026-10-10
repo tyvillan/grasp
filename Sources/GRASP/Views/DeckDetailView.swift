@@ -133,6 +133,7 @@ struct DeckDetailView: View {
     /// query four times per render -- on every selection click.
     @State private var dueCount = 0
     @State private var problemCount = 0
+    @State private var unfinishedTest: Study.UnfinishedTest?
 
     /// The New Card sheet's default target: the current deck when scoped
     /// to one, or no default at all in the "All Cards" master category --
@@ -330,11 +331,14 @@ struct DeckDetailView: View {
         .sheet(item: $testPhase, onDismiss: load) { phase in
             switch phase {
             case .setup:
-                TestSetupSheet(deckIds: scopeDeckIds, deckName: deckName) { attemptId, questions, aiWarning in
+                TestSetupSheet(deckIds: scopeDeckIds, deckName: deckName, onResume: { id in
+                    testPhase = TestPhase.resuming(id, store: store)
+                }) { attemptId, questions, aiWarning in
                     testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
                 }
-            case .running(let attemptId, let questions, let aiWarning):
-                TestRunView(attemptId: attemptId, deckName: deckName, questions: questions, aiWarning: aiWarning) { graded in
+            case .running(let attemptId, let questions, let aiWarning, let answered):
+                TestRunView(attemptId: attemptId, deckName: deckName, questions: questions, aiWarning: aiWarning,
+                        answered: answered) { graded in
                     _ = try? store.finishTest(attemptId: attemptId)
                     testPhase = .results(attemptId: attemptId, graded: graded)
                 }
@@ -496,6 +500,12 @@ struct DeckDetailView: View {
             isLearning = true
         }
         .disabled(activeCount == 0)
+        if let unfinishedTest {
+            modeButton("Continue Test (\(unfinishedTest.answered)/\(unfinishedTest.total))", "play.fill", prominent: false) {
+                testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
+            }
+            .help("Pick up the test you left, at the next question")
+        }
         modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
             .disabled(activeCount == 0)
             .help("A graded quiz on this deck's cards")
@@ -1048,6 +1058,7 @@ struct DeckDetailView: View {
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
         dueCount = (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0
         problemCount = store.codeQuestionCount(inDecks: scopeDeckIds)
+        unfinishedTest = store.unfinishedTest(forDecks: scopeDeckIds)
         if let courseId {
             let allDecksInCourse = (try? store.decks(inCourse: courseId)) ?? []
             switch scope {

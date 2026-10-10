@@ -46,6 +46,18 @@ extension AppStore {
     /// Writes checked practice from these decks in the background, with
     /// the usual progress strip and Stop button. False when one is already
     /// running for this course.
+    /// Gives saved fill-in-the-blank questions their multiple-choice version
+    /// (wrong options checked by running them). Mac only; once per launch.
+    func addMissingChoicesInBackground() {
+        guard let executor = codeExecutor, !choiceUpgradeStarted else { return }
+        choiceUpgradeStarted = true
+        let database = database
+        Task.detached(priority: .utility) { [weak self] in
+            let changed = await CodeQuestionBank.addMissingChoices(database: database, using: executor)
+            if changed > 0 { await MainActor.run { self?.reload() } }
+        }
+    }
+
     @discardableResult
     func writePractice(_ request: PracticeBuilder.Request, courseId: String?) -> Bool {
         guard let executor = codeExecutor else { return false }

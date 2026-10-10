@@ -7,15 +7,29 @@ import GRASPCore
 /// dismissing and re-presenting, so the flow reads as one flow, not three.
 enum TestPhase: Identifiable {
     case setup
-    case running(attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?)
+    case running(attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?,
+                 answered: [GradedQuestion] = [])
     case results(attemptId: String, graded: [GradedQuestion])
 
     var id: String {
         switch self {
         case .setup: return "setup"
-        case .running(let attemptId, _, _): return "running-\(attemptId)"
+        case .running(let attemptId, _, _, _): return "running-\(attemptId)"
         case .results(let attemptId, _): return "results-\(attemptId)"
         }
+    }
+}
+
+extension TestPhase {
+    /// An unfinished test, ready to run from its next unanswered question.
+    @MainActor
+    static func resuming(_ attemptId: String, store: AppStore) -> TestPhase? {
+        guard let saved = store.resumeTest(attemptId: attemptId), !saved.questions.isEmpty else { return nil }
+        let answered = saved.answers.enumerated().map { index, answer in
+            GradedQuestion(question: saved.questions[index], ordinal: index,
+                           givenAnswer: answer.given, isCorrect: answer.isCorrect)
+        }
+        return .running(attemptId: attemptId, questions: saved.questions, aiWarning: nil, answered: answered)
     }
 }
 
@@ -47,7 +61,10 @@ struct TestSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
     let deckIds: [String]
     let deckName: String
+    /// Picks an unfinished test up again, by attempt id.
+    var onResume: ((String) -> Void)? = nil
     let onStart: (String, [LearnEngine.RoundQuestion], String?) -> Void
+    @State private var unfinished: Study.UnfinishedTest?
 
     @State private var questionCount = 20
     @State private var allowMultipleChoice = true
@@ -87,6 +104,28 @@ struct TestSetupSheet: View {
                     .graspType(.body)
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let unfinished, let onResume {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Unfinished test")
+                        .graspType(.eyebrow).textCase(.uppercase).foregroundStyle(GRASPColor.textTertiary)
+                    Text("\(unfinished.answered) of \(unfinished.total) answered, started "
+                         + unfinished.startedAt.formatted(.relative(presentation: .named)) + ".")
+                        .graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                    HStack(spacing: 8) {
+                        Button("Continue Test") { onResume(unfinished.attemptId) }
+                            .buttonStyle(GRASPProminentButton())
+                        Button("Discard") {
+                            store.discardTest(attemptId: unfinished.attemptId)
+                            self.unfinished = nil
+                        }
+                        .buttonStyle(GRASPQuietButton())
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GRASPColor.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             Stepper("Questions: \(questionCount)", value: $questionCount, in: 5...100, step: 5)
@@ -186,6 +225,8 @@ struct TestSetupSheet: View {
         .macSheetFrame(width: 420)
         .background(GRASPColor.canvas)
         .task {
+            store.addMissingChoicesInBackground()
+            unfinished = store.unfinishedTest(forDecks: deckIds)
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
         }
@@ -242,8 +283,12 @@ struct TestRunView: View {
     /// behind it, so silently falling back to an all-card test the way
     /// `generateAdditionalCards` does would just look broken.
     let aiWarning: String?
+    /// Answers already given, when this is an unfinished test picked up again.
+    var answered: [GradedQuestion] = []
     let onFinished: ([GradedQuestion]) -> Void
 
+    @State private var confirmingExit = false
+    @State private var resumed = false
     @State private var index = 0
     @State private var selectedChoice: String?
     @State private var writtenAnswer = ""
@@ -267,6 +312,25 @@ struct TestRunView: View {
         }
         .background(GRASPColor.canvas)
         .macWindowFrame(minWidth: 620, minHeight: 520)
+        .onAppear {
+            // Picking an unfinished test up where it was left.
+            guard !resumed else { return }
+            resumed = true
+            if !answered.isEmpty, answered.count < questions.count {
+                graded = answered
+                index = answered.count
+            }
+        }
+        .confirmationDialog("Leave this test?", isPresented: $confirmingExit, titleVisibility: .visible) {
+            Button("Save and Exit") { dismiss() }
+            Button("Discard Test", role: .destructive) {
+                store.discardTest(attemptId: attemptId)
+                dismiss()
+            }
+            Button("Keep Going", role: .cancel) {}
+        } message: {
+            Text("Saved tests can be continued from the deck, on this device or another.")
+        }
     }
 
     private func warningBanner(_ message: String) -> some View {
@@ -297,7 +361,7 @@ struct TestRunView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button {
-                    dismiss()
+                    confirmingExit = true
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
@@ -306,7 +370,7 @@ struct TestRunView: View {
                         .background(GRASPColor.surface, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .help("Cancel this test")
+                .help("Save this test for later, or discard it")
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(deckName)
@@ -384,6 +448,20 @@ struct TestRunView: View {
             VStack(spacing: 14) {
                 switch question.type {
                 case .multipleChoice:
+                    if let code = question.code {
+                        // The program the choices are about, with the one
+                        // open blank marked.
+                        ScrollView {
+                            Text(CodeQuestion.fill(code.code) { _ in "_____" })
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundStyle(GRASPColor.textPrimary)
+                                .textSelection(.enabled)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: 560, maxHeight: 220)
+                        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
                     choiceList(question)
                 case .trueFalse:
                     VStack(spacing: 18) {
@@ -492,12 +570,22 @@ struct TestRunView: View {
                 } label: {
                     HStack(alignment: .top, spacing: 11) {
                         marker(choice, position: position, correct: question.correctAnswer)
-                        Text(choice)
-                            .graspType(.body)
-                            .foregroundStyle(GRASPColor.textPrimary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                        if question.code != nil {
+                            Text(choice)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundStyle(GRASPColor.textPrimary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else if question.problem?.kind == .matrix {
+                            GuideText(text: choice, style: .body, color: GRASPColor.textPrimary)
+                        } else {
+                            Text(choice)
+                                .graspType(.body)
+                                .foregroundStyle(GRASPColor.textPrimary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 12)
@@ -690,7 +778,7 @@ struct TestResultsView: View {
                         }
                     }
                     if !item.isCorrect {
-                        Text("You answered: \(item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer)")
+                        Text("You answered: \(item.question.type == .multipleChoice ? item.givenAnswer : (item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer))")
                             .font(item.question.code == nil ? nil : .system(size: 12, design: .monospaced))
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)

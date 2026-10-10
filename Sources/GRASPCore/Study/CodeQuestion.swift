@@ -60,6 +60,11 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
     public var buggyLine: Int?
     public var fixedLine: String?
     public var explanation: String?
+    /// Multiple-choice version: for `codeBlanks`, which blank (1-based) is
+    /// asked about and wrong fills checked by running them; for
+    /// `predictOutput`, wrong outputs.
+    public var choiceBlank: Int?
+    public var choices: [String]?
 
     public init(kind: CodeQuestionKind, language: CodeLanguage, prompt: String, code: String,
                 blanks: [[String]]? = nil, expectedOutput: String? = nil, buggyLine: Int? = nil,
@@ -93,7 +98,7 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
         Self.fill(code, with: fill)
     }
 
-    static func fill(_ text: String, with fill: (Int) -> String) -> String {
+    public static func fill(_ text: String, with fill: (Int) -> String) -> String {
         let ns = text as NSString
         var result = ""
         var last = 0

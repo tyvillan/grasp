@@ -885,6 +885,7 @@ final class AppStore {
 
     /// The batch writing a guide's skill explanations, and the skills still waiting on it.
     @ObservationIgnored var skillPrefetch: Task<Void, Never>?
+    @ObservationIgnored var choiceUpgradeStarted = false
     @ObservationIgnored var skillPrefetchPending: Set<String> = []
     struct CodeQuestionRunResult: Equatable {
         var saved: Int
@@ -958,11 +959,14 @@ final class AppStore {
         // them, which the one-line questions written on the spot weren't.
         var codeQuestions: [LearnEngine.RoundQuestion] = []
         var codeBudgetUsed = 0
-        if isAITestQuestionsEnabled && config.allowWritten {
+        if isAITestQuestionsEnabled && (config.allowWritten || config.allowMultipleChoice) {
             let budget = Study.aiQuestionBudget(for: config.questionCount)
             codeQuestions = (try? await database.queue.read { db in
                 var rng = SystemRandomNumberGenerator()
-                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds, using: &rng, db: db)
+                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds,
+                                                      allowWritten: config.allowWritten,
+                                                      allowMultipleChoice: config.allowMultipleChoice,
+                                                      using: &rng, db: db)
             }) ?? []
             codeBudgetUsed = codeQuestions.count
         }
@@ -995,6 +999,20 @@ final class AppStore {
         // write an attempt nobody can take (`startTest` wrote none).
         guard !started.questions.isEmpty else { return ("", [], nil) }
         return (started.attemptId, started.questions, aiResult.warning)
+    }
+
+    func unfinishedTest(forDecks deckIds: [String]) -> Study.UnfinishedTest? {
+        (try? database.queue.read { db in try Study.unfinishedTest(forDecks: deckIds, db: db) }) ?? nil
+    }
+
+    /// An unfinished test's questions and the answers already given.
+    func resumeTest(attemptId: String) -> (questions: [LearnEngine.RoundQuestion], answers: [(given: String, isCorrect: Bool)])? {
+        try? database.queue.read { db in try Study.resumeTest(attemptId: attemptId, db: db) }
+    }
+
+    func discardTest(attemptId: String) {
+        try? database.queue.write { db in try Study.discardTest(attemptId: attemptId, db: db) }
+        reload()
     }
 
     /// A new test over just these questions (the ones missed last time).

@@ -114,9 +114,43 @@ public enum CodeQuestionBuilder {
             accepted.append(kept)
         }
         let output = printing(reference.stdout)
-        return CodeQuestion(kind: .codeBlanks, language: language,
-                            prompt: "Fill in the blanks so the program prints:\n" + output,
-                            code: draft.code, blanks: accepted, expectedOutput: output, explanation: draft.explanation)
+        let question = CodeQuestion(kind: .codeBlanks, language: language,
+                                    prompt: "Fill in the blanks so the program prints:\n" + output,
+                                    code: draft.code, blanks: accepted, expectedOutput: output, explanation: draft.explanation)
+        return await addingChoices(to: question, using: executor)
+    }
+
+    /// The question with a multiple-choice version: one blank and three
+    /// wrong fills, each run to make sure it really is wrong (fails, or
+    /// prints something else). Unchanged when no blank has three.
+    public static func addingChoices(to question: CodeQuestion, using executor: any CodeExecuting) async -> CodeQuestion {
+        guard question.kind == .codeBlanks, let blanks = question.blanks, let expected = question.expectedOutput,
+              executor.canRun(question.language) else { return question }
+        let primary = blanks.map { $0.first ?? "" }
+        let wanted = CodeAnswerGrading.normalizedOutput(expected)
+        for blank in blanks.indices {
+            let candidates = ChoiceVersions.blankCandidates(
+                answer: primary[blank], accepted: blanks[blank], code: question.code,
+                otherAnswers: primary.enumerated().filter { $0.offset != blank }.map(\.element))
+            var wrong: [String] = []
+            for candidate in candidates.prefix(8) {
+                if Task.isCancelled { return question }
+                var trial = primary
+                trial[blank] = candidate
+                let result = await executor.run(CodeQuestion.fill(question.code) { trial[$0 - 1] }, language: question.language)
+                if !(result.succeeded && CodeAnswerGrading.normalizedOutput(result.stdout) == wanted) {
+                    wrong.append(candidate)
+                }
+                if wrong.count == 3 { break }
+            }
+            if wrong.count == 3 {
+                var withChoices = question
+                withChoices.choiceBlank = blank + 1
+                withChoices.choices = wrong
+                return withChoices
+            }
+        }
+        return question
     }
 
     private static func verifyOutput(_ draft: GeneratedCodeQuestion, language: CodeLanguage,
@@ -208,22 +242,70 @@ public enum CodeQuestionBank {
         return hash != written
     }
 
-    /// Up to `count` saved questions of every kind, as test questions.
+    /// Up to `count` saved questions of every kind, as test questions: typed
+    /// when written answers are allowed, multiple choice when that is, a
+    /// mix of the two when both are. A question with no multiple-choice
+    /// version is left out of a multiple-choice-only test.
     public static func pickRound<R: RandomNumberGenerator>(
-        count: Int, inDecks deckIds: [String], using rng: inout R, db: Database
+        count: Int, inDecks deckIds: [String], allowWritten: Bool = true, allowMultipleChoice: Bool = false,
+        using rng: inout R, db: Database
     ) throws -> [LearnEngine.RoundQuestion] {
+        guard allowWritten || allowMultipleChoice else { return [] }
         var pool = try questions(inDecks: deckIds, db: db)
         pool.shuffle(using: &rng)
         var result: [LearnEngine.RoundQuestion] = []
         for record in pool {
             guard result.count < count else { break }
+            let choice: LearnEngine.RoundQuestion?
+            let typed: LearnEngine.RoundQuestion?
             if let code = record.question {
-                result.append(code.roundQuestion())
+                choice = allowMultipleChoice ? ChoiceVersions.codeVersion(code, using: &rng) : nil
+                typed = allowWritten ? code.roundQuestion() : nil
             } else if let problem = record.problem {
-                result.append(problem.roundQuestion(using: &rng))
+                if problem.kind == .multipleChoice {
+                    // Already multiple choice: it fits either kind of test.
+                    result.append(problem.roundQuestion(using: &rng))
+                    continue
+                }
+                choice = allowMultipleChoice ? ChoiceVersions.problemVersion(problem, using: &rng) : nil
+                typed = allowWritten ? problem.roundQuestion(using: &rng) : nil
+            } else {
+                continue
+            }
+            switch (typed, choice) {
+            case let (typed?, choice?): result.append(Bool.random(using: &rng) ? typed : choice)
+            case let (typed?, nil): result.append(typed)
+            case let (nil, choice?): result.append(choice)
+            case (nil, nil): break
             }
         }
         return result
+    }
+
+    /// Gives saved fill-in-the-blank questions written before multiple
+    /// choice existed their checked wrong options. Returns how many changed.
+    public static func addMissingChoices(database: GRASPDatabase, using executor: any CodeExecuting) async -> Int {
+        let rows = (try? await database.queue.read { db in
+            try TestQuestion.filter(Column("deletedAt") == nil)
+                .filter(Column("kind") == CodeQuestionKind.codeBlanks.rawValue).fetchAll(db)
+        }) ?? []
+        var changed = 0
+        for row in rows {
+            if Task.isCancelled { break }
+            guard let question = row.question, question.choices == nil else { continue }
+            var upgraded = await CodeQuestionBuilder.addingChoices(to: question, using: executor)
+            if Task.isCancelled { break }
+            // Tried and none held up: an empty list, so it isn't tried again.
+            if upgraded.choices == nil { upgraded.choices = [] }
+            guard let json = upgraded.encoded() else { continue }
+            try? await database.queue.write { db in
+                guard var fresh = try TestQuestion.fetchOne(db, key: row.id) else { return }
+                fresh.bodyJSON = json
+                try fresh.save(db)
+            }
+            changed += 1
+        }
+        return changed
     }
 
     /// Up to `count` questions for a test, drawn at random.

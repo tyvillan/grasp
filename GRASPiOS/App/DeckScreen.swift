@@ -15,6 +15,7 @@ struct DeckScreen: View {
     @State private var studying = false
     @State private var learning = false
     @State private var testPhase: TestPhase?
+    @State private var unfinishedTest: Study.UnfinishedTest?
     @State private var editing: Card?
     @State private var query = ""
     @State private var creatingCard = false
@@ -191,7 +192,8 @@ struct DeckScreen: View {
             StudyModeButton(title: "Learn", subtitle: "\(activeCount) cards",
                             icon: "graduationcap.fill", prominent: dueCount == 0 && activeCount > 0) { learning = true }
                 .disabled(activeCount == 0)
-            StudyModeButton(title: "Test", subtitle: "Quiz", icon: "checklist", prominent: false) { testPhase = .setup }
+            StudyModeButton(title: "Test", subtitle: unfinishedTest.map { "\($0.answered)/\($0.total) saved" } ?? "Quiz",
+                            icon: "checklist", prominent: false) { testPhase = .setup }
                 .disabled(activeCount == 0)
         }
         .buttonStyle(.plain)
@@ -251,14 +253,17 @@ struct DeckScreen: View {
         case .setup:
             // The setup sheet has its own Cancel and Start buttons.
             ScrollView {
-                TestSetupSheet(deckIds: deckIds, deckName: route.name) { attemptId, questions, aiWarning in
+                TestSetupSheet(deckIds: deckIds, deckName: route.name, onResume: { id in
+                    testPhase = TestPhase.resuming(id, store: store)
+                }) { attemptId, questions, aiWarning in
                     testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 24)
             }
-        case .running(let attemptId, let questions, let aiWarning):
-            TestRunView(attemptId: attemptId, deckName: route.name, questions: questions, aiWarning: aiWarning) { graded in
+        case .running(let attemptId, let questions, let aiWarning, let answered):
+            TestRunView(attemptId: attemptId, deckName: route.name, questions: questions, aiWarning: aiWarning,
+                        answered: answered) { graded in
                 _ = try? store.finishTest(attemptId: attemptId)
                 testPhase = .results(attemptId: attemptId, graded: graded)
             }
@@ -273,6 +278,7 @@ struct DeckScreen: View {
         let ids = deckIds
         cards = (try? store.cards(inDecks: ids)) ?? []
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
+        unfinishedTest = store.unfinishedTest(forDecks: ids)
     }
 }
 
