@@ -30,7 +30,7 @@ struct CodeQuestionView: View {
             answerArea
             if isAnswered { feedback }
         }
-        .frame(maxWidth: 640, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - The program

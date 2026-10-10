@@ -279,6 +279,25 @@ extension View {
         #endif
     }
 
+    /// A study sheet that grows with the window on the Mac: it opens at the
+    /// size of the page behind it (macOS 15+) and follows the window when it
+    /// is resized, with a floor so nothing gets cramped.
+    @ViewBuilder
+    func adaptiveStudySheet(minWidth: CGFloat = 680, minHeight: CGFloat = 560) -> some View {
+        #if os(macOS)
+        if #available(macOS 15.0, *) {
+            self.frame(minWidth: minWidth, idealWidth: 1000, maxWidth: .infinity,
+                       minHeight: minHeight, idealHeight: 820, maxHeight: .infinity)
+                .presentationSizing(.page)
+        } else {
+            self.frame(minWidth: minWidth, idealWidth: 1000, maxWidth: .infinity,
+                       minHeight: minHeight, idealHeight: 820, maxHeight: .infinity)
+        }
+        #else
+        self
+        #endif
+    }
+
     /// A fixed sheet size on the Mac; the full width available on iPhone.
     @ViewBuilder
     func macSheetFrame(width: CGFloat, height: CGFloat? = nil) -> some View {

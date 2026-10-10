@@ -59,7 +59,7 @@ struct ProblemQuestionView: View {
                 feedback
             }
         }
-        .frame(maxWidth: 560, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func check() {

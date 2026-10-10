@@ -331,7 +331,7 @@ struct TestRunView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .macWindowFrame(minWidth: 620, minHeight: 520)
+        .adaptiveStudySheet()
         .onAppear {
             // Picking an unfinished test up where it was left.
             guard !resumed else { return }
@@ -423,161 +423,177 @@ struct TestRunView: View {
         }
     }
 
+    /// How wide the question column gets on a big window: wide enough for
+    /// code, narrow enough to read.
+    private let columnWidth: CGFloat = 860
+
+    /// The question scrolls; what to do next stays pinned below it, so a long
+    /// question can never push the Next button out of reach.
     @ViewBuilder
     private func questionBody(_ question: LearnEngine.RoundQuestion) -> some View {
         VStack(spacing: 0) {
-            if let code = question.code {
-                Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(GRASPColor.accent)
-                    .help("Written by AI, then compiled and run to check the answer")
-                    .padding(.top, 42)
-            } else if let problem = question.problem {
-                Label("\(problem.kind.label) · \(problem.subject.label)", systemImage: "function")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(GRASPColor.accent)
-                    .help("Written by AI, then checked before it was saved")
-                    .padding(.top, 42)
-            } else if question.cardId == nil {
-                Label("AI-generated", systemImage: "sparkles")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(GRASPColor.accent)
-                    .help("AI-generated for this test -- not saved as a card, worth double-checking")
-                    .padding(.top, 42)
+            ScrollView {
+                VStack(spacing: 18) {
+                    questionLabel(question)
+                    questionPrompt(question)
+                    answerArea(question)
+                    if isAnswered, question.type == .multipleChoice, let explanation = question.problem?.explanation {
+                        Text(explanation)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: columnWidth)
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
             }
+            if isAnswered { answeredBar(question) }
+        }
+    }
 
-            if question.problem != nil || (question.cardId == nil && question.prompt.contains("\n")) {
-                // A problem can hold a matrix, which only lines up in a
-                // fixed-width font, so it reads left to right.
-                GuideText(text: question.prompt, style: .prose, color: GRASPColor.textPrimary)
-                    .frame(maxWidth: 560, alignment: .leading)
-                    .padding(.top, 10)
-            } else {
-                Text(question.prompt)
-                    .graspType(.studyPrompt)
-                    .foregroundStyle(GRASPColor.textPrimary)
+    @ViewBuilder
+    private func questionLabel(_ question: LearnEngine.RoundQuestion) -> some View {
+        if let code = question.code {
+            Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(GRASPColor.accent)
+                .help("A code question: from your study guide, or written by AI and checked by running it")
+        } else if let problem = question.problem {
+            Label("\(problem.kind.label) · \(problem.subject.label)", systemImage: "function")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(GRASPColor.accent)
+                .help("Written by AI, then checked before it was saved")
+        } else if question.cardId == nil {
+            Label("No card", systemImage: "sparkles")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(GRASPColor.accent)
+                .help("Not from one of your cards: from a study guide, or written by AI for this test")
+        }
+    }
+
+    @ViewBuilder
+    private func questionPrompt(_ question: LearnEngine.RoundQuestion) -> some View {
+        if question.problem != nil || (question.cardId == nil && question.prompt.contains("\n")) {
+            // Long or code-bearing prompts read left to right; a matrix only
+            // lines up that way.
+            GuideText(text: question.prompt, style: .prose, color: GRASPColor.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(question.prompt)
+                .graspType(.studyPrompt)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .frame(maxWidth: 640)
+                .padding(.vertical, question.cardId == nil ? 0 : 24)
+        }
+    }
+
+    @ViewBuilder
+    private func answerArea(_ question: LearnEngine.RoundQuestion) -> some View {
+        switch question.type {
+        case .multipleChoice:
+            if let code = question.code {
+                // The program the choices are about, with the open blank marked.
+                ScrollView(.horizontal) {
+                    Text(CodeQuestion.fill(code.code) { _ in "_____" })
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize()
+                        .padding(14)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            choiceList(question)
+        case .trueFalse:
+            VStack(spacing: 18) {
+                Text(question.statement ?? "")
+                    .graspType(.studyAnswer)
+                    .foregroundStyle(GRASPColor.textSecondary)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
-                    .frame(maxWidth: 560)
-                    .padding(.top, question.cardId == nil ? 10 : 42)
-                    .padding(.bottom, question.code == nil ? 0 : 6)
+                    .frame(maxWidth: 640)
+                HStack(spacing: 10) {
+                    trueFalseButton("True", question)
+                    trueFalseButton("False", question)
+                }
+                .frame(maxWidth: 340)
             }
-
-            Spacer(minLength: 28)
-
-            VStack(spacing: 14) {
-                switch question.type {
-                case .multipleChoice:
-                    if let code = question.code {
-                        // The program the choices are about, with the one
-                        // open blank marked.
-                        ScrollView {
-                            Text(CodeQuestion.fill(code.code) { _ in "_____" })
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundStyle(GRASPColor.textPrimary)
-                                .textSelection(.enabled)
-                                .padding(12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxWidth: 560, maxHeight: 220)
-                        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    choiceList(question)
-                case .trueFalse:
-                    VStack(spacing: 18) {
-                        Text(question.statement ?? "")
-                            .graspType(.studyAnswer)
-                            .foregroundStyle(GRASPColor.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: 520)
-                        HStack(spacing: 10) {
-                            trueFalseButton("True", question)
-                            trueFalseButton("False", question)
-                        }
-                        .frame(maxWidth: 340)
-                    }
-                case .written where question.problem != nil:
-                    ProblemQuestionView(problem: question.problem!, isAnswered: isAnswered) { given, correct in
-                        submit(correct, given: given, question: question)
-                    }
-                    .id(question.id)
-                case .written where question.code != nil:
-                    ScrollView {
-                        CodeQuestionView(question: question.code!, isAnswered: isAnswered) { given, correct in
-                            submit(correct, given: given, question: question)
-                        }
-                        .id(question.id)
-                    }
-                    .frame(maxHeight: 380)
-                case .written:
-                    TextField("Type the answer", text: $writtenAnswer)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 15))
-                        .padding(.horizontal, 13)
-                        .frame(height: 38)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(GRASPColor.inset)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(
-                                    writtenFieldFocused ? GRASPColor.accent : GRASPColor.hairlineStrong,
-                                    lineWidth: 1
-                                )
-                        )
-                        .focused($writtenFieldFocused)
-                        .disabled(isAnswered)
-                        .onSubmit {
-                            guard !isAnswered, !writtenAnswer.isEmpty else { return }
-                            let verdict = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
-                            submit(verdict != .incorrect, given: writtenAnswer, question: question)
-                        }
-                        .frame(maxWidth: 420)
-                        .task { writtenFieldFocused = true }
-                }
-
-                if isAnswered, question.type == .multipleChoice, let explanation = question.problem?.explanation {
-                    Text(explanation)
-                        .graspType(.body)
-                        .foregroundStyle(GRASPColor.textSecondary)
-                        .frame(maxWidth: 560, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if isAnswered {
-                    HStack(spacing: 6) {
-                        Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .font(.system(size: 12))
-                        Text(lastCorrect
-                             ? (wasOverridden ? "Marked correct" : "Correct")
-                             : (question.code == nil && question.problem == nil
-                                ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
-                            .graspType(.body)
-                    }
-                    .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)
-
-                    HStack(spacing: 8) {
-                        // Exact/fuzzy text matching is a poor judge of a
-                        // long or loaded free-response answer -- offered
-                        // only for written questions, and only while still
-                        // wrong. Same shape as the next-question button
-                        // beside it, tinted green for "this was actually
-                        // correct" rather than the app's normal accent.
-                        if question.type == .written && !lastCorrect {
-                            Button("I actually got this right") { override(question) }
-                                .buttonStyle(GRASPProminentButton(tint: GRASPColor.success))
-                        }
-
-                        Button(index == questions.count - 1 ? "Finish test" : "Next question") { advance() }
-                            .buttonStyle(GRASPProminentButton())
-                            .keyboardShortcut(.defaultAction)
-                    }
-                }
+        case .written where question.problem != nil:
+            ProblemQuestionView(problem: question.problem!, isAnswered: isAnswered) { given, correct in
+                submit(correct, given: given, question: question)
             }
-            .padding(.bottom, 28)
+            .id(question.id)
+        case .written where question.code != nil:
+            CodeQuestionView(question: question.code!, isAnswered: isAnswered) { given, correct in
+                submit(correct, given: given, question: question)
+            }
+            .id(question.id)
+        case .written:
+            TextField("Type the answer", text: $writtenAnswer)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .padding(.horizontal, 13)
+                .frame(height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(GRASPColor.inset)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(
+                            writtenFieldFocused ? GRASPColor.accent : GRASPColor.hairlineStrong,
+                            lineWidth: 1
+                        )
+                )
+                .focused($writtenFieldFocused)
+                .disabled(isAnswered)
+                .onSubmit {
+                    guard !isAnswered, !writtenAnswer.isEmpty else { return }
+                    let verdict = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
+                    submit(verdict != .incorrect, given: writtenAnswer, question: question)
+                }
+                .frame(maxWidth: 520)
+                .task { writtenFieldFocused = true }
         }
-        .padding(.horizontal, 32)
+    }
+
+    /// The verdict and the way on, pinned under the scrolling question.
+    private func answeredBar(_ question: LearnEngine.RoundQuestion) -> some View {
+        HStack(spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.system(size: 12))
+                Text(lastCorrect
+                     ? (wasOverridden ? "Marked correct" : "Correct")
+                     : (question.code == nil && question.problem == nil
+                        ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
+                    .graspType(.body)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+            .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)
+            Spacer(minLength: 12)
+            // Text matching is a poor judge of a long or loaded answer --
+            // offered only for written questions, and only while wrong.
+            if question.type == .written && !lastCorrect {
+                Button("I actually got this right") { override(question) }
+                    .buttonStyle(GRASPProminentButton(tint: GRASPColor.success))
+            }
+            Button(index == questions.count - 1 ? "Finish test" : "Next question") { advance() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .background(GRASPColor.canvas)
+        .background(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
     }
 
     private func choiceList(_ question: LearnEngine.RoundQuestion) -> some View {
@@ -623,7 +639,7 @@ struct TestRunView: View {
                 .disabled(isAnswered)
             }
         }
-        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -847,7 +863,7 @@ struct TestResultsView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .macWindowFrame(minWidth: 520, minHeight: 520)
+        .adaptiveStudySheet(minWidth: 560, minHeight: 520)
     }
 
     /// Flips this one item locally (so the score/progress bar above update
