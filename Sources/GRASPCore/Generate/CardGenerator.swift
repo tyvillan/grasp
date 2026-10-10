@@ -230,6 +230,10 @@ public protocol CardGenerator: Sendable {
     /// explain are left out.
     func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String]
 
+    /// Quiz questions about one study-guide part, each with a short answer
+    /// (a few words) so it works as multiple choice and true/false too.
+    func generateGuideQuestions(context: String, count: Int) async -> [GeneratedTestQuestion]
+
     /// A study-guide part's raw notes rewritten as titled, explained blocks.
     /// Empty when this generator can't, or the reply was unusable.
     func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock]
@@ -252,6 +256,10 @@ public extension CardGenerator {
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
 
     func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] { [] }
+
+    func generateGuideQuestions(context: String, count: Int) async -> [GeneratedTestQuestion] {
+        await generateTestQuestions(existing: [], noteContext: context, maxCount: count)
+    }
 
     func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
         var result: [String: String] = [:]

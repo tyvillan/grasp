@@ -20,12 +20,22 @@ struct ExamScreen: View {
     @State private var choosingFiles = false
     @State private var importing = false
     @State private var message: String?
+    @State private var testPhase: TestPhase?
+
+    private var testScopeKey: String { "guide:" + (practiceGuideId ?? examEventId) }
 
     var body: some View {
         ScrollView {
             if let page {
                 VStack(alignment: .leading, spacing: 20) {
                     if !isPracticeSet { studyButton(page) }
+                    if !page.parts.isEmpty {
+                        Button { testPhase = .setup } label: {
+                            Label("Test Yourself on This Guide", systemImage: "checklist")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(GRASPQuietButton())
+                    }
                     if importing {
                         HStack(spacing: 8) {
                             ProgressView()
@@ -44,6 +54,9 @@ struct ExamScreen: View {
             }
         }
         .background(GRASPColor.canvas)
+        .fullScreenCover(item: $testPhase, onDismiss: load) { phase in
+            if let page { testView(phase, page: page) }
+        }
         .navigationTitle(page?.exam.title ?? "Exam")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -114,6 +127,32 @@ struct ExamScreen: View {
                 .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func testView(_ phase: TestPhase, page: StudyGuideActions.ExamPage) -> some View {
+        switch phase {
+        case .setup:
+            ScrollView {
+                TestSetupSheet(deckIds: page.deckIds, deckName: page.exam.title,
+                               onResume: { id in testPhase = TestPhase.resuming(id, store: store) },
+                               guide: (page, testScopeKey)) { attemptId, questions, aiWarning in
+                    testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
+            }
+        case .running(let attemptId, let questions, let aiWarning, let answered):
+            TestRunView(attemptId: attemptId, deckName: page.exam.title, questions: questions, aiWarning: aiWarning,
+                        answered: answered) { graded in
+                _ = try? store.finishTest(attemptId: attemptId)
+                testPhase = .results(attemptId: attemptId, graded: graded)
+            }
+        case .results(let attemptId, let graded):
+            TestResultsView(deckName: page.exam.title, attemptId: attemptId, graded: graded, deckIds: page.deckIds) { id, questions in
+                testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+            }
         }
     }
 

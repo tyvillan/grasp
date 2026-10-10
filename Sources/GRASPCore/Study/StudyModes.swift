@@ -116,15 +116,15 @@ extension Study {
     /// A new test over exactly these questions -- "retry what I missed".
     /// Returns an empty attempt id when there are none.
     public static func startRetry(questions: [LearnEngine.RoundQuestion], deckIds: [String],
-                                  db: Database) throws -> String {
+                                  scopeKey: String? = nil, db: Database) throws -> String {
         guard !questions.isEmpty else { return "" }
-        return try insertAttempt(questions: questions, deckIds: deckIds, db: db)
+        return try insertAttempt(questions: questions, deckIds: deckIds, scopeKey: scopeKey, db: db)
     }
 
     private static func insertAttempt(questions: [LearnEngine.RoundQuestion], deckIds: [String],
-                                      db: Database) throws -> String {
+                                      scopeKey: String? = nil, db: Database) throws -> String {
         let attempt = TestAttempt(deckId: deckIds.count == 1 ? deckIds.first : nil,
-                                  configJSON: AttemptConfig(deckIds: deckIds).encoded(), startedAt: Date())
+                                  configJSON: AttemptConfig(deckIds: deckIds, scopeKey: scopeKey).encoded(), startedAt: Date())
         try attempt.insert(db)
         for (index, question) in questions.enumerated() {
             // A true/false item keeps its statement where a choice list would
@@ -149,6 +149,9 @@ extension Study {
     /// one can be found from the same decks.
     public struct AttemptConfig: Codable, Sendable {
         public var deckIds: [String]
+        /// Set for a test that isn't over decks alone, such as a study
+        /// guide's ("guide:<id>").
+        public var scopeKey: String?
 
         func encoded() -> String {
             (try? JSONEncoder().encode(self)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -168,12 +171,14 @@ extension Study {
 
     /// The most recent test over exactly these decks that was left before
     /// its end, if any.
-    public static func unfinishedTest(forDecks deckIds: [String], db: Database) throws -> UnfinishedTest? {
+    public static func unfinishedTest(forDecks deckIds: [String], scopeKey: String? = nil,
+                                      db: Database) throws -> UnfinishedTest? {
         let wanted = Set(deckIds)
         let attempts = try TestAttempt.filter(Column("finishedAt") == nil)
             .order(Column("startedAt").desc).fetchAll(db)
         for attempt in attempts {
-            guard let config = AttemptConfig.decode(attempt.configJSON), Set(config.deckIds) == wanted else { continue }
+            guard let config = AttemptConfig.decode(attempt.configJSON), Set(config.deckIds) == wanted,
+                  config.scopeKey == scopeKey else { continue }
             let items = try TestItem.filter(Column("attemptId") == attempt.id).fetchAll(db)
             guard !items.isEmpty else { continue }
             let answered = items.filter { $0.isCorrect != nil }.count

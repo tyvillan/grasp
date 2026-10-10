@@ -132,6 +132,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.rewritePart(title: title, subject: subject, text: text)
     }
 
+    public func generateGuideQuestions(context: String, count: Int) async -> [GeneratedTestQuestion] {
+        await pipeline.generateGuideQuestions(context: context, count: count)
+    }
+
     public func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
         await pipeline.reviewSection(noteContext: noteContext, section: section)
     }
@@ -434,6 +438,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { !$0.isEmpty },
                   cloud: { await cloud.explainSkills(skills, subject: subject, context: context) },
                   local: { await local.explainSkills(skills, subject: subject, context: context) })
+    }
+
+    public func generateGuideQuestions(context: String, count: Int) async -> [GeneratedTestQuestion] {
+        await run(keep: { !$0.isEmpty },
+                  cloud: { await cloud.generateGuideQuestions(context: context, count: count) },
+                  local: { await local.generateGuideQuestions(context: context, count: count) })
     }
 
     public func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] {

@@ -1001,8 +1001,62 @@ final class AppStore {
         return (started.attemptId, started.questions, aiResult.warning)
     }
 
-    func unfinishedTest(forDecks deckIds: [String]) -> Study.UnfinishedTest? {
-        (try? database.queue.read { db in try Study.unfinishedTest(forDecks: deckIds, db: db) }) ?? nil
+    func unfinishedTest(forDecks deckIds: [String], scopeKey: String? = nil) -> Study.UnfinishedTest? {
+        (try? database.queue.read { db in try Study.unfinishedTest(forDecks: deckIds, scopeKey: scopeKey, db: db) }) ?? nil
+    }
+
+    /// A test on a study guide: its key terms and AI-written questions from
+    /// its parts (written the first time, then kept), mixed with the cards
+    /// and saved practice problems of the decks it covers.
+    func startGuideTest(page: StudyGuideActions.ExamPage, scopeKey: String, config: TestBuilder.Config) async throws
+        -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
+        aiTestQuestionsSkipped.set(false)
+        let deckIds = page.deckIds
+        let database = database
+        var saved = (try? await database.queue.read { db in try GuideTest.saved(for: page, db: db) }) ?? []
+        let cards = (try? await database.queue.read { db in try Study.learnCandidates(forDecks: deckIds, db: db) }) ?? []
+        let poolSize = GuideTest.pool(page: page, saved: saved).count + cards.count
+        // Enough written questions that the guide's own parts show up, and
+        // enough in all to fill the test.
+        let needed = max(config.questionCount - poolSize, config.questionCount / 2 - saved.count)
+        var warning: String?
+        if needed > 0 {
+            let skipped = aiTestQuestionsSkipped
+            let existing = saved
+            let task = Task {
+                await GuideTest.write(page: page, saved: existing, needed: needed,
+                                      using: await CardGenerators.select(), skipped: { skipped.value })
+            }
+            let written = await task.value
+            if !written.isEmpty {
+                try? await database.queue.write { db in try GuideTest.save(written, db: db) }
+                saved += written
+            } else if !isGeneratorAvailable {
+                warning = "No AI model is set up, so this test uses the guide's key terms and your cards only."
+            }
+        }
+        var bank: [LearnEngine.RoundQuestion] = []
+        if isAITestQuestionsEnabled, !deckIds.isEmpty {
+            let budget = Study.aiQuestionBudget(for: config.questionCount)
+            bank = (try? await database.queue.read { db in
+                var rng = SystemRandomNumberGenerator()
+                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds, allowWritten: config.allowWritten,
+                                                      allowMultipleChoice: config.allowMultipleChoice, using: &rng, db: db)
+            }) ?? []
+        }
+        var rng = SystemRandomNumberGenerator()
+        let pool = GuideTest.pool(page: page, saved: saved)
+            + cards.map { (cardId: $0.candidate.cardId, front: $0.candidate.front, back: $0.candidate.back) }
+        var cardConfig = config
+        cardConfig.questionCount = max(0, config.questionCount - bank.count)
+        var questions = GuideTest.detachingPool(TestBuilder.build(from: pool, config: cardConfig, using: &rng)) + bank
+        questions.shuffle(using: &rng)
+        guard !questions.isEmpty else { return ("", [], warning) }
+        let final = questions
+        let attemptId = try await database.queue.write { db in
+            try Study.startRetry(questions: final, deckIds: deckIds, scopeKey: scopeKey, db: db)
+        }
+        return (attemptId, final, warning)
     }
 
     /// An unfinished test's questions and the answers already given.

@@ -63,6 +63,8 @@ struct TestSetupSheet: View {
     let deckName: String
     /// Picks an unfinished test up again, by attempt id.
     var onResume: ((String) -> Void)? = nil
+    /// Set for a test on a study guide rather than on decks alone.
+    var guide: (page: StudyGuideActions.ExamPage, scopeKey: String)? = nil
     let onStart: (String, [LearnEngine.RoundQuestion], String?) -> Void
     @State private var unfinished: Study.UnfinishedTest?
 
@@ -99,8 +101,11 @@ struct TestSetupSheet: View {
                     .font(.system(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
-                Text("A graded quiz on this deck's cards: multiple choice, written, and true / false. "
-                     + "Worked problems with code or calculations live under Problems instead.")
+                Text(guide != nil
+                     ? "A graded quiz on this study guide: its key terms, and questions the AI writes about each part "
+                       + "(the first time, then kept), mixed with the cards of the lectures it covers."
+                     : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
+                       + "Worked problems with code or calculations live under Problems instead.")
                     .graspType(.body)
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -193,7 +198,9 @@ struct TestSetupSheet: View {
                     )
                     isStarting = true
                     noQuestions = false
-                    let run = (store.isAITestQuestionsEnabled && allowWritten)
+                    let run = guide != nil
+                        ? AIActivity(headline: "Writing questions from the study guide")
+                        : (store.isAITestQuestionsEnabled && allowWritten)
                         ? AIActivity(headline: "Writing AI questions from your notes")
                         : nil
                     aiActivity = run
@@ -203,7 +210,13 @@ struct TestSetupSheet: View {
                             aiActivity = nil
                             isStarting = false
                         }
-                        let start = { try await store.startTest(deckIds: deckIds, config: config) }
+                        let guide = self.guide
+                        let start = {
+                            if let guide {
+                                return try await store.startGuideTest(page: guide.page, scopeKey: guide.scopeKey, config: config)
+                            }
+                            return try await store.startTest(deckIds: deckIds, config: config)
+                        }
                         let result = if let run {
                             try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }
                         } else {
@@ -226,7 +239,7 @@ struct TestSetupSheet: View {
         .background(GRASPColor.canvas)
         .task {
             store.addMissingChoicesInBackground()
-            unfinished = store.unfinishedTest(forDecks: deckIds)
+            unfinished = store.unfinishedTest(forDecks: deckIds, scopeKey: guide?.scopeKey)
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
         }

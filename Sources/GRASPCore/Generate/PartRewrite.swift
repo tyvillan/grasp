@@ -48,4 +48,29 @@ extension OllamaGenerator {
                                   code: (code?.isEmpty ?? true) ? nil : code)
         }
     }
+
+    /// Short-answer quiz questions about one part of a study guide.
+    public func generateGuideQuestions(context: String, count: Int) async -> [GeneratedTestQuestion] {
+        guard count > 0, context.count > 40 else { return [] }
+        let prompt = """
+        Write \(count) quiz questions that test a student on this part of their exam study guide. Each answer must be \
+        short: a term, a value, a line of code, or at most twelve words. Ask about what the material actually says; \
+        never add facts it doesn't contain. Vary them: definitions, "what happens when", "which one", reading code.
+
+        Reply with JSON only: {"questions": [{"q": "...", "a": "..."}]}
+
+        Study guide part:
+        \(context.prefix(2400))
+        """
+        guard let reply = try? await chat(prompt: prompt, maxTokens: 900),
+              let data = Self.salvageJSON(reply).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let raw = object["questions"] as? [[String: Any]] else { return [] }
+        return raw.prefix(count).compactMap { entry in
+            guard let q = (entry["q"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let a = (entry["a"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !q.isEmpty, !a.isEmpty, a.count <= 140 else { return nil }
+            return GeneratedTestQuestion(prompt: PlainMath.clean(q), correctAnswer: PlainMath.clean(a))
+        }
+    }
 }

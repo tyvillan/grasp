@@ -478,6 +478,19 @@ enum Schema {
             }
         }
 
+        // Questions the AI wrote from a study guide's parts, for testing on
+        // the guide itself. Local to this device; they can be written again.
+        migrator.registerMigration("v17_guide_question") { db in
+            try db.create(table: "guideQuestion") { t in
+                t.column("id", .text).primaryKey()
+                t.column("guideId", .text).notNull().indexed()
+                t.column("partIndex", .integer).notNull()
+                t.column("prompt", .text).notNull()
+                t.column("answer", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+        }
+
         return migrator
     }
 
