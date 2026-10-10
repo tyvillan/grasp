@@ -5,43 +5,6 @@ import GRDB
 
 @Suite("Study guide tests")
 struct GuideTestTests {
-    private func page(guide: StudyGuide) -> StudyGuideActions.ExamPage {
-        let part = StudyGuideActions.PagePart(
-            number: 1, title: "Functions", questionCount: nil,
-            sources: [.init(guideId: guide.id, partIndex: 0)], deckIds: [], skills: [], traps: [], examples: [],
-            terms: [.init(term: "Prototype", definition: "A function's declaration before its definition"),
-                    .init(term: "Reference parameter", definition: "An alias for the caller's variable")],
-            formulas: [], remember: [], notes: ["void f(int&);"])
-        return StudyGuideActions.ExamPage(
-            exam: CalendarEvent(title: "Midterm", startsAt: Date()), guides: [guide], questionCount: nil,
-            format: [], notes: [], parts: [part], unreadGuides: [], isPracticeSet: false)
-    }
-
-    @Test("terms and saved questions form the pool, and none of it is graded as a card")
-    func pool() async throws {
-        let db = try GRASPDatabase.inMemory()
-        let guide = StudyGuide(courseId: "c", title: "Guide", bodyJSON: "{}")
-        let page = page(guide: guide)
-        try await db.queue.write { db in
-            try GuideTest.save([.init(guideId: guide.id, partIndex: 0, prompt: "What does & mean in a parameter?",
-                                      answer: "Pass by reference")], db: db)
-        }
-        let saved = try await db.queue.read { try GuideTest.saved(for: page, db: $0) }
-        #expect(saved.count == 1)
-
-        let pool = GuideTest.pool(page: page, saved: saved)
-        #expect(pool.count == 3)
-        #expect(pool.allSatisfy { $0.cardId.hasPrefix(GuideTest.idPrefix) })
-
-        var rng = SystemRandomNumberGenerator()
-        let questions = GuideTest.detachingPool(TestBuilder.build(
-            from: pool, config: .init(questionCount: 3, allowMultipleChoice: true, allowWritten: true,
-                                      allowTrueFalse: true, shuffle: true), using: &rng))
-        #expect(questions.count == 3)
-        #expect(questions.allSatisfy { $0.cardId == nil })
-        #expect(Set(questions.map(\.id)).count == 3)
-    }
-
     @Test("a guide's unfinished test is kept apart from a deck test over the same decks")
     func scoped() async throws {
         let db = try GRASPDatabase.inMemory()
@@ -52,5 +15,52 @@ struct GuideTestTests {
         }
         #expect(try await db.queue.read { try Study.unfinishedTest(forDecks: [], scopeKey: "guide:x", db: $0) }?.attemptId == attempt)
         #expect(try await db.queue.read { try Study.unfinishedTest(forDecks: [], db: $0) } == nil)
+    }
+}
+
+@Suite("Guide example questions")
+struct GuideExampleTests {
+    private func page(_ examples: [StudyGuideDocument.Example]) -> StudyGuideActions.ExamPage {
+        let part = StudyGuideActions.PagePart(
+            number: 1, title: "Sample questions", questionCount: nil, sources: [], deckIds: [], skills: [], traps: [],
+            examples: examples.enumerated().map { .init(id: "e\($0.offset)", guideId: "g", example: $0.element) },
+            terms: [], formulas: [], remember: [], notes: [])
+        return StudyGuideActions.ExamPage(exam: CalendarEvent(title: "Midterm", startsAt: Date()), guides: [],
+                                          questionCount: nil, format: [], notes: [], parts: [part], unreadGuides: [],
+                                          isPracticeSet: false)
+    }
+
+    @Test("the loop's test is blanked, not the sample call after the answer")
+    func blanking() throws {
+        let code = "int CountVowels(int num)\n{\nfor (int i = 0; i < num; i++)\ncount++;\nreturn count;\n}\n//sample function call, NOT part of the answer\nif (IsVowel(x))\n{\n}"
+        let result = try #require(GuideExamples.blanking(code))
+        #expect(result.answer == "i < num")
+        #expect(result.code.contains("for (int i = 0; [[1]]; i++)"))
+        #expect(!result.code.contains("IsVowel"))
+    }
+
+    @Test("code answers become fill-in-the-blank, output questions predict-the-output, words stay written")
+    func items() {
+        let items = GuideExamples.items(from: page([
+            .init(label: "Q1", question: "Use a while loop to print 97 asterisks.",
+                  steps: [], answer: "k = 0;\nwhile (k < 97){\ncout << \u{201C}*\u{201D};\nk ++;\n}"),
+            .init(label: "Q2", question: "What is the output of the following code?\nint main()\n{\ncout << 5;\n}",
+                  steps: [], answer: "Output:\n5"),
+            .init(label: "Q3", question: "Does this divide by zero?", steps: [], answer: "No, because of short circuit evaluation"),
+            .init(label: "Q4", question: "Illustration only", steps: [], answer: nil),
+        ]))
+        #expect(items.count == 3)
+        guard items.count == 3, case .code(let blanks) = items[0], case .code(let output) = items[1],
+              case .recall(_, let answer) = items[2] else { Issue.record("wrong kinds"); return }
+        #expect(blanks.kind == .codeBlanks && blanks.blanks == [["k < 97"]])
+        #expect(blanks.code.contains("\"*\""))
+        #expect(blanks.choices?.count == 3)
+        #expect(output.kind == .predictOutput && output.expectedOutput == "5" && output.code.hasPrefix("int main()"))
+        #expect(answer == "No, because of short circuit evaluation")
+
+        var rng = SystemRandomNumberGenerator()
+        let choiceOnly = GuideExamples.round(items, count: 10, allowWritten: false, allowMultipleChoice: true, using: &rng)
+        #expect(choiceOnly.count == 2)
+        #expect(choiceOnly.allSatisfy { $0.type == .multipleChoice && $0.cardId == nil })
     }
 }

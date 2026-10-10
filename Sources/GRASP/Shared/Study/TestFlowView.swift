@@ -102,8 +102,9 @@ struct TestSetupSheet: View {
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text(guide != nil
-                     ? "A graded quiz on this study guide: its key terms, and questions the AI writes about each part "
-                       + "(the first time, then kept), mixed with the cards of the lectures it covers."
+                     ? "Built from what the exam will ask: this guide's worked examples (code answers become "
+                       + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
+                       + "problems saved for the lectures it covers."
                      : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
                        + "Worked problems with code or calculations live under Problems instead.")
                     .graspType(.body)
@@ -142,13 +143,18 @@ struct TestSetupSheet: View {
                     .foregroundStyle(GRASPColor.textTertiary)
                 Toggle("Multiple choice", isOn: $allowMultipleChoice)
                 Toggle("Written", isOn: $allowWritten)
-                Toggle("True / False", isOn: $allowTrueFalse)
+                if guide == nil {
+                    // A guide's questions come from its worked examples,
+                    // which have no true/false form.
+                    Toggle("True / False", isOn: $allowTrueFalse)
+                }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             historyBlock
+            if guide == nil {
             Toggle("Include AI-written questions", isOn: Binding(
                 get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
             ))
@@ -160,6 +166,8 @@ struct TestSetupSheet: View {
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
             }
 
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
@@ -193,13 +201,12 @@ struct TestSetupSheet: View {
                 Button("Start Test") {
                     let config = TestBuilder.Config(
                         questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
-                        allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
+                        allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
                         excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
                     )
                     isStarting = true
                     noQuestions = false
-                    let run = guide != nil
-                        ? AIActivity(headline: "Writing questions from the study guide")
+                    let run = guide != nil ? nil
                         : (store.isAITestQuestionsEnabled && allowWritten)
                         ? AIActivity(headline: "Writing AI questions from your notes")
                         : nil
@@ -439,7 +446,7 @@ struct TestRunView: View {
                     .padding(.top, 42)
             }
 
-            if question.problem != nil {
+            if question.problem != nil || (question.cardId == nil && question.prompt.contains("\n")) {
                 // A problem can hold a matrix, which only lines up in a
                 // fixed-width font, so it reads left to right.
                 GuideText(text: question.prompt, style: .prose, color: GRASPColor.textPrimary)

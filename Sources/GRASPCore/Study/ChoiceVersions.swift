@@ -27,6 +27,13 @@ public enum ChoiceVersions {
                   !out.contains(where: { CodeAnswerGrading.normalizedCode($0) == key }) else { return }
             out.append(trimmed)
         }
+        // A comparison swapped for each of the others: the classic off-by-one
+        // and wrong-direction mistakes.
+        if let comparison = answer.range(of: #"<=|>=|==|!=|(?<![<>=!])[<>](?![<>=])"#, options: .regularExpression) {
+            for other in ["<", "<=", ">", ">=", "==", "!="] where other != String(answer[comparison]) {
+                add(answer.replacingCharacters(in: comparison, with: other))
+            }
+        }
         for (a, b) in swaps {
             if answer.contains(a) { add(answer.replacingOccurrences(of: a, with: b)) }
             else if answer.contains(b) { add(answer.replacingOccurrences(of: b, with: a)) }
@@ -58,16 +65,20 @@ public enum ChoiceVersions {
         let identifier = try! NSRegularExpression(pattern: #"\b[A-Za-z_][A-Za-z0-9_]*\b"#)
         let keywords: Set<String> = ["int", "double", "char", "bool", "string", "void", "return", "if", "else", "for",
                                      "while", "do", "include", "using", "namespace", "std", "main", "def", "print",
-                                     "in", "range", "and", "or", "not", "True", "False", "None", "const", "auto"]
+                                     "in", "range", "and", "or", "not", "True", "False", "None", "const", "auto",
+                                     "cout", "cin", "endl", "std", "include", "iostream", "self"]
         // Names only: what's inside quotes is text, not a name.
-        let unquoted = code.replacingOccurrences(of: #""[^"\n]*"|'[^'\n]*'"#, with: " ", options: .regularExpression)
+        let unquoted = code.replacingOccurrences(of: #""[^"\n]*"|'[^'\n]*'|//[^\n]*|/\*[\s\S]*?\*/|#include[^\n]*"#,
+                                                 with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\[\[\d+\]\]"#, with: " ", options: .regularExpression)
         let codeNames = Set(identifier.matches(in: unquoted, range: NSRange(location: 0, length: (unquoted as NSString).length))
             .map { (unquoted as NSString).substring(with: $0.range) }).subtracting(keywords).sorted()
         for match in identifier.matches(in: answer, range: NSRange(location: 0, length: ns.length)) {
             let name = ns.substring(with: match.range)
             guard !keywords.contains(name) else { continue }
-            for other in codeNames where other != name && other.count <= 20 {
+            // Same kind of name: a variable for a variable, a Type for a Type.
+            for other in codeNames where other != name && other.count <= 20
+                && other.first?.isUppercase == name.first?.isUppercase {
                 add(ns.replacingCharacters(in: match.range, with: other))
             }
         }
@@ -184,7 +195,9 @@ public enum ChoiceVersions {
             var shown = question
             // The other blanks are filled in; only the one asked about stays open.
             shown.code = CodeQuestion.fill(question.code) { $0 == blank ? "[[\($0)]]" : (blanks[$0 - 1].first ?? "") }
-            shown.prompt = "Which code fills the blank so the program prints:\n" + (question.expectedOutput ?? "")
+            shown.prompt = question.expectedOutput.map { "Which code fills the blank so the program prints:\n" + $0 }
+                ?? question.prompt.replacingOccurrences(of: "Fill in the missing piece of the answer.",
+                                                        with: "Which code fills the blank?")
             let options = ([answer] + wrong.prefix(3)).shuffled(using: &rng)
             return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: shown.prompt, correctAnswer: answer,
                                              type: .multipleChoice, choices: options, code: shown)
