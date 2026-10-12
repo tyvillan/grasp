@@ -1,236 +1,286 @@
 import SwiftUI
 import GRASPCore
 
-/// The home tab: how today's going, what to study next, and what's coming.
+/// The home tab -- the Mac's Home at phone width: the next exam as a big
+/// yellow countdown, Today's plan with the one yellow button, the next
+/// exams, what the due count means, and the deck you were last in.
 struct TodayView: View {
     @Environment(AppStore.self) private var store
-    @AppStorage("dailyCardGoal") private var dailyGoal = 20
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var decks: [AppStore.DeckSummary] = []
     @State private var exams: [AppStore.UpcomingEvent] = []
+    @State private var standings: [String: ExamPlan.Standing] = [:]
+    @State private var plan = TodayPlan(steps: [])
     @State private var streak = AppStore.StudyStreak(days: 0, studiedToday: false, reviewsToday: 0)
+    @State private var studying: StudyTarget?
+    @State private var route: TodayRoute?
+    @State private var showsAcronym = false
+    /// The acronym is shown once, on the first launch; after that a long
+    /// press on the wordmark brings it back.
+    @AppStorage("seenAcronym", store: .standard) private var seenAcronym = false
+    @AppStorage("todayPlanChecked") private var checkedStore = ""
+
+    struct StudyTarget: Identifiable {
+        let id = UUID()
+        let deckIds: [String]
+        let name: String
+    }
+
+    enum TodayRoute: Hashable {
+        case deck(DeckRoute)
+        case exam(courseId: String, examEventId: String)
+    }
 
     private var totalDue: Int { decks.reduce(0) { $0 + $1.dueCount } }
 
-    /// The deck studied most recently that still has something due -- or,
-    /// failing that, the one with the most due.
-    private var jumpBackIn: AppStore.DeckSummary? {
-        let due = decks.filter { $0.dueCount > 0 }
-        return due.filter { $0.lastReviewedAt != nil }.max { ($0.lastReviewedAt ?? .distantPast) < ($1.lastReviewedAt ?? .distantPast) }
-            ?? due.max { $0.dueCount < $1.dueCount }
-    }
-
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                greeting
-                statsRow
-                if dailyGoal > 0 { goalCard }
-                if let deck = jumpBackIn { jumpBackCard(deck) }
-                if !exams.isEmpty { examsCard }
-                dueByCourse
+            VStack(alignment: .leading, spacing: GRASPSpace.l) {
+                header
+                hero
+                planCard
+                ForEach(Array(exams.dropFirst().prefix(2).enumerated()), id: \.element.id) { index, item in
+                    Button { open(item) } label: {
+                        ExamCard(item: item, standing: standings[item.event.id])
+                    }
+                    .buttonStyle(.plain)
+                    .revealOnAppear(index: 3 + index)
+                }
+                DueExplainerCard(totalDue: totalDue)
+                if let deck = Dashboard.jumpBackIn(decks) { jumpBackCard(deck) }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
         .background(GRASPColor.canvas.ignoresSafeArea())
-        .navigationTitle("Today")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { SyncIndicator() } }
+        .toolbar(.hidden, for: .navigationBar)
         .refreshable { store.sync.syncNow() }
         .task(id: store.revision) { load() }
-    }
-
-    private var greeting: some View {
-        let hour = Calendar.current.component(.hour, from: Date())
-        let part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
-        let first = store.profile.name.split(separator: " ").first.map(String.init) ?? store.profile.name
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("\(part), \(first)")
-                .font(.graspUI(size: 22, weight: .semibold))
-                .foregroundStyle(GRASPColor.textPrimary)
-            Text(totalDue == 0 ? "Nothing due right now -- a good moment to learn something new."
-                               : "\(totalDue) card\(totalDue == 1 ? "" : "s") due across your courses.")
-                .graspType(.body)
-                .foregroundStyle(GRASPColor.textSecondary)
+        .fullScreenCover(item: $studying, onDismiss: load) { target in
+            FlashcardStudyView(deckIds: target.deckIds, deckName: target.name)
         }
-    }
-
-    private var statsRow: some View {
-        HStack(spacing: 10) {
-            StatTile(value: "\(streak.days)", label: streak.days == 1 ? "day streak" : "day streak",
-                     icon: "flame.fill", tint: streak.studiedToday ? GRASPColor.accent : GRASPColor.textTertiary)
-            StatTile(value: "\(streak.reviewsToday)", label: "reviewed today", icon: "checkmark.circle.fill",
-                     tint: GRASPColor.success)
-            StatTile(value: "\(totalDue)", label: "due now", icon: "clock.fill", tint: GRASPColor.accent)
+        .navigationDestination(item: $route) { route in
+            switch route {
+            case .deck(let deck): DeckScreen(route: deck)
+            case .exam(let courseId, let examEventId): ExamScreen(courseId: courseId, examEventId: examEventId)
+            }
         }
-    }
-
-    private var goalCard: some View {
-        Panel {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    SectionLabel("Daily goal")
-                    Spacer()
-                    Text(streak.reviewsToday >= dailyGoal ? "Done for today"
-                         : "\(streak.reviewsToday) of \(dailyGoal)")
-                        .graspType(.meta)
-                        .foregroundStyle(streak.reviewsToday >= dailyGoal ? GRASPColor.success : GRASPColor.textSecondary)
-                }
-                ProgressBar(value: min(streak.reviewsToday, dailyGoal), total: dailyGoal,
-                            tint: streak.reviewsToday >= dailyGoal ? GRASPColor.success : GRASPColor.accent)
+        .onAppear {
+            if !seenAcronym {
+                showsAcronym = true
+                seenAcronym = true
             }
         }
     }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: GRASPSpace.m) {
+            HStack(spacing: GRASPSpace.s) {
+                HStack(spacing: 8) {
+                    BrandDot(size: 14)
+                    Text("GRASP").font(.graspDisplay(20)).foregroundStyle(GRASPColor.textPrimary)
+                }
+                .onLongPressGesture {
+                    withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) { showsAcronym.toggle() }
+                }
+                .sensoryFeedback(.selection, trigger: showsAcronym)
+                .accessibilityLabel("GRASP: Gather Resources, Apply, Study, Perform")
+                Spacer()
+                SyncIndicator()
+                if streak.days > 0 {
+                    StreakPill(days: streak.days, studiedToday: streak.studiedToday)
+                }
+            }
+            if showsAcronym {
+                acronym.transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                SectionLabel("Today")
+                Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+        }
+    }
+
+    private var acronym: some View {
+        let words = ["Gather", "Resources", "Apply", "Study", "Perform"]
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { ForEach(words, id: \.self, content: acronymWord) }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 12) { ForEach(words.prefix(3), id: \.self, content: acronymWord) }
+                HStack(spacing: 12) { ForEach(words.suffix(2), id: \.self, content: acronymWord) }
+            }
+        }
+        .onTapGesture { withAnimation(Motion.snappy) { showsAcronym = false } }
+    }
+
+    private func acronymWord(_ word: String) -> some View {
+        HStack(spacing: 4) {
+            Text(String(word.prefix(1))).font(.graspDisplay(16)).foregroundStyle(GRASPColor.accent)
+            Text(word).font(.graspUI(size: 13, weight: .medium)).foregroundStyle(GRASPColor.textPrimary)
+        }
+    }
+
+    // MARK: - Hero
+
+    private var hero: some View {
+        Group {
+            if let exam = exams.first {
+                CountdownHero(item: exam, days: store.daysUntil(exam.event), numeralSize: 132)
+            } else {
+                DueHero(totalDue: totalDue, numeralSize: 132)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .graspCard(padding: 22)
+        .contentShape(RoundedRectangle(cornerRadius: GRASPRadius.card))
+        .onTapGesture { if let exam = exams.first { open(exam) } }
+        .revealOnAppear(index: 0, distance: 14)
+    }
+
+    // MARK: - Plan
+
+    private static var todayKey: String { Date().formatted(.iso8601.year().month().day()) }
+
+    private var checked: Set<String> {
+        let parts = checkedStore.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, parts[0] == Self.todayKey else { return [] }
+        return Set(parts[1].split(separator: ",").map(String.init))
+    }
+
+    private func toggle(_ step: TodayPlan.Step) {
+        var set = checked
+        if set.contains(step.id) { set.remove(step.id) } else { set.insert(step.id) }
+        withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) {
+            checkedStore = Self.todayKey + "|" + set.sorted().joined(separator: ",")
+        }
+    }
+
+    private var minutesLeft: Int {
+        plan.steps.filter { !checked.contains($0.id) }.reduce(0) { $0 + $1.minutes }
+    }
+
+    private var allDone: Bool { !plan.steps.isEmpty && plan.steps.allSatisfy { checked.contains($0.id) } }
+
+    private var planCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Today's plan")
+                    .font(.graspDisplay(22))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Spacer()
+                if !plan.steps.isEmpty {
+                    Text(allDone ? "All done" : "about \(minutesLeft) min")
+                        .graspType(.meta)
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(minutesLeft)))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
+            .padding(.bottom, GRASPSpace.s)
+
+            if plan.steps.isEmpty {
+                Text("Nothing due and no exams coming up.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .padding(.vertical, GRASPSpace.s)
+            } else {
+                ForEach(Array(plan.steps.enumerated()), id: \.element.id) { index, step in
+                    if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                    PlanStepRow(step: step, isDone: checked.contains(step.id),
+                                onToggle: { toggle(step) }, onOpen: { run(step) })
+                        .revealOnAppear(index: index + 1)
+                }
+                Button {
+                    if let next = plan.steps.first(where: { !checked.contains($0.id) }) { run(next) }
+                } label: {
+                    Text(allDone ? "Plan done" : (checked.isEmpty ? "Start today's plan" : "Continue today's plan"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(GRASPProminentButton())
+                .disabled(allDone)
+                .overlay { CelebrationBurst(trigger: allDone) }
+                .padding(.top, GRASPSpace.m)
+            }
+        }
+        .graspCard(padding: 20)
+    }
+
+    private func run(_ step: TodayPlan.Step) {
+        switch step.action {
+        case .review(let deckIds, let name):
+            studying = StudyTarget(deckIds: deckIds, name: name)
+        case .continueDeck(_, let deckId, let name):
+            studying = StudyTarget(deckIds: [deckId], name: name)
+        case .openExam(let eventId):
+            if let item = exams.first(where: { $0.event.id == eventId }) { open(item) }
+        }
+    }
+
+    /// An exam with a study guide opens its page; otherwise its deck, else
+    /// the course's cards.
+    private func open(_ item: AppStore.UpcomingEvent) {
+        guard let courseId = item.event.courseId else { return }
+        if store.hasStudyGuide(examEventId: item.event.id) {
+            route = .exam(courseId: courseId, examEventId: item.event.id)
+        } else if let deckId = item.event.deckId, let deck = try? store.deck(deckId) {
+            route = .deck(DeckRoute(scope: .deck(deckId), name: deck.name))
+        } else {
+            route = .deck(DeckRoute(scope: .course(courseId), name: item.courseName ?? "All Cards"))
+        }
+    }
+
+    // MARK: - Jump back in
 
     private func jumpBackCard(_ deck: AppStore.DeckSummary) -> some View {
-        NavigationLink {
-            DeckScreen(route: DeckRoute(scope: .deck(deck.deckId), name: deck.deckName))
+        Button {
+            route = .deck(DeckRoute(scope: .deck(deck.deckId), name: deck.deckName))
         } label: {
-            Panel {
-                HStack(spacing: 14) {
-                    Image(systemName: "play.fill")
-                        .font(.graspUI(size: 16))
-                        .foregroundStyle(GRASPColor.dynamic(light: 0xFFFFFF, dark: 0x16130C))
-                        .frame(width: 42, height: 42)
-                        .background(GRASPColor.accent, in: Circle())
+            VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                SectionLabel(deck.dueCount > 0 ? "Pick up where you left off" : "Last studied")
+                HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
-                        SectionLabel("Jump back in")
-                        Text(deck.deckName).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
-                        Text("\(deck.courseName) · \(deck.dueCount) due")
-                            .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                        Text(deck.deckName).font(.graspDisplay(19)).foregroundStyle(GRASPColor.textPrimary)
+                        Text(deck.courseName).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
                     }
                     Spacer()
+                    if deck.dueCount > 0 {
+                        Text("\(deck.dueCount) due").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                    }
                     Image(systemName: "chevron.right").foregroundStyle(GRASPColor.textTertiary)
                 }
+                ProgressBar(value: deck.reviewedCount, total: deck.cardCount)
             }
+            .graspCard(padding: 20)
         }
         .buttonStyle(.plain)
     }
 
-    private var examsCard: some View {
-        Panel {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionLabel("Coming up")
-                ForEach(exams) { upcoming in
-                    examRow(upcoming)
-                }
-            }
-        }
-    }
-
-    /// An exam with a study guide opens its page; the rest are just dates.
-    @ViewBuilder
-    private func examRow(_ upcoming: AppStore.UpcomingEvent) -> some View {
-        if let courseId = upcoming.event.courseId, store.hasStudyGuide(examEventId: upcoming.event.id) {
-            NavigationLink {
-                ExamScreen(courseId: courseId, examEventId: upcoming.event.id)
-            } label: {
-                examLine(upcoming, hasGuide: true)
-            }
-            .buttonStyle(.plain)
-        } else {
-            examLine(upcoming, hasGuide: false)
-        }
-    }
-
-    private func examLine(_ upcoming: AppStore.UpcomingEvent, hasGuide: Bool) -> some View {
-        let plan = store.examPlan(for: upcoming.event)
-        return VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 12) {
-                        Image(systemName: upcoming.event.kind == .quiz ? "questionmark.circle" : "graduationcap")
-                            .foregroundStyle(GRASPColor.accent)
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(upcoming.event.title).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
-                                .lineLimit(1)
-                            Text(upcoming.courseName ?? "No course")
-                                .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-                        }
-                        Spacer()
-                        Text(daysAway(upcoming.event.startsAt))
-                            .graspType(.meta)
-                            .foregroundStyle(GRASPColor.accent)
-                        if hasGuide {
-                            Image(systemName: "chevron.right")
-                                .font(.graspUI(size: 12, weight: .semibold))
-                                .foregroundStyle(GRASPColor.textTertiary)
-                        }
-                    }
-                    .contentShape(Rectangle())
-            if !plan.isEmpty {
-                Text("Today: " + plan.map(\.text).joined(separator: " · "))
-                    .graspType(.meta)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 34)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var dueByCourse: some View {
-        let byCourse = Dictionary(grouping: decks.filter { $0.dueCount > 0 }, by: \.courseName)
-            .map { (name: $0.key, due: $0.value.reduce(0) { $0 + $1.dueCount }) }
-            .sorted { $0.due > $1.due }
-        if !byCourse.isEmpty {
-            Panel {
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionLabel("Due by course")
-                    ForEach(byCourse, id: \.name) { course in
-                        HStack {
-                            Text(course.name).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
-                            Spacer()
-                            DueBadge(count: course.due)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func daysAway(_ date: Date) -> String {
-        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()),
-                                                   to: Calendar.current.startOfDay(for: date)).day ?? 0
-        switch days {
-        case ..<1: return "Today"
-        case 1: return "Tomorrow"
-        default: return "in \(days) days"
-        }
-    }
-
     private func load() {
         decks = (try? store.dashboardDecks()) ?? []
-        exams = (try? store.upcomingExams(within: 30, limit: 5)) ?? []
+        exams = (try? store.upcomingExams(within: 30, limit: 4)) ?? []
+        var byId: [String: ExamPlan.Standing] = [:]
+        for item in exams {
+            let ids = store.planDeckIds(for: item.event)
+            if !ids.isEmpty { byId[item.event.id] = store.examStanding(deckIds: ids) }
+        }
+        standings = byId
+        plan = store.todayPlan(exams: exams, decks: decks)
         streak = store.studyStreak()
     }
 }
 
-/// A GRASP panel: the surface step up from the canvas.
+/// A GRASP panel: the surface step up from the canvas, with a hairline.
 struct Panel<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
         content
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct StatTile: View {
-    let value: String
-    let label: String
-    let icon: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon).font(.graspUI(size: 14)).foregroundStyle(tint)
-            Text(value).font(.graspUI(size: 24, weight: .semibold).monospacedDigit())
-                .foregroundStyle(GRASPColor.textPrimary)
-            Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .graspCard(padding: 16)
     }
 }

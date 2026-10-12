@@ -11,6 +11,10 @@ struct GRASPiOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(AppearanceChoice.storageKey, store: .standard) private var appearance = AppearanceChoice.dark.rawValue
 
+    init() {
+        _ = GRASPFonts.available
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -32,6 +36,7 @@ struct GRASPiOSApp: App {
                 }
             }
             .tint(GRASPColor.accent)
+            .font(.graspBody)
             .preferredColorScheme((AppearanceChoice(rawValue: appearance) ?? .dark).colorScheme)
             .onOpenURL { url in
                 if let link = WidgetLink(url: url) {

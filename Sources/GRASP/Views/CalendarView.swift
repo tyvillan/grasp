@@ -42,19 +42,6 @@ extension AppStore {
     }
 }
 
-extension CalendarEvent {
-    /// The time range as shown on a chip or row -- nil for an all-day
-    /// event, which is most exams. (`countdownText`/`daysAway` live in
-    /// GRASPCore alongside the record itself, where the calendar-day math
-    /// is unit-tested.)
-    var timeText: String? {
-        guard !isAllDay else { return nil }
-        let start = startsAt.formatted(date: .omitted, time: .shortened)
-        guard let endsAt else { return start }
-        return "\(start) – \(endsAt.formatted(date: .omitted, time: .shortened))"
-    }
-}
-
 /// The calendar destination: exams, deadlines and study blocks in month,
 /// week or agenda form. Reached from the sidebar via
 /// `ContentView.calendarRoute`, the same sentinel-selection trick Home

@@ -122,9 +122,9 @@ struct ExamScreen: View {
                     Spacer()
                     Image(systemName: "chevron.right").font(.graspUI(size: 13, weight: .semibold))
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(GRASPColor.ink)
                 .padding(14)
-                .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(GRASPColor.brand, in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
             }
             .buttonStyle(.plain)
         }
