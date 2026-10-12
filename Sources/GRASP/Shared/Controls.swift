@@ -227,3 +227,43 @@ struct BackBar: View {
         .background(alignment: .bottom) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
     }
 }
+
+/// A menu drawn as GRASP's outlined pill. A styled label inside `Menu` is
+/// flattened to tinted text on the Mac, so the pill is drawn underneath and
+/// an invisible menu sits on top of it to take the click.
+struct PillMenu<Items: View>: View {
+    let title: String
+    var systemImage: String? = nil
+    var isBusy = false
+    @ViewBuilder let items: () -> Items
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isBusy {
+                ProgressView().controlSize(.small)
+            } else if let systemImage {
+                Image(systemName: systemImage).font(.graspUI(size: 11, weight: .medium))
+            }
+            Text(title)
+            Image(systemName: "chevron.down").font(.graspUI(size: 9, weight: .semibold))
+        }
+        .font(.graspUI(size: 13.5, weight: .medium))
+        .foregroundStyle(GRASPColor.textPrimary)
+        .padding(.horizontal, 16)
+        .frame(height: 30)
+        .background(Capsule().fill(hovering ? GRASPColor.surfaceRaised : .clear))
+        .overlay(Capsule().strokeBorder(GRASPColor.textPrimary.opacity(0.4), lineWidth: 1))
+        .overlay {
+            Menu { items() } label: {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .opacity(0.011)
+        }
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .animation(Motion.sweep, value: hovering)
+    }
+}

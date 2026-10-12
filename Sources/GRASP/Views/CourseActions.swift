@@ -108,10 +108,13 @@ struct CourseEditSheet: View {
         _course = State(initialValue: course)
     }
 
-    private static let palette: [(name: String, hex: String)] = [
-        ("Amber", "F2B84B"), ("Teal", "5FC9B5"), ("Rose", "E2725B"),
-        ("Violet", "9B8BF4"), ("Sky", "5AA9E6"), ("Lime", "A3C644"),
-    ]
+    /// Colors other courses in the same term already use: a term never
+    /// shows two courses in one color.
+    private var takenHexes: Set<String> {
+        Set(store.courses(inSemester: course.semesterId)
+            .filter { $0.id != course.id }
+            .compactMap { $0.colorHex?.uppercased() })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -133,12 +136,14 @@ struct CourseEditSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Color").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                 HStack(spacing: 8) {
-                    ForEach(Self.palette, id: \.hex) { swatch in
+                    ForEach(CoursePalette.slots) { swatch in
+                        let taken = takenHexes.contains(swatch.hex)
                         Button {
-                            course.colorHex = course.colorHex == swatch.hex ? nil : swatch.hex
+                            course.colorHex = swatch.hex
                         } label: {
                             Circle()
-                                .fill(Color(hex: swatch.hex))
+                                .fill(swatch.color)
+                                .opacity(taken ? 0.25 : 1)
                                 .frame(width: 22, height: 22)
                                 .overlay(
                                     Circle().stroke(
@@ -149,7 +154,8 @@ struct CourseEditSheet: View {
                                 )
                         }
                         .buttonStyle(.plain)
-                        .help(swatch.name)
+                        .disabled(taken)
+                        .help(taken ? "\(swatch.name) (used by another course this term)" : swatch.name)
                     }
                 }
             }

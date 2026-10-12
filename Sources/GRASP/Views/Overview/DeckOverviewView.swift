@@ -152,7 +152,9 @@ struct DeckOverviewView: View {
                         .frame(height: 1)
                         .padding(.vertical, 40)
                 }
-                if entry.isStale { staleBar(entry) }
+                // Staleness is said once, by `staleNotice` above the
+                // lessons, with each changed note's own header carrying a
+                // small "Out of date" chip -- not a third banner per note.
                 OverviewSectionsView(overview: entry) { cardIds in
                     if let first = cardIds.first { onOpenCard(first) }
                 }
@@ -291,24 +293,6 @@ struct DeckOverviewView: View {
 
     /// Above a note whose source changed: says so where the reader is, with
     /// a rewrite for just this note.
-    private func staleBar(_ entry: RenderedOverview) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath").foregroundStyle(GRASPColor.accent)
-            Text("The note changed after this overview was written, so it may be out of date.")
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textSecondary)
-            Spacer(minLength: 8)
-            if isGeneratorAvailable {
-                Button("Rewrite This Note") { prepare([entry.materialId]) }
-                    .buttonStyle(GRASPQuietButton())
-                    .disabled(isWriting)
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(GRASPColor.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .padding(.bottom, 16)
-    }
-
     private func staleNotice(_ overview: DeckOverview) -> some View {
         let stale = overview.staleEntries
         return HStack(spacing: 10) {

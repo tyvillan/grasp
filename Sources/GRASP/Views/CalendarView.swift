@@ -16,22 +16,29 @@ extension CalendarEventKind {
         }
     }
 
+    /// For an event with no course: exams in the brand yellow, everything
+    /// else neutral. An event with a course takes its course color
+    /// (`AppStore.eventTint`); the icon still says what kind it is.
     var tint: Color {
         switch self {
-        case .exam: return GRASPColor.rejected
-        case .quiz: return GRASPColor.accent
-        case .deadline: return GRASPColor.textSecondary
-        case .study: return GRASPColor.success
+        case .exam: return GRASPColor.accent
+        case .quiz, .study: return GRASPColor.textSecondary
+        case .deadline: return GRASPColor.textTertiary
         }
     }
 
     var softTint: Color {
         switch self {
-        case .exam: return GRASPColor.rejectedSoft
-        case .quiz: return GRASPColor.accentSoft
-        case .deadline: return GRASPColor.inset
-        case .study: return GRASPColor.successSoft
+        case .exam: return GRASPColor.accentSoft
+        default: return GRASPColor.inset
         }
+    }
+}
+
+extension AppStore {
+    /// An event's color on the calendar: its course's, else its kind's.
+    func eventTint(_ event: CalendarEvent) -> Color {
+        courseColor(id: event.courseId) ?? event.kind.tint
     }
 }
 
@@ -432,7 +439,7 @@ private struct DayCell: View {
                     .padding(.horizontal, isToday ? 5 : 0)
                     .padding(.vertical, isToday ? 1 : 0)
                     .background {
-                        if isToday { Capsule().fill(GRASPColor.accent) }
+                        if isToday { Capsule().fill(GRASPColor.brand) }
                     }
                 // The workload dot yields to the hover "+" rather than
                 // sitting beside it: two 9pt marks in one corner of a
@@ -476,12 +483,14 @@ private struct DayCell: View {
     }
 
     private var dayNumberColor: Color {
-        if isToday { return GRASPColor.canvas }
+        if isToday { return GRASPColor.ink }
         return isInMonth ? GRASPColor.textPrimary : GRASPColor.textTertiary
     }
 }
 
 private struct EventChip: View {
+    @Environment(AppStore.self) private var store
+    private var tint: Color { store.eventTint(event) }
     let event: CalendarEvent
     let onOpen: () -> Void
 
@@ -490,7 +499,7 @@ private struct EventChip: View {
             HStack(spacing: 4) {
                 Image(systemName: event.kind.icon)
                     .font(.graspUI(size: 8, weight: .semibold))
-                    .foregroundStyle(event.kind.tint)
+                    .foregroundStyle(tint)
                 Text(event.title.isEmpty ? event.kind.label : event.title)
                     .font(.graspUI(size: 10, weight: .medium))
                     .foregroundStyle(GRASPColor.textPrimary)
@@ -499,7 +508,7 @@ private struct EventChip: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(event.kind.softTint, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
         }
         .buttonStyle(.plain)
         .help(event.title)
@@ -583,6 +592,8 @@ private struct WeekColumn: View {
 }
 
 private struct WeekEventCard: View {
+    @Environment(AppStore.self) private var store
+    private var tint: Color { store.eventTint(event) }
     let event: CalendarEvent
     let onOpen: () -> Void
 
@@ -592,10 +603,10 @@ private struct WeekEventCard: View {
                 HStack(spacing: 4) {
                     Image(systemName: event.kind.icon)
                         .font(.graspUI(size: 9, weight: .semibold))
-                        .foregroundStyle(event.kind.tint)
+                        .foregroundStyle(tint)
                     Text(event.kind.label)
                         .graspType(.eyebrow)
-                        .foregroundStyle(event.kind.tint)
+                        .foregroundStyle(tint)
                 }
                 Text(event.title.isEmpty ? event.kind.label : event.title)
                     .graspType(.body)
@@ -610,7 +621,7 @@ private struct WeekEventCard: View {
             }
             .padding(7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(event.kind.softTint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -668,6 +679,7 @@ private struct AgendaList: View {
 
 private struct AgendaRow: View {
     @Environment(AppStore.self) private var store
+    private var tint: Color { store.eventTint(event) }
     let event: CalendarEvent
     let onOpen: () -> Void
     let onStudy: () -> Void
@@ -675,14 +687,14 @@ private struct AgendaRow: View {
     var body: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(event.kind.tint)
+                .fill(tint)
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title.isEmpty ? event.kind.label : event.title)
                     .graspType(.rowTitle)
                     .foregroundStyle(GRASPColor.textPrimary)
                 HStack(spacing: 5) {
-                    Text(event.kind.label).foregroundStyle(event.kind.tint)
+                    Text(event.kind.label).foregroundStyle(tint)
                     if let courseName {
                         Text("·").foregroundStyle(GRASPColor.textTertiary)
                         Text(courseName).foregroundStyle(GRASPColor.textSecondary)

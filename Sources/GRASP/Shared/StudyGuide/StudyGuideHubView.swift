@@ -76,28 +76,45 @@ struct StudyGuideHubView<Destination: View>: View {
         .onChange(of: store.revision) { load() }
     }
 
-    private func load() { courses = store.studyGuideHub() }
+    /// Only exams that have a guide: an exam without one is a calendar
+    /// entry, not a study guide, and listing each with "no study guide yet"
+    /// filled the page with the same empty state over and over.
+    private func load() {
+        courses = store.studyGuideHub().filter { course in
+            course.exams.contains { !$0.guides.isEmpty } || !course.practiceSets.isEmpty
+        }
+    }
 
     // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
         if courses.isEmpty {
-            ContentUnavailableView {
-                Label("No study guides yet", systemImage: "graduationcap")
-            } description: {
-                Text("Add a professor's or your own exam guide from a course's Add Study Guide button, "
-                     + "or have GRASP write a practice guide from your lecture decks.")
-            } actions: {
-                Button("New Study Guide…") { showingGenerator = true }
-                    .buttonStyle(GRASPProminentButton())
-                    .disabled(job != nil)
+            VStack(alignment: .leading, spacing: 0) {
+                #if os(macOS)
+                pageHeader(showsAction: false)
+                #endif
+                ContentUnavailableView {
+                    Label("No study guides yet", systemImage: "graduationcap")
+                } description: {
+                    Text("Add a professor's or your own exam guide from a course's Add Guide button, "
+                         + "or have GRASP write a practice guide from your lecture decks.")
+                } actions: {
+                    Button("Create guide") { showingGenerator = true }
+                        .buttonStyle(GRASPProminentButton())
+                        .disabled(job != nil)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    ForEach(courses) { course in courseBlock(course) }
+                VStack(alignment: .leading, spacing: 32) {
+                    #if os(macOS)
+                    pageHeader(showsAction: true)
+                    #endif
+                    ForEach(Array(courses.enumerated()), id: \.element.id) { index, course in
+                        courseBlock(course).revealOnAppear(index: index)
+                    }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
                 .padding(.horizontal, 24)
@@ -107,12 +124,36 @@ struct StudyGuideHubView<Destination: View>: View {
         }
     }
 
+    /// The Mac page's title and its one action (the window has no toolbar).
+    private func pageHeader(showsAction: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Study guides")
+                .graspType(.display)
+                .foregroundStyle(GRASPColor.textPrimary)
+            Spacer(minLength: GRASPSpace.m)
+            if showsAction {
+                Button {
+                    showingGenerator = true
+                } label: {
+                    Label("New study guide", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(GRASPProminentButton())
+                .disabled(job != nil)
+                .help("Write a practice guide from your decks' notes")
+            }
+        }
+        .padding(.horizontal, showsAction ? 0 : 24)
+        .padding(.top, showsAction ? 0 : 24)
+    }
+
     private func courseBlock(_ course: StudyGuideActions.HubCourse) -> some View {
-        let upcoming = course.exams.filter { !$0.isPast }
-        let past = course.exams.filter(\.isPast)
+        let guided = course.exams.filter { !$0.guides.isEmpty }
+        let upcoming = guided.filter { !$0.isPast }
+        let past = guided.filter(\.isPast)
         return VStack(alignment: .leading, spacing: 10) {
             Text(course.course.name)
-                .graspType(.display)
+                .font(.graspDisplay(22))
+                .tracking(-0.3)
                 .foregroundStyle(GRASPColor.textPrimary)
             if !upcoming.isEmpty {
                 group("Upcoming exams", upcoming.map { examRow($0, in: course.course) })
@@ -128,19 +169,16 @@ struct StudyGuideHubView<Destination: View>: View {
 
     private func group(_ title: String, _ rows: [some View]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .graspType(.eyebrow)
-                .textCase(.uppercase)
-                .foregroundStyle(GRASPColor.textTertiary)
-                .padding(.bottom, 6)
+            SectionLabel(title)
+                .padding(.bottom, 8)
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                     if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
                     row
                 }
             }
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(GRASPColor.hairline))
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous).strokeBorder(GRASPColor.hairline))
         }
     }
 

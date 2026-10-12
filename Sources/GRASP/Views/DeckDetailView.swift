@@ -108,6 +108,7 @@ struct DeckDetailView: View {
     /// notice and the duplicate notice sit above this and are shared by
     /// both -- they're facts about the deck, not about either view of it.
     @State private var contentTab: ContentTab = .cards
+    @Namespace private var tabSwitch
 
     private enum ContentTab: String, CaseIterable, Identifiable {
         case cards = "Cards", overview = "Overview"
@@ -451,8 +452,8 @@ struct DeckDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(deckName)
-                        .font(.graspUI(size: 20, weight: .semibold))
-                        .tracking(-0.4)
+                        .font(.graspDisplay(30))
+                        .tracking(-0.6)
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(2)
                     compositionLine
@@ -494,9 +495,9 @@ struct DeckDetailView: View {
 
     @ViewBuilder
     private var studyModeButtons: some View {
-        modeButton("Study", "rectangle.stack.fill", prominent: false) { isStudying = true }
+        modeButton("Study", "rectangle.stack.fill", prominent: true) { isStudying = true }
             .disabled(dueCount == 0)
-        modeButton("Learn", "graduationcap.fill", prominent: dueCount == 0 && activeCount > 0) {
+        modeButton("Learn", "graduationcap.fill", prominent: false) {
             isLearning = true
         }
         .disabled(activeCount == 0)
@@ -514,10 +515,38 @@ struct DeckDetailView: View {
     @ViewBuilder
     private var cardActionButtons: some View {
         addMenuButton
-        filesButton
-        problemsButton
-        if contentTab == .cards, isGeneratorAvailable {
-            refineButton(.everything)
+        moreMenu
+    }
+
+    /// Files, Problems and Refine with AI: reachable, but out of the row so
+    /// the study modes read first.
+    private var moreMenu: some View {
+        let noun = filesNoun
+        let refineCount = refineCount(.everything)
+        return PillMenu(title: "More", systemImage: "ellipsis") {
+            Button {
+                showingDeckFiles = true
+            } label: {
+                Label("Files", systemImage: "doc.on.doc")
+            }
+            Button {
+                showingCodeQuestions = true
+            } label: {
+                Label(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function")
+            }
+            if contentTab == .cards, isGeneratorAvailable {
+                Divider()
+                Button {
+                    refineConfirmation = .everything
+                } label: {
+                    Label(isRefiningDeck ? "Refining…" : "Refine with AI", systemImage: "checkmark.seal")
+                }
+                .disabled(isRefiningDeck || aiActivity != nil || refineCount == 0)
+            }
+        }
+        .help("Files, practice problems and Refine with AI")
+        .sheet(isPresented: $showingDeckFiles) {
+            DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
         }
     }
 
@@ -528,7 +557,7 @@ struct DeckDetailView: View {
             ForEach(ContentTab.allCases) { tab in
                 let selected = contentTab == tab
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { contentTab = tab }
+                    withAnimation(Motion.snappy) { contentTab = tab }
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
@@ -536,13 +565,15 @@ struct DeckDetailView: View {
                         Text(tab.rawValue)
                             .font(.graspUI(size: 14, weight: .semibold))
                     }
-                    .foregroundStyle(selected ? Color.black.opacity(0.88) : GRASPColor.textSecondary)
+                    .foregroundStyle(selected ? GRASPColor.ink : GRASPColor.textSecondary)
                     .padding(.horizontal, 18)
-                    .frame(height: 36)
-                    .background(
-                        selected ? GRASPColor.accent : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    )
+                    .frame(height: 32)
+                    .background {
+                        if selected {
+                            Capsule().fill(GRASPColor.brand)
+                                .matchedGeometryEffect(id: "content-tab", in: tabSwitch)
+                        }
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -550,16 +581,25 @@ struct DeckDetailView: View {
             }
         }
         .padding(3)
-        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(GRASPColor.hairlineStrong))
+        .background(GRASPColor.surface, in: Capsule())
+        .overlay(Capsule().strokeBorder(GRASPColor.hairline))
     }
 
     /// Reads as a sentence -- "231 cards · 12 due · 40 understood" -- with
     /// only the figure that needs attention carrying the accent.
     private var compositionLine: some View {
         HStack(spacing: 5) {
-            Text("\(activeCount) card\(activeCount == 1 ? "" : "s")")
-                .foregroundStyle(GRASPColor.textSecondary)
+            // Approved cards and drafts counted separately: "0 cards" over a
+            // list of 11 drafts waiting for review read as a contradiction.
+            if activeCount > 0 || draftCount == 0 {
+                Text("\(activeCount) card\(activeCount == 1 ? "" : "s")")
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
+            if draftCount > 0 {
+                if activeCount > 0 { Text("·").foregroundStyle(GRASPColor.textTertiary) }
+                Text("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review")
+                    .foregroundStyle(GRASPColor.textSecondary)
+            }
             if dueCount > 0 {
                 Text("·").foregroundStyle(GRASPColor.textTertiary)
                 Text("\(dueCount) due").foregroundStyle(GRASPColor.accent)
@@ -601,7 +641,7 @@ struct DeckDetailView: View {
     /// (New Card, Files) with the AI action nested inside the first.
     private var addMenuButton: some View {
         let noun = filesNoun
-        return Menu {
+        return PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
             if contentTab == .cards {
                 Button("New Card…") { isCreatingCard = true }
                 if isGeneratorAvailable {
@@ -616,53 +656,8 @@ struct DeckDetailView: View {
             }
             Button("Add Files to \(noun)…") { onAddFiles() }
                 .disabled(store.isImporting)
-        } label: {
-            HStack(spacing: 5) {
-                if store.isImporting {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "plus").font(.graspUI(size: 11))
-                }
-                Text("Add")
-                Image(systemName: "chevron.down").font(.graspUI(size: 8, weight: .semibold))
-            }
-            .font(.graspUI(size: 13, weight: .semibold))
-            .tracking(-0.1)
-            .foregroundStyle(Color.black.opacity(0.88))
-            .padding(.horizontal, 14)
-            .frame(height: 28)
-            .background(GRASPColor.accent, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                    .blendMode(.plusLighter)
-            )
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .help("Add a card, generate cards with AI, or add files to this \(noun.lowercased())")
-    }
-
-    /// The deck's saved practice problems, and writing more: code, matrix and
-    /// calculation problems, scenario questions that tests mix in.
-    private var problemsButton: some View {
-        modeButton(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", "function", prominent: false) {
-            showingCodeQuestions = true
-        }
-        .help("Saved and new practice problems: worked code and calculation questions, separate from Test")
-    }
-
-    /// Which files are behind this deck (or course).
-    private var filesButton: some View {
-        let noun = filesNoun
-        return modeButton("Files", "doc.on.doc", prominent: false) { showingDeckFiles = true }
-            .help("See which files this \(noun.lowercased())'s cards came from")
-            .sheet(isPresented: $showingDeckFiles) {
-                DeckFilesSheet(
-                    deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased()
-                )
-            }
     }
 
     /// The single unified action that replaced the separate "Refine with
@@ -1351,7 +1346,6 @@ private struct CardPreviewPane: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(GRASPColor.hairline, lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
         )
         .contentShape(Rectangle())
         .onTapGesture { isFlipped.toggle() }

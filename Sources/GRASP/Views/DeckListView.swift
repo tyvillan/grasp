@@ -60,6 +60,7 @@ struct DeckListView: View {
     @State private var deletingDeck: Deck?
     @State private var deletingDeckCardCount = 0
     @State private var dropTargetDeckId: String?
+    @Namespace private var selection
 
     /// Summed from `store.deckCounts`, the same per-deck counts every real
     /// row already reads -- free of any extra query, and it updates the
@@ -92,22 +93,25 @@ struct DeckListView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            List(selection: $selectedDeckId) {
-                AllCardsRow(cardCount: allCardsCounts.cardCount, dueCount: allCardsCounts.dueCount)
-                    .tag(Self.allCardsId)
-                ForEach(exams) { exam in
-                    ExamRow(exam: exam)
-                        .tag(Self.examRowId(exam.id))
-                }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    DeckListRow(isSelected: selectedDeckId == Self.allCardsId, namespace: selection) {
+                        AllCardsRow(cardCount: allCardsCounts.cardCount, dueCount: allCardsCounts.dueCount)
+                    } action: { selectedDeckId = Self.allCardsId }
 
-                ForEach(sortedDecks) { deck in
-                    let counts = store.deckCounts[deck.id] ?? (0, 0)
-                    DeckRow(name: deck.name, kicker: kickers[deck.id],
-                            cardCount: counts.cardCount, dueCount: counts.dueCount)
-                        .tag(deck.id)
-                        .listRowBackground(
-                            dropTargetDeckId == deck.id ? GRASPColor.accentSoft : Color.clear
-                        )
+                    ForEach(exams) { exam in
+                        DeckListRow(isSelected: selectedDeckId == Self.examRowId(exam.id), namespace: selection) {
+                            ExamRow(exam: exam)
+                        } action: { selectedDeckId = Self.examRowId(exam.id) }
+                    }
+
+                    ForEach(sortedDecks) { deck in
+                        let counts = store.deckCounts[deck.id] ?? (0, 0)
+                        DeckListRow(isSelected: selectedDeckId == deck.id, namespace: selection,
+                                    isDropTarget: dropTargetDeckId == deck.id) {
+                            DeckRow(name: deck.name, kicker: kickers[deck.id],
+                                    cardCount: counts.cardCount, dueCount: counts.dueCount)
+                        } action: { selectedDeckId = deck.id }
                         .rowActions(inline: true) {
                             DeckContextMenu(
                                 deck: deck,
@@ -123,10 +127,13 @@ struct DeckListView: View {
                         } isTargeted: { isTargeted in
                             dropTargetDeckId = isTargeted ? deck.id : nil
                         }
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+                .animation(Motion.snappy, value: selectedDeckId)
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
+            .scrollIndicators(.automatic)
         }
         .sheet(item: $renamingDeck) { deck in
             DeckRenameSheet(deck: deck, onRenamed: load)
@@ -155,9 +162,7 @@ struct DeckListView: View {
     /// it's no longer duplicated in the main window toolbar.
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Decks")
-                .graspType(.eyebrow)
-                .foregroundStyle(GRASPColor.textSecondary)
+            SectionLabel("Decks")
             Spacer(minLength: 4)
             Menu {
                 Picker("Sort Decks", selection: $sortOption) {
@@ -230,18 +235,7 @@ private struct AllCardsRow: View {
                 .graspType(.rowTitle)
                 .fontWeight(.semibold)
             Spacer(minLength: 4)
-            if dueCount > 0 {
-                Text("\(dueCount)")
-                    .font(.graspUI(size: 10, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(GRASPColor.accent)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(GRASPColor.accentSoft, in: Capsule())
-            }
-            Text("\(cardCount)")
-                .graspType(.meta)
-                .monospacedDigit()
-                .foregroundStyle(GRASPColor.textTertiary)
-                .frame(minWidth: 26, alignment: .trailing)
+            DeckCountLabel(cardCount: cardCount, dueCount: dueCount)
         }
         .padding(.vertical, 2)
     }
@@ -286,27 +280,81 @@ private struct DeckRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 if let kicker {
                     Text(kicker)
-                        .font(.graspCaption2.weight(.semibold))
-                        .foregroundStyle(GRASPColor.accent)
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textTertiary)
                 }
                 Text(name)
                     .graspType(.rowTitle)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if dueCount > 0 {
-                Text("\(dueCount)")
-                    .font(.graspUI(size: 10, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(GRASPColor.accent)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(GRASPColor.accentSoft, in: Capsule())
-            }
-            Text("\(cardCount)")
-                .graspType(.meta)
-                .monospacedDigit()
-                .foregroundStyle(GRASPColor.textTertiary)
-                .frame(minWidth: 26, alignment: .trailing)
+            DeckCountLabel(cardCount: cardCount, dueCount: dueCount)
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// One number per row, labelled: "39 due" (a yellow pill) while cards are
+/// waiting, else "41 cards". The two bare numbers side by side never said
+/// which was which; the total is still in the tooltip.
+private struct DeckCountLabel: View {
+    let cardCount: Int
+    let dueCount: Int
+
+    var body: some View {
+        Group {
+            if dueCount > 0 {
+                Text("\(dueCount) due")
+                    .font(.graspUI(size: 11, weight: .semibold))
+                    .foregroundStyle(GRASPColor.ink)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(GRASPColor.brand, in: Capsule())
+            } else {
+                Text("\(cardCount) card\(cardCount == 1 ? "" : "s")")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+        }
+        .monospacedDigit()
+        .fixedSize()
+        .help("\(cardCount) card\(cardCount == 1 ? "" : "s"), \(dueCount) due for review")
+    }
+}
+
+/// A deck-list row: the sliding yellow bar and a raised fill when selected.
+private struct DeckListRow<Content: View>: View {
+    let isSelected: Bool
+    let namespace: Namespace.ID
+    var isDropTarget = false
+    @ViewBuilder let content: () -> Content
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            content()
+                .foregroundStyle(GRASPColor.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isDropTarget ? GRASPColor.accentSoft
+                              : isSelected ? GRASPColor.surfaceRaised
+                              : hovering ? GRASPColor.surfaceRaised.opacity(0.6) : .clear)
+                )
+                .overlay(alignment: .leading) {
+                    if isSelected {
+                        Capsule().fill(GRASPColor.brand)
+                            .frame(width: 3, height: 18)
+                            .offset(x: -5)
+                            .matchedGeometryEffect(id: "deck-selection", in: namespace)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
