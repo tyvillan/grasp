@@ -76,6 +76,17 @@ struct DeckDetailView: View {
         var id: String { rawValue }
     }
     @State private var fillGapsResult: Int?
+    /// Cards the current (or last) generation run has written, newest
+    /// first -- shown at the top of the list, so a run is visible where the
+    /// eye already is. Cleared when the scope changes.
+    @State private var recentAIIds: [String] = []
+    /// Of those, the ones that have landed but whose row hasn't slid in yet.
+    @State private var hiddenNewIds: Set<String> = []
+    /// Every card id the live view has seen, so only arrivals animate.
+    @State private var seenIds: Set<String> = []
+    /// Title of the note the newest card came from.
+    @State private var liveSourceTitle: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingGenerateSheet = false
     @State private var showingCodeQuestions = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
@@ -168,10 +179,11 @@ struct DeckDetailView: View {
         // With no active cards the filter picker is hidden, so a filter
         // carried in from another deck would blank the list with no way to
         // clear it. Only active cards have a mastery level to filter on.
+        let revealed = hiddenNewIds.isEmpty ? cards : cards.filter { !hiddenNewIds.contains($0.id) }
         if masteryFilter == .all || activeCount == 0 {
-            filtered = cards
+            filtered = revealed
         } else {
-            filtered = cards.filter { card in
+            filtered = revealed.filter { card in
                 guard card.status == .active else { return false }
                 let isUnderstood = learnLevels[card.id] == .mastered
                 return masteryFilter == .understood ? isUnderstood : !isUnderstood
@@ -203,7 +215,13 @@ struct DeckDetailView: View {
     private func sortedCards(_ cards: [Card]) -> [Card] {
         switch cardSortOption {
         case .deckOrder:
-            return cards
+            // A generation run's cards lead the list, newest first, until
+            // the scope changes -- they would otherwise land at the very
+            // end of the deck, out of sight.
+            guard !recentAIIds.isEmpty else { return cards }
+            let recent = Set(recentAIIds)
+            let byId = Dictionary(cards.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            return recentAIIds.compactMap { byId[$0] } + cards.filter { !recent.contains($0.id) }
         case .alphabetical:
             return cards.sorted { $0.front.localizedStandardCompare($1.front) == .orderedAscending }
         case .dateAdded:
@@ -277,7 +295,8 @@ struct DeckDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             deckHeader
-            if let aiActivity {
+            // Card generation has its own strip, at the top of the list.
+            if let aiActivity, !isGeneratingCards {
                 AIProgressStrip(
                     activity: aiActivity,
                     onStop: { store.stopAIJob(cardJobKey) },
@@ -335,6 +354,7 @@ struct DeckDetailView: View {
             await store.refreshGeneratorStatus()
             isGeneratorAvailable = store.isGeneratorAvailable
         }
+        .task(id: isGeneratingCards) { await watchGeneration() }
         .sheet(isPresented: $isStudying, onDismiss: load) {
             FlashcardStudyView(deckIds: scopeDeckIds, deckName: deckName)
         }
@@ -549,19 +569,22 @@ struct DeckDetailView: View {
     private var aiButton: some View {
         let onCards = contentTab == .cards
         return Button {
-            if onCards { showingCodeQuestions = true } else { requestOverviewRewrite(.all) }
+            if onCards { showingGenerateSheet = true } else { requestOverviewRewrite(.all) }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: AIGlyph.symbol)
                     .font(.graspUI(size: 11, weight: .semibold))
                     .foregroundStyle(GRASPColor.accent)
-                Text(onCards ? "Generate questions" : "Rewrite with AI")
+                Text(onCards ? (isGeneratingCards ? "Generating…" : "Generate questions") : "Rewrite with AI")
             }
         }
         .buttonStyle(GRASPQuietButton())
-        .disabled(!onCards && (!isGeneratorAvailable || overviewNoteCount == 0))
+        .disabled(onCards
+                  ? (!isGeneratorAvailable || aiActivity != nil)
+                  : (!isGeneratorAvailable || overviewNoteCount == 0))
         .help(onCards
-              ? "Write practice questions from this deck's notes -- code to complete, calculations, matrices -- that tests mix in"
+              ? (isGeneratorAvailable ? "Write new draft cards from this \(filesNoun.lowercased())'s notes, shown here as they arrive"
+                                      : "Set up an AI model in Settings first")
               : isGeneratorAvailable ? "Rewrite every overview in this \(filesNoun.lowercased()) with AI"
                                      : "Set up an AI model in Settings to write overviews")
     }
@@ -642,15 +665,9 @@ struct DeckDetailView: View {
         PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
             let aiBusy = aiActivity != nil
             var items: [PillMenuItem] = [
-                .action("Generate questions with AI", ai: true,
-                        help: "Practice questions from this deck's notes, checked before they're kept") {
+                .action("Practice problems with AI…", ai: true,
+                        help: "Code, calculations and matrices from this deck's notes, checked before they're kept") {
                     showingCodeQuestions = true
-                },
-                .action(isGeneratingCards ? "Adding cards…" : "Add more cards with AI", ai: true,
-                        disabled: !isGeneratorAvailable || isGeneratingCards || aiBusy,
-                        help: isGeneratorAvailable ? "New draft flashcards from this deck's notes"
-                                                   : "Set up an AI model in Settings first") {
-                    showingGenerateSheet = true
                 },
                 .action(isRefiningDeck ? "Refining…" : "Refine deck with AI", ai: true,
                         disabled: !isGeneratorAvailable || isRefiningDeck || aiBusy || refineCount(.everything) == 0,
@@ -872,7 +889,9 @@ struct DeckDetailView: View {
             // would silently overwrite what's now on screen with data for
             // a scope that's no longer even visible.
             guard generation == scopeGeneration else { return }
-            if !(run.stopRequested && count == 0) { fillGapsResult = count }
+            // Cards that landed were shown arriving, and the drafts strip
+            // carries the count; the sheet is only for the empty outcome.
+            if !(run.stopRequested && count == 0), count == 0 { fillGapsResult = count }
             load()
         }
     }
@@ -905,6 +924,82 @@ struct DeckDetailView: View {
         .padding(.vertical, 10)
         .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+    }
+
+    /// While cards are being written: a pulsing sparkle, where from, how
+    /// many so far, and Stop. Replaces the drafts strip until the run ends,
+    /// when the drafts strip returns with the final count.
+    private var generatingStrip: some View {
+        let written = recentAIIds.count
+        return HStack(spacing: 10) {
+            Image(systemName: AIGlyph.symbol)
+                .font(.graspUI(size: 13, weight: .semibold))
+                .foregroundStyle(GRASPColor.accent)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+            Text(liveSourceTitle.map { "Generating from \($0)…" } ?? "Generating from your notes…")
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            Text("\(written) card\(written == 1 ? "" : "s")")
+                .graspType(.meta)
+                .monospacedDigit()
+                .contentTransition(.numericText(value: Double(written)))
+                .foregroundStyle(GRASPColor.textSecondary)
+            Button(aiActivity?.stopRequested == true ? "Stopping…" : "Stop") {
+                store.stopAIJob(cardJobKey)
+            }
+            .buttonStyle(GRASPQuietButton())
+            .disabled(aiActivity?.stopRequested == true)
+            .help("Stops now. Cards already written are kept.")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+    }
+
+    /// Watches the database while a generation job runs. The core hands
+    /// back one count at the end, but writes each note's cards as the note
+    /// finishes, so reading the deck about twice a second shows them
+    /// arriving. Each batch slides in one row at a time (about 60 ms apart,
+    /// the whole batch within 1.5 s); with Reduce Motion they just appear.
+    private func watchGeneration() async {
+        guard isGeneratingCards else {
+            // Run over: anything still waiting appears now.
+            withAnimation(nil) { hiddenNewIds.removeAll() }
+            return
+        }
+        seenIds = Set(cards.map(\.id))
+        recentAIIds = []
+        liveSourceTitle = nil
+        let generation = scopeGeneration
+        while !Task.isCancelled, isGeneratingCards, generation == scopeGeneration {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, generation == scopeGeneration else { break }
+            guard let fresh = try? store.cards(inDecks: scopeDeckIds) else { continue }
+            let arrivals = fresh.filter { !seenIds.contains($0.id) }
+            guard !arrivals.isEmpty else { continue }
+            seenIds.formUnion(arrivals.map(\.id))
+            let ordered = arrivals.sorted { $0.createdAt > $1.createdAt }
+            if let source = ordered.first(where: { $0.materialId != nil })?.materialId,
+               let title = (try? store.material(source)) ?? nil {
+                liveSourceTitle = title.title
+            }
+            hiddenNewIds.formUnion(ordered.map(\.id))
+            recentAIIds = ordered.map(\.id) + recentAIIds
+            cards = fresh
+            let step = min(0.06, 1.5 / Double(ordered.count))
+            for card in ordered.reversed() {
+                if reduceMotion {
+                    hiddenNewIds.remove(card.id)
+                } else {
+                    withAnimation(.easeOut(duration: 0.24)) { _ = hiddenNewIds.remove(card.id) }
+                    try? await Task.sleep(for: .seconds(step))
+                }
+            }
+        }
     }
 
     /// Opens the first draft in the preview; approving it there moves on to
@@ -948,7 +1043,12 @@ struct DeckDetailView: View {
         let cards = visibleCards
         let selection = cards.filter { selectedCardIds.contains($0.id) }.map(\.id)
         return List(selection: $selectedCardIds) {
-            if draftCount > 0 || !duplicateGroups.isEmpty {
+            if isGeneratingCards {
+                generatingStrip
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+            } else if draftCount > 0 || !duplicateGroups.isEmpty {
                 statusStrip
                     .selectionDisabled()
                     .listRowSeparator(.hidden)
@@ -988,6 +1088,7 @@ struct DeckDetailView: View {
                         .padding(.horizontal, 4)
                 )
                 .background(TableHighlightRemover())
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .listStyle(.inset)
@@ -1127,6 +1228,8 @@ struct DeckDetailView: View {
         scopeGeneration += 1
         // A filter is about the deck it was chosen in.
         masteryFilter = .all
+        recentAIIds = []
+        hiddenNewIds = []
         switch scope {
         case .deck(let id):
             let deck = (try? store.deck(id)) ?? nil
@@ -1297,8 +1400,8 @@ private struct GenerateCardsSheet: View {
 
     var body: some View {
         GRASPSheet(
-            eyebrow: "Generate with AI", title: "Add more cards",
-            message: "The AI looks for concepts your notes mention that don't have a card yet.",
+            eyebrow: "Generate with AI", title: "Generate questions",
+            message: "The AI writes new draft cards for concepts your notes mention that don't have a card yet. They arrive in the list as they're written.",
             icon: AIGlyph.symbol, width: 440
         ) {
             VStack(alignment: .leading, spacing: 16) {
