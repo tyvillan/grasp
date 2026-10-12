@@ -1832,6 +1832,11 @@ private struct CardRow: View {
     // row's width from jumping the instant the pointer arrives.
     @State private var isHovering = false
     @State private var showingContextRefinementDetail = false
+    private enum ActionFocus { case preview, approve }
+    @FocusState private var actionFocus: ActionFocus?
+    /// The status gives way to the actions while the pointer is on the row
+    /// or keyboard focus is on one of them (so Tab reveals them too).
+    private var isActive: Bool { isHovering || actionFocus != nil || showingContextRefinementDetail }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -1888,48 +1893,58 @@ private struct CardRow: View {
                 }
             }
             Spacer(minLength: 8)
-            // Status marks stay; the actions (preview, approve, the menu)
-            // appear only while the pointer is on the row. Their space is
-            // reserved, so the row doesn't jump when they show.
-            if card.status == .active && mastery == .mastered { masteryBadge }
             contextRefinedBadge
-            previewButton
-            approveButton
-            Menu {
-                if card.status == .draft {
-                    Button("Approve", action: onApprove)
-                }
-                Button(card.status == .suspended ? "Reactivate" : "Suspend", action: onSuspend)
-                Button("Edit", action: onEdit)
-                if card.materialId != nil {
-                    Button("View Source Note", action: onViewNote)
-                    // Not gated on card.status: an approved card is just
-                    // as likely to be clumsily worded or quietly off-topic
-                    // as a fresh draft, and this was previously the only
-                    // way to ask for a second look at one specific card
-                    // rather than the whole deck.
-                    Button(isRefining ? "Refining…" : "Refine with AI", action: onRefine)
-                        .disabled(isRefining)
-                }
-                if !siblingDecks.isEmpty {
-                    Menu("Move to…") {
-                        ForEach(siblingDecks) { deck in
-                            Button(deck.name) { onMove(deck.id) }
+            // One muted word -- "Due today", "in 3d", "New", "Draft" -- that
+            // cross-fades to the actions on hover or keyboard focus. The
+            // slot is a fixed width, so nothing in the row moves.
+            ZStack(alignment: .trailing) {
+                Text(CardRowStatus.text(for: card))
+                    .font(.graspUI(size: 12))
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .lineLimit(1)
+                    .opacity(isActive ? 0 : 1)
+                HStack(spacing: 6) {
+                    previewButton
+                    approveButton
+                Menu {
+                    if card.status == .draft {
+                        Button("Approve", action: onApprove)
+                    }
+                    Button(card.status == .suspended ? "Reactivate" : "Suspend", action: onSuspend)
+                    Button("Edit", action: onEdit)
+                    if card.materialId != nil {
+                        Button("View Source Note", action: onViewNote)
+                        // Not gated on card.status: an approved card is just
+                        // as likely to be clumsily worded or quietly off-topic
+                        // as a fresh draft, and this was previously the only
+                        // way to ask for a second look at one specific card
+                        // rather than the whole deck.
+                        Button(isRefining ? "Refining…" : "Refine with AI", action: onRefine)
+                            .disabled(isRefining)
+                    }
+                    if !siblingDecks.isEmpty {
+                        Menu("Move to…") {
+                            ForEach(siblingDecks) { deck in
+                                Button(deck.name) { onMove(deck.id) }
+                            }
                         }
                     }
+                    Divider()
+                    Button("Delete", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                Divider()
-                Button("Delete", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .tint(GRASPColor.textSecondary)
+                .frame(width: 28)
+                .help("Card actions")
+                }
+                .opacity(isActive ? 1 : 0)
+                .allowsHitTesting(isActive)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .tint(GRASPColor.textSecondary)
-            .frame(width: 28)
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
-            .help("Card actions")
+            .frame(width: 104, alignment: .trailing)
+            .animation(Motion.fade, value: isActive)
         }
         .padding(.vertical, 7)
         .contentShape(Rectangle())
@@ -1955,9 +1970,8 @@ private struct CardRow: View {
                 .background(GRASPColor.surface, in: Circle())
         }
         .buttonStyle(.plain)
+        .focused($actionFocus, equals: .preview)
         .help("Preview")
-        .opacity(isHovering ? 1 : 0)
-        .allowsHitTesting(isHovering)
     }
 
     /// Approve, for a draft -- on hover, beside Preview.
@@ -1972,9 +1986,8 @@ private struct CardRow: View {
                     .overlay(Circle().strokeBorder(GRASPColor.success.opacity(0.4)))
             }
             .buttonStyle(.plain)
+            .focused($actionFocus, equals: .approve)
             .help("Approve")
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
         }
     }
 
@@ -2052,7 +2065,7 @@ private struct CardRow: View {
                 showingContextRefinementDetail = true
             } label: {
                 Label("AI Refined", systemImage: "checkmark.shield")
-                    .labelStyle(.iconOnly).foregroundStyle(GRASPColor.success)
+                    .labelStyle(.iconOnly).foregroundStyle(GRASPColor.textTertiary)
             }
             .buttonStyle(.plain)
             .help("This definition was rewritten by the context checker -- click to compare with the original")
