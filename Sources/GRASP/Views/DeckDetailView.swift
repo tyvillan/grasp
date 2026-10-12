@@ -147,6 +147,8 @@ struct DeckDetailView: View {
     /// overviews"); the Overview tab picks it up and asks before writing.
     @State private var overviewRequest: OverviewRewriteRequest?
     @State private var deletingDeck: Deck?
+    @State private var renamingDeck: Deck?
+    @State private var datingDeck: Deck?
     @State private var deletingDeckCardCount = 0
     /// While set, approving the previewed draft moves on to the next one.
     @State private var reviewingDrafts = false
@@ -592,13 +594,26 @@ struct DeckDetailView: View {
                     showingDuplicateReview = true
                 })
             }
-            if case .deck(let id) = scope {
+            // Editing the deck itself -- the same actions as its row's
+            // right-click menu in the deck list. All Cards is the whole
+            // course, not a deck, so it has none of these.
+            if case .deck(let id) = scope, let deck = (try? store.deck(id)) ?? nil {
+                items.append(.divider)
+                items.append(.action("Rename deck…", systemImage: "pencil") { renamingDeck = deck })
+                items.append(.action(deck.manualLessonDate == nil ? "Set lecture date…" : "Change lecture date…",
+                                     systemImage: "calendar") { datingDeck = deck })
                 items.append(.divider)
                 items.append(.action("Delete deck…", systemImage: "trash", destructive: true) {
                     beginDeleteDeck(id)
                 })
             }
             return items
+        }
+        .sheet(item: $renamingDeck) { deck in
+            DeckRenameSheet(deck: deck, onRenamed: loadScopeIdentity)
+        }
+        .sheet(item: $datingDeck) { deck in
+            DeckLectureDateSheet(deck: deck, onSaved: load)
         }
         .sheet(isPresented: $showingDeckFiles) {
             DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
