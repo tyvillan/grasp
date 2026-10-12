@@ -86,6 +86,8 @@ struct DeckDetailView: View {
     @State private var seenIds: Set<String> = []
     /// Title of the note the newest card came from.
     @State private var liveSourceTitle: String?
+    /// Note titles for AI-made cards' "from <note>" line.
+    @State private var sourceTitles: [String: String] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingGenerateSheet = false
     @State private var showingCodeQuestions = false
@@ -116,7 +118,7 @@ struct DeckDetailView: View {
     @State private var scopeGeneration = 0
 
     enum MasteryFilter: String, CaseIterable, Identifiable {
-        case all = "All", needsReview = "Needs review", understood = "Understood"
+        case all = "All", drafts = "Drafts", due = "Due", understood = "Understood"
         var id: String { rawValue }
     }
 
@@ -175,21 +177,28 @@ struct DeckDetailView: View {
     }
 
     private var visibleCards: [Card] {
-        let filtered: [Card]
-        // With no active cards the filter picker is hidden, so a filter
-        // carried in from another deck would blank the list with no way to
-        // clear it. Only active cards have a mastery level to filter on.
         let revealed = hiddenNewIds.isEmpty ? cards : cards.filter { !hiddenNewIds.contains($0.id) }
-        if masteryFilter == .all || activeCount == 0 {
-            filtered = revealed
-        } else {
-            filtered = revealed.filter { card in
-                guard card.status == .active else { return false }
-                let isUnderstood = learnLevels[card.id] == .mastered
-                return masteryFilter == .understood ? isUnderstood : !isUnderstood
-            }
+        return sortedCards(revealed.filter(matchesFilter))
+    }
+
+    private func matchesFilter(_ card: Card) -> Bool {
+        switch masteryFilter {
+        case .all: return true
+        case .drafts: return card.status == .draft
+        case .due: return card.status == .active && card.due <= Date()
+        case .understood: return card.status == .active && learnLevels[card.id] == .mastered
         }
-        return sortedCards(filtered)
+    }
+
+    /// The numbers on the filter pills. Over every loaded card, so a pill
+    /// says what it will show.
+    private var filterCounts: [MasteryFilter: Int] {
+        let now = Date()
+        var counts: [MasteryFilter: Int] = [.all: cards.count]
+        counts[.drafts] = draftCount
+        counts[.due] = cards.filter { $0.status == .active && $0.due <= now }.count
+        counts[.understood] = cards.filter { $0.status == .active && learnLevels[$0.id] == .mastered }.count
+        return counts
     }
 
     private var cardSortMenu: some View {
@@ -257,9 +266,7 @@ struct DeckDetailView: View {
         VStack(spacing: 0) {
             if !cards.isEmpty {
                 HStack {
-                    if activeCount > 0 {
-                        FilterPills(selection: $masteryFilter)
-                    }
+                    FilterPills(selection: $masteryFilter, counts: filterCounts)
                     Spacer()
                     cardSortMenu
                 }
@@ -1005,7 +1012,7 @@ struct DeckDetailView: View {
     /// Opens the first draft in the preview; approving it there moves on to
     /// the next, until none are left.
     private func startReviewingDrafts() {
-        masteryFilter = .all
+        masteryFilter = .drafts
         guard let first = visibleCards.first(where: { $0.status == .draft }) else { return }
         reviewingDrafts = true
         selectedCardIds = [first.id]
@@ -1057,6 +1064,7 @@ struct DeckDetailView: View {
             ForEach(cards) { card in
                 CardRow(
                     card: card,
+                    sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
                     mastery: learnLevels[card.id] ?? .new,
                     siblingDecks: siblingDecks,
                     isRefining: refiningCardIds.contains(card.id),
@@ -1093,6 +1101,7 @@ struct DeckDetailView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+        .overlay(alignment: .bottom) { floatingApproveBar }
         .contextMenu(forSelectionType: Card.ID.self) { ids in
             if ids.isEmpty {
                 Button("Approve All Drafts") {
@@ -1178,6 +1187,38 @@ struct DeckDetailView: View {
     /// Surfaces the same batch actions as the context menu without
     /// requiring a right-click, since right-click alone isn't discoverable
     /// enough for something this useful.
+    /// Drafts among the selected rows -- what "Approve N selected" acts on.
+    private var selectedDraftIds: [String] {
+        visibleCards.filter { selectedCardIds.contains($0.id) && $0.status == .draft }.map(\.id)
+    }
+
+    /// Floats over the foot of the list while a selection holds drafts:
+    /// shift-click a range, then approve it in one go.
+    @ViewBuilder private var floatingApproveBar: some View {
+        let drafts = selectedDraftIds
+        if !drafts.isEmpty {
+            HStack(spacing: 12) {
+                Text("\(selectedCardIds.count) selected")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                Button("Approve \(drafts.count) selected") {
+                    try? store.bulkSetStatus(drafts, status: .active)
+                    selectedCardIds.removeAll()
+                    load()
+                }
+                .buttonStyle(GRASPQuietButton())
+                .keyboardShortcut(.return, modifiers: [.command])
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
+            .background(GRASPColor.surfaceRaised, in: Capsule())
+            .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
+            .padding(.bottom, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     private var selectionActionBar: some View {
         HStack(spacing: 10) {
             Text("\(selectedCardIds.count) selected")
@@ -1247,6 +1288,13 @@ struct DeckDetailView: View {
         load()
     }
 
+    private func loadSourceTitles() {
+        let ids = Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil })
+        for id in ids where sourceTitles[id] == nil {
+            if let material = (try? store.material(id)) ?? nil { sourceTitles[id] = material.title }
+        }
+    }
+
     private func load() {
         switch scope {
         case .deck(let id):
@@ -1261,6 +1309,9 @@ struct DeckDetailView: View {
         }
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
+        loadSourceTitles()
+        // A Drafts filter with no drafts left would show an empty list.
+        if masteryFilter == .drafts, !cards.contains(where: { $0.status == .draft }) { masteryFilter = .all }
         dueCount = (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0
         problemCount = store.codeQuestionCount(inDecks: scopeDeckIds)
         unfinishedTest = store.unfinishedTest(forDecks: scopeDeckIds)
@@ -1676,6 +1727,7 @@ private struct TableHighlightRemover: NSViewRepresentable {
 /// is raised, not yellow -- yellow on this screen belongs to Study.
 private struct FilterPills: View {
     @Binding var selection: DeckDetailView.MasteryFilter
+    let counts: [DeckDetailView.MasteryFilter: Int]
     @Namespace private var pill
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1686,8 +1738,9 @@ private struct FilterPills: View {
                 Button {
                     withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) { selection = filter }
                 } label: {
-                    Text(filter.rawValue)
+                    Text("\(filter.rawValue) \(counts[filter] ?? 0)")
                         .font(.graspUI(size: 12.5, weight: selected ? .semibold : .medium))
+                        .monospacedDigit()
                         .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textTertiary)
                         .padding(.horizontal, 12)
                         .frame(height: 26)
@@ -1757,6 +1810,8 @@ enum CardTermDisplay {
 
 private struct CardRow: View {
     let card: Card
+    /// The note an AI-made card came from, when known.
+    let sourceTitle: String?
     let mastery: LearnEngine.Level
     let siblingDecks: [Deck]
     let isRefining: Bool
@@ -1794,6 +1849,15 @@ private struct CardRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 let term = CardTermDisplay.split(card.front)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    // The one AI mark: a yellow sparkle on a draft the AI
+                    // wrote. Approving it takes the sparkle away; the
+                    // "from <note>" line below stays.
+                    if card.origin == .aiGenerated && card.status == .draft {
+                        Image(systemName: AIGlyph.symbol)
+                            .font(.graspUI(size: 11, weight: .semibold))
+                            .foregroundStyle(GRASPColor.accent)
+                            .help("Written by the AI -- check it against your notes")
+                    }
                     Text(term.term)
                         .graspType(.rowTitle)
                         .foregroundStyle(GRASPColor.textPrimary)
@@ -1810,6 +1874,18 @@ private struct CardRow: View {
                     .graspType(.body)
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if card.origin == .aiGenerated, let sourceTitle {
+                    Button(action: onViewNote) {
+                        Text("from \(sourceTitle)")
+                            .font(.graspUI(size: 12))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open this note")
+                    .padding(.top, 1)
+                }
             }
             Spacer(minLength: 8)
             // Status marks stay; the actions (preview, approve, the menu)
@@ -1817,7 +1893,6 @@ private struct CardRow: View {
             // reserved, so the row doesn't jump when they show.
             if card.status == .active && mastery == .mastered { masteryBadge }
             contextRefinedBadge
-            originBadge
             previewButton
             approveButton
             Menu {
@@ -1912,7 +1987,15 @@ private struct CardRow: View {
         switch card.status {
         case .draft: return GRASPColor.hairlineStrong
         case .suspended: return GRASPColor.rejected
-        case .active: return mastery == .mastered ? GRASPColor.success : GRASPColor.textTertiary
+        case .active:
+            // Mastery as cream at three strengths -- nothing known yet is
+            // the hairline; the fuller the rail, the better it's known.
+            switch mastery {
+            case .new: return GRASPColor.hairlineStrong
+            case .recognition: return GRASPColor.textPrimary.opacity(0.3)
+            case .recall: return GRASPColor.textPrimary.opacity(0.6)
+            case .mastered: return GRASPColor.textPrimary
+            }
         }
     }
 
@@ -1920,7 +2003,13 @@ private struct CardRow: View {
         switch card.status {
         case .draft: return "Pending review"
         case .suspended: return "Rejected"
-        case .active: return nil
+        case .active:
+            switch mastery {
+            case .new: return "Not started"
+            case .recognition: return "Recognized"
+            case .recall: return "Recalled"
+            case .mastered: return "Understood"
+            }
         }
     }
 
