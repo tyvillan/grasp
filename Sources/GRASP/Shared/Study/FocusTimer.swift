@@ -276,42 +276,32 @@ private struct FocusTimerSettingsSheet: View {
     @AppStorage("focusCardTarget") private var cardTarget = 20
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "timer")
-                    .font(.graspUI(size: 24))
-                    .foregroundStyle(GRASPColor.accent)
-                Text("Focus Timer")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
+        GRASPSheet(
+            eyebrow: "Study", title: "Focus timer",
+            message: "The timer never interrupts a session. It changes color when an interval is up and waits for you.",
+            icon: "timer", width: 420
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                stepper("Work interval", value: $workMinutes, range: 5...90, unit: "min")
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                stepper("Break", value: $breakMinutes, range: 1...30, unit: "min")
+                Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                stepper("Card target per interval", value: $cardTarget, range: 0...200, unit: "cards")
+                Text("Set the card target to 0 to hide it.")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
             }
-
-            stepper("Work interval", value: $workMinutes, range: 5...90, unit: "min")
-            stepper("Break", value: $breakMinutes, range: 1...30, unit: "min")
-            stepper("Card target per interval", value: $cardTarget, range: 0...200, unit: "cards")
-
-            Text("Set the card target to 0 to hide it. The timer never interrupts a session -- "
-                 + "it changes colour when an interval is up and waits for you.")
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Spacer()
-                Button("Done") {
-                    model.workMinutes = workMinutes
-                    model.breakMinutes = breakMinutes
-                    model.cardTarget = cardTarget
-                    dismiss()
-                }
-                .buttonStyle(GRASPProminentButton())
-                .keyboardShortcut(.defaultAction)
+            .popupGroup()
+        } footer: {
+            Button("Done") {
+                model.workMinutes = workMinutes
+                model.breakMinutes = breakMinutes
+                model.cardTarget = cardTarget
+                dismiss()
             }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .macSheetFrame(width: 400)
-        .background(GRASPColor.canvas)
     }
 
     private func stepper(_ label: String, value: Binding<Int>, range: ClosedRange<Int>, unit: String) -> some View {

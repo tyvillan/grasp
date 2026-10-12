@@ -511,17 +511,11 @@ struct WriteOverviewsSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                Image(systemName: "text.book.closed")
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(GRASPColor.accent)
-                Text(noteCount == 1 ? "Write an overview?" : "Write overviews for \(noteCount) notes?")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-            }
-
+        GRASPSheet(
+            eyebrow: "Overview",
+            title: noteCount == 1 ? "Write an overview?" : "Write overviews for \(noteCount) notes?",
+            icon: AIGlyph.symbol, width: 480, showsClose: false
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 effect("list.bullet", "Key takeaways, the definitions worth knowing, worked "
                                      + "examples, and the note's own outline.")
@@ -553,19 +547,14 @@ struct WriteOverviewsSheet: View {
                            + "or a cloud model in Settings → AI, gives markedly better results.")
                 }
             }
-
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button(noteCount == 1 ? "Write It" : "Write Them", action: onConfirm)
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
-            }
+            .popupGroup(padding: 14)
+        } footer: {
+            Button("Cancel", action: onCancel)
+                .keyboardShortcut(.cancelAction)
+            Button(noteCount == 1 ? "Write it" : "Write them", action: onConfirm)
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .frame(width: 440)
-        .background(GRASPColor.canvas)
     }
 
     private func effect(_ icon: String, _ text: String) -> some View {

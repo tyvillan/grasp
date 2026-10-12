@@ -12,68 +12,32 @@ struct ProfileMenuButton: View {
     @Environment(\.openSettings) private var openSettings
     /// The sidebar's footer shows the name beside the avatar.
     var showsName = false
-    @State private var showingMenu = false
+    @State private var anchor = MenuAnchor()
+    @State private var hovering = false
 
     var body: some View {
         Button {
-            showingMenu = true
+            anchor.present([
+                .header(store.profile.name),
+                .action("Settings…", systemImage: "gearshape", shortcut: (",", .command)) { openSettings() },
+                .divider,
+                .action("Switch profile / sign out", systemImage: "arrow.left.arrow.right") { switchProfile() },
+            ])
         } label: {
             HStack(spacing: 10) {
                 Avatar(name: store.profile.name, size: 28, fontSize: 12)
                 if showsName {
                     Text(store.profile.name.split(separator: " ").first.map(String.init) ?? store.profile.name)
                         .font(.graspUI(size: 13.5, weight: .medium))
-                        .foregroundStyle(GRASPColor.textSecondary)
+                        .foregroundStyle(hovering ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                         .lineLimit(1)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(MenuAnchorHost(anchor: anchor))
+        .onHover { hovering = $0 }
         .help(store.profile.name)
-        .popover(isPresented: $showingMenu, arrowEdge: .top) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Avatar(name: store.profile.name, size: 40, fontSize: 16)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(store.profile.name).font(.graspHeadline)
-                        Text("Local profile").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
-                    }
-                }
-                Divider()
-                VStack(alignment: .leading, spacing: 2) {
-                    MenuRow(title: "Settings…", icon: "gearshape") {
-                        showingMenu = false
-                        openSettings()
-                    }
-                    MenuRow(title: "Switch Profile / Sign Out", icon: "arrow.left.arrow.right") {
-                        showingMenu = false
-                        switchProfile()
-                    }
-                }
-            }
-            .padding(16)
-            .frame(width: 240)
-            .background(GRASPColor.surfaceRaised)
-        }
     }
 }
-
-private struct MenuRow: View {
-    let title: String
-    let icon: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Label(title, systemImage: icon)
-                Spacer()
-            }
-            .contentShape(Rectangle())
-            .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
-    }
-}
-

@@ -76,11 +76,12 @@ struct WelcomeView: View {
             )
             .presentationDetents([.medium, .large])
         }
-        .alert("New profile", isPresented: $showingNewProfile) {
-            Button("Create") { createLocalProfile() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("A profile that stays on this iPhone. You can sign in later from Settings to sync it.")
+        .sheet(isPresented: $showingNewProfile) {
+            ConfirmationSheet(
+                icon: "person.crop.circle.badge.plus", title: "New profile",
+                message: "A profile that stays on this iPhone. You can sign in later from Settings to sync it.",
+                confirmTitle: "Create", isDestructive: false
+            ) { createLocalProfile() }
         }
         .onChange(of: accounts.completedFromLink) { _, _ in
             if let account = accounts.consumeCompletedFromLink() { signedIn(account) }

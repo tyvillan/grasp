@@ -338,24 +338,28 @@ private struct CardQuickEditSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Card").font(.graspHeadline)
-            TextEditor(text: $card.front).frame(height: 60).border(.separator)
-            TextEditor(text: $card.back).frame(height: 100).border(.separator)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    onSave(card)
-                    dismiss()
+        GRASPSheet(eyebrow: "Card", title: "Edit card", width: 480) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Front")
+                    TextEditor(text: $card.front).graspEditorChrome(minHeight: 56)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Back")
+                    TextEditor(text: $card.back).graspEditorChrome(minHeight: 110)
+                }
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Save") {
+                onSave(card)
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(20)
-        .macSheetFrame(width: 420)
     }
 }
 

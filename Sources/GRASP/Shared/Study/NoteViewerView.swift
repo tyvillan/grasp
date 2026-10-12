@@ -21,35 +21,56 @@ struct NoteViewerView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let kicker = heading?.kicker {
-                        Text(kicker)
-                            .font(.graspCaption.weight(.semibold))
-                            .foregroundStyle(GRASPColor.accent)
-                    }
-                    Text(heading?.title ?? material?.title ?? "Note").font(.graspHeadline)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: GRASPSpace.m) {
+                VStack(alignment: .leading, spacing: 6) {
+                    SectionLabel(heading?.kicker ?? "Note")
+                    Text(heading?.title ?? material?.title ?? "Note")
+                        .font(.graspDisplay(22))
+                        .tracking(-0.4)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Toggle("Raw", isOn: $showRaw).toggleStyle(.button)
-                Button("Close") { dismiss() }
+                GRASPSegmented(selection: $showRaw, options: [(false, "Reflowed"), (true, "Raw")])
+                PopupCloseButton { dismiss() }
             }
+            .padding(.horizontal, GRASPSpace.xl)
+            .padding(.top, 22)
+            .padding(.bottom, GRASPSpace.l)
             ScrollView {
                 Text((showRaw ? noteText?.raw : noteText?.reflowed) ?? "")
+                    .font(showRaw ? .graspMono(12.5) : .graspBody)
+                    .lineSpacing(3)
+                    .foregroundStyle(GRASPColor.textPrimary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(GRASPSpace.l)
             }
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+            )
+            .padding(.horizontal, GRASPSpace.xl)
             if let path = material?.relativePath {
-                Text(path)
-                    .font(.graspCaption).foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").font(.graspUI(size: 10))
+                    Text(path)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+                .padding(.horizontal, GRASPSpace.xl)
+                .padding(.vertical, 14)
+            } else {
+                Spacer().frame(height: GRASPSpace.xl)
             }
         }
-        .padding(20)
-        .macSheetFrame(width: 560, height: 480)
+        .macSheetFrame(width: 640, height: 560)
+        .graspPopupBackground()
         .task(id: materialId) {
             material = try? store.material(materialId)
             noteText = try? store.noteText(forMaterial: materialId)

@@ -15,12 +15,15 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                HStack(spacing: 6) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(GRASPColor.textTertiary)
+                        .font(.graspUI(size: 14, weight: .medium))
+                        .foregroundStyle(isQueryFocused ? GRASPColor.accent : GRASPColor.textTertiary)
                     TextField("Search your notes", text: $query)
                         .textFieldStyle(.plain)
+                        .font(.graspUI(size: 16))
+                        .foregroundStyle(GRASPColor.textPrimary)
                         .focused($isQueryFocused)
                         .onChange(of: query) { runSearch() }
                     if !query.isEmpty {
@@ -36,39 +39,54 @@ struct SearchView: View {
                         .help("Clear search")
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(GRASPColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(isQueryFocused ? GRASPColor.accent : GRASPColor.hairlineStrong,
+                                      lineWidth: isQueryFocused ? 1.5 : 1)
+                )
 
                 // A visible way out of the search sheet that doesn't
                 // require reaching for Escape every time.
                 Button("Cancel") { dismiss() }
                     .buttonStyle(GRASPQuietButton())
+                    .keyboardShortcut(.cancelAction)
             }
-            .padding()
-            Divider()
-            List(results) { result in
-                Button {
-                    viewingMaterialId = result.materialId
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(highlighted(result.title, terms: searchTerms))
-                            .font(.graspBody.weight(.medium))
-                        Text(highlightedSnippet(result.snippet))
-                            .font(.graspCallout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+            .padding(GRASPSpace.l)
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if !results.isEmpty {
+                        SectionLabel("\(results.count) note\(results.count == 1 ? "" : "s")")
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 6)
+                    }
+                    ForEach(results) { result in
+                        SearchResultRow(
+                            title: highlighted(result.title, terms: searchTerms),
+                            snippet: highlightedSnippet(result.snippet)
+                        ) { viewingMaterialId = result.materialId }
                     }
                 }
-                .buttonStyle(.plain)
+                .padding(GRASPSpace.m)
             }
             .overlay {
-                if results.isEmpty && !query.isEmpty {
-                    ContentUnavailableView("No matches", systemImage: "magnifyingglass")
+                if results.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.graspUI(size: 24))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                        Text(query.isEmpty ? "Type to search every note you've imported." : "No matches")
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                    }
                 }
             }
         }
-        .frame(minWidth: 420, minHeight: 480)
+        .frame(minWidth: 520, minHeight: 520)
+        .graspPopupBackground()
         .onAppear { isQueryFocused = true }
         .sheet(item: Binding(
             get: { viewingMaterialId.map { MaterialIdentifier(id: $0) } },
@@ -106,7 +124,7 @@ struct SearchView: View {
             if isMatch {
                 piece.foregroundColor = GRASPColor.textPrimary
                 piece.backgroundColor = GRASPColor.accentSoft
-                piece.font = .callout.weight(.semibold)
+                piece.font = .graspUI(size: 13.5, weight: .semibold)
             }
             result += piece
             current = ""
@@ -153,3 +171,38 @@ struct SearchView: View {
 }
 
 private struct MaterialIdentifier: Identifiable { let id: String }
+
+/// A search hit: the note's title and the matching passage, lit on hover.
+private struct SearchResultRow: View {
+    let title: AttributedString
+    let snippet: AttributedString
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.graspUI(size: 14, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text(snippet)
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(hovering ? GRASPColor.surface : .clear,
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(alignment: .leading) {
+                if hovering {
+                    Capsule().fill(GRASPColor.brand).frame(width: 3, height: 18).padding(.leading, 2)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}

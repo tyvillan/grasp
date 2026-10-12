@@ -202,31 +202,36 @@ private struct NewProfileSheet: View {
     @State private var pin = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Profile").font(.graspHeadline)
-            TextField("Name", text: $name)
-            Toggle("Protect with a 4-digit PIN", isOn: $usePIN)
-            if usePIN {
-                SecureField("PIN", text: $pin)
-                    .onChange(of: pin) { pin = String(pin.filter(\.isNumber).prefix(4)) }
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Create") {
-                    let profile = Profile(
-                        name: name.trimmingCharacters(in: .whitespaces),
-                        pinHash: (usePIN && pin.count == 4) ? ProfileStore.hashPIN(pin) : nil
-                    )
-                    onCreate(profile)
-                    dismiss()
+        GRASPSheet(
+            eyebrow: "Profile", title: "New profile",
+            message: "Each profile keeps its own courses, cards and study history.", width: 400
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Name")
+                    TextField("Your name", text: $name)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || (usePIN && pin.count != 4))
+                Toggle("Protect with a 4-digit PIN", isOn: $usePIN.animation(Motion.snappy))
+                if usePIN {
+                    SecureField("PIN", text: $pin)
+                        .frame(width: 140)
+                        .onChange(of: pin) { pin = String(pin.filter(\.isNumber).prefix(4)) }
+                }
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Create profile") {
+                let profile = Profile(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    pinHash: (usePIN && pin.count == 4) ? ProfileStore.hashPIN(pin) : nil
+                )
+                onCreate(profile)
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || (usePIN && pin.count != 4))
         }
-        .padding(20)
-        .frame(width: 320)
     }
 }
 
@@ -238,28 +243,27 @@ private struct UnlockProfileSheet: View {
     @State private var wrongPIN = false
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text(profile.name).font(.graspHeadline)
-            SecureField("PIN", text: $pin)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 140)
-                .onChange(of: pin) {
-                    pin = String(pin.filter(\.isNumber).prefix(4))
-                    wrongPIN = false
+        GRASPSheet(eyebrow: "Locked", title: profile.name, icon: "lock", width: 360) {
+            VStack(alignment: .leading, spacing: 8) {
+                FieldLabel("PIN")
+                SecureField("4 digits", text: $pin)
+                    .frame(width: 160)
+                    .onChange(of: pin) {
+                        pin = String(pin.filter(\.isNumber).prefix(4))
+                        wrongPIN = false
+                    }
+                    .onSubmit(tryUnlock)
+                if wrongPIN {
+                    Text("Wrong PIN").graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 }
-                .onSubmit(tryUnlock)
-            if wrongPIN {
-                Text("Wrong PIN").font(.graspCaption).foregroundStyle(.red)
             }
-            HStack {
-                Button("Cancel") { dismiss() }
-                Button("Unlock", action: tryUnlock)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(pin.count != 4)
-            }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Unlock", action: tryUnlock)
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(pin.count != 4)
         }
-        .padding(20)
-        .frame(width: 260)
     }
 
     private func tryUnlock() {

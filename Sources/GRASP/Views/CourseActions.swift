@@ -117,97 +117,96 @@ struct CourseEditSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Edit Course").font(.graspHeadline)
+        GRASPSheet(eyebrow: "Course", title: "Edit course", width: 460) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Name")
+                    TextField("Course name", text: $course.name)
+                }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Name").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
-                TextField("Course name", text: $course.name)
-            }
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Course code")
+                    TextField("e.g. COP 3014", text: Binding(
+                        get: { course.code ?? "" },
+                        set: { course.code = $0.isEmpty ? nil : $0 }
+                    ))
+                }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Course code").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
-                TextField("e.g. COP 3014", text: Binding(
-                    get: { course.code ?? "" },
-                    set: { course.code = $0.isEmpty ? nil : $0 }
-                ))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Color").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
-                HStack(spacing: 8) {
-                    ForEach(CoursePalette.slots) { swatch in
-                        let taken = takenHexes.contains(swatch.hex)
-                        Button {
-                            course.colorHex = swatch.hex
-                        } label: {
-                            Circle()
-                                .fill(swatch.color)
-                                .opacity(taken ? 0.25 : 1)
-                                .frame(width: 22, height: 22)
-                                .overlay(
-                                    Circle().stroke(
-                                        course.colorHex == swatch.hex ? GRASPColor.textPrimary : .clear,
-                                        lineWidth: 2
+                VStack(alignment: .leading, spacing: 8) {
+                    FieldLabel("Color")
+                    HStack(spacing: 10) {
+                        ForEach(CoursePalette.slots) { swatch in
+                            let taken = takenHexes.contains(swatch.hex)
+                            Button {
+                                withAnimation(Motion.snappy) { course.colorHex = swatch.hex }
+                            } label: {
+                                Circle()
+                                    .fill(swatch.color)
+                                    .opacity(taken ? 0.25 : 1)
+                                    .frame(width: 22, height: 22)
+                                    .overlay(
+                                        Circle().stroke(
+                                            course.colorHex == swatch.hex ? GRASPColor.textPrimary : .clear,
+                                            lineWidth: 2
+                                        )
+                                        .padding(-3)
                                     )
-                                    .padding(-3)
-                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(taken)
+                            .help(taken ? "\(swatch.name) (used by another course this term)" : swatch.name)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(taken)
-                        .help(taken ? "\(swatch.name) (used by another course this term)" : swatch.name)
                     }
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 6) {
-                TimelineField(text: $timelineText, allowsNoTimeline: true)
-                if course.folderPath != nil {
-                    Text("Changing this here sticks -- re-importing the vault never overwrites a course's timeline once it's set.")
-                        .font(.graspCaption)
-                        .foregroundStyle(GRASPColor.textSecondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    TimelineField(text: $timelineText, allowsNoTimeline: true)
+                    if course.folderPath != nil {
+                        Text("Changing this here sticks -- re-importing the vault never overwrites a course's timeline once it's set.")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                    }
                 }
-            }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                if let folderPath = course.folderPath {
-                    Text("Source folder").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
-                    Text(folderPath)
-                        .font(.graspCaption)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let folderPath = course.folderPath {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder").font(.graspUI(size: 11))
+                            Text("Source folder").font(.graspUI(size: 12, weight: .semibold))
+                        }
                         .foregroundStyle(GRASPColor.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .textSelection(.enabled)
-                } else {
-                    Text("Added by hand -- no vault folder, so importing won't add notes to it.")
-                        .font(.graspCaption)
-                        .foregroundStyle(GRASPColor.textSecondary)
+                        Text(folderPath)
+                            .font(.graspMono(11.5))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .textSelection(.enabled)
+                    } else {
+                        Text("Added by hand -- no vault folder, so importing won't add notes to it.")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                    }
+                    if let noteCount {
+                        Text("\(noteCount) imported file\(noteCount == 1 ? "" : "s")")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                    }
                 }
-                if let noteCount {
-                    Text("\(noteCount) imported file\(noteCount == 1 ? "" : "s")")
-                        .font(.graspCaption)
-                        .foregroundStyle(GRASPColor.textSecondary)
-                }
+                .popupGroup(padding: 12)
             }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    course.name = course.name.trimmingCharacters(in: .whitespaces)
-                    let trimmedTimeline = timelineText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    course.semesterId = trimmedTimeline.isEmpty ? nil : (try? store.findOrCreateSemester(name: trimmedTimeline))
-                    try? store.updateCourse(course)
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(course.name.trimmingCharacters(in: .whitespaces).isEmpty)
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Save") {
+                course.name = course.name.trimmingCharacters(in: .whitespaces)
+                let trimmedTimeline = timelineText.trimmingCharacters(in: .whitespacesAndNewlines)
+                course.semesterId = trimmedTimeline.isEmpty ? nil : (try? store.findOrCreateSemester(name: trimmedTimeline))
+                try? store.updateCourse(course)
+                dismiss()
             }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(course.name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(20)
-        .frame(width: 420)
         // Split from the `noteCount` fetch below: `store.semesters` is
         // already in memory (no I/O), so this must not wait behind that
         // fetch (which reads through GRDB, and this project's database

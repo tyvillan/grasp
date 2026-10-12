@@ -34,74 +34,75 @@ struct GenerateStudyGuideSheet: View {
     private var canWrite: Bool { store.isGeneratorAvailable && !selectedDecks.isEmpty }
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New Study Guide").font(.graspHeadline)
-                Text("Pick the courses and decks to practice. GRASP writes practice problems with worked answers, "
-                     + "sample test questions and key terms from each deck's notes.")
-                    .font(.graspCallout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            Divider()
-
+        GRASPSheet(
+            eyebrow: "Study guide", title: "New study guide",
+            message: "Pick the courses and decks to practice. GRASP writes practice problems with worked answers, "
+                + "sample test questions and key terms from each deck's notes.",
+            icon: AIGlyph.symbol, width: 560, height: 660
+        ) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 14) {
                     coursesSection
                     ForEach(courses.filter { selectedCourses.contains($0.id) }) { course in
                         decksSection(course)
                     }
                     optionsSection
+                    notices
                 }
-                .padding(20)
             }
-
-            Divider()
-            footer
+        } footer: {
+            Text(selectedDecks.isEmpty ? "Nothing selected" : summary)
+                .graspType(.meta)
+                .monospacedDigit()
+                .foregroundStyle(GRASPColor.textTertiary)
+            Spacer()
+            Button("Cancel") { dismiss() }
+            Button {
+                store.generateStudyGuides(
+                    courseIds: orderedSelectedCourseIds, deckIds: Array(selectedDecks),
+                    problemsPerDeck: problemsPerDeck, examEventId: examId.isEmpty ? nil : examId
+                )
+                dismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol).font(.graspUI(size: 11, weight: .semibold))
+                    Text("Write guide")
+                }
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canWrite)
         }
-        #if os(macOS)
-        .frame(width: 540, height: 640)
-        #endif
         .task { load() }
     }
 
     // MARK: - Sections
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text)
-            .graspType(.eyebrow)
-            .textCase(.uppercase)
-            .foregroundStyle(GRASPColor.textTertiary)
-    }
-
     private func checkRow(_ title: String, subtitle: String? = nil, isOn: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(isOn ? GRASPColor.accent : GRASPColor.textTertiary)
-                Text(title).foregroundStyle(GRASPColor.textPrimary)
+        Toggle(isOn: Binding(get: { isOn }, set: { _ in action() })) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).graspType(.body)
                 if let subtitle {
-                    Text(subtitle).font(.graspCaption.weight(.semibold)).foregroundStyle(GRASPColor.accent)
+                    Text(subtitle).font(.graspUI(size: 11.5, weight: .semibold)).foregroundStyle(GRASPColor.accent)
                 }
                 Spacer(minLength: 0)
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 2)
     }
 
     private var coursesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Courses")
+            SectionLabel("Courses")
+                .padding(.bottom, 2)
             if courses.isEmpty {
-                Text("No courses have decks yet.").font(.graspCallout).foregroundStyle(.secondary)
+                Text("No courses have decks yet.").graspType(.body).foregroundStyle(GRASPColor.textSecondary)
             }
             ForEach(courses) { course in
                 checkRow(course.name, isOn: selectedCourses.contains(course.id)) { toggle(course) }
             }
         }
+        .popupGroup()
     }
 
     private func decksSection(_ course: Course) -> some View {
@@ -109,81 +110,69 @@ struct GenerateStudyGuideSheet: View {
         let allOn = decks.allSatisfy { selectedDecks.contains($0.id) }
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionTitle("Decks · \(course.name)")
+                SectionLabel("Decks · \(course.name)")
                 Spacer()
-                Button(allOn ? "Select None" : "Select All") {
+                Button(allOn ? "Select none" : "Select all") {
                     if allOn { decks.forEach { selectedDecks.remove($0.id) } } else { decks.forEach { selectedDecks.insert($0.id) } }
                 }
                 .buttonStyle(.plain)
-                .font(.graspCaption)
+                .font(.graspUI(size: 12, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
             }
+            .padding(.bottom, 2)
             ForEach(decks) { deck in
                 checkRow(deck.name, subtitle: kickers[deck.id], isOn: selectedDecks.contains(deck.id)) {
                     if selectedDecks.contains(deck.id) { selectedDecks.remove(deck.id) } else { selectedDecks.insert(deck.id) }
                 }
             }
         }
+        .popupGroup()
     }
 
     private var optionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Options")
-            Picker("Practice problems per deck", selection: $problemsPerDeck) {
-                ForEach([3, 5, 8], id: \.self) { Text("\($0)").tag($0) }
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel("Options")
+            HStack {
+                Text("Practice problems per deck").graspType(.body)
+                Spacer()
+                GRASPSegmented(selection: $problemsPerDeck, options: [3, 5, 8].map { ($0, "\($0)") })
             }
             if !exams.isEmpty {
-                Picker("Attach to an exam", selection: $examId) {
-                    Text("None -- a practice set").tag("")
-                    ForEach(exams) { exam in
-                        Text("\(exam.title) · \(exam.startsAt.formatted(.dateTime.month(.abbreviated).day()))")
-                            .tag(exam.id)
-                    }
+                HStack {
+                    Text("Attach to an exam").graspType(.body)
+                    Spacer()
+                    GRASPPicker(
+                        selection: $examId,
+                        options: [("", "None -- a practice set")] + exams.map {
+                            ($0.id, "\($0.title) · \($0.startsAt.formatted(.dateTime.month(.abbreviated).day()))")
+                        }
+                    )
+                    .frame(maxWidth: 260)
                 }
             }
         }
+        .popupGroup()
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    @ViewBuilder private var notices: some View {
+        VStack(alignment: .leading, spacing: 6) {
             if !store.isGeneratorAvailable {
                 Label("No AI model is set up. Settings → AI has the setup.", systemImage: "exclamationmark.triangle")
-                    .font(.graspCaption)
                     .foregroundStyle(GRASPColor.rejected)
             } else {
                 Text("Written by \(store.generatorStatus).")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
                 if store.aiMode.usesCloud, store.hasCloudKey {
                     Label("Your notes for these decks are sent to Google Gemini. Its free tier may use what you send "
                           + "to improve Google's products.", systemImage: "cloud")
-                        .font(.graspCaption)
-                        .foregroundStyle(.secondary)
                     if let warning = AIQuotaEstimate.warning(needed: requestEstimate, mode: store.aiMode) {
                         Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.graspCaption)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            HStack {
-                Text(selectedDecks.isEmpty ? "Nothing selected" : summary)
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Write Guide") {
-                    store.generateStudyGuides(
-                        courseIds: orderedSelectedCourseIds, deckIds: Array(selectedDecks),
-                        problemsPerDeck: problemsPerDeck, examEventId: examId.isEmpty ? nil : examId
-                    )
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canWrite)
-            }
         }
-        .padding(20)
+        .graspType(.meta)
+        .foregroundStyle(GRASPColor.textTertiary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - State

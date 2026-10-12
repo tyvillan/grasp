@@ -95,47 +95,48 @@ struct EmailSignInSheet: View {
     private var emailLooksValid: Bool { trimmedEmail.contains("@") && trimmedEmail.contains(".") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Sign in with email")
-                .font(.graspUI(size: 18, weight: .semibold))
-                .foregroundStyle(GRASPColor.textPrimary)
-            TextField("Email", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.emailAddress)
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.password)
-                .onSubmit { signIn() }
-
-            if let message {
-                Text(message)
-                    .graspType(.meta)
-                    .foregroundStyle(isError ? GRASPColor.rejected : GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Button("Email me a sign-in link") { sendLink() }
+        GRASPSheet(
+            eyebrow: "Account", title: "Sign in with email",
+            message: "Same account on every device, so your library follows you.",
+            icon: "envelope", width: 520
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Email")
+                    TextField("you@school.edu", text: $email)
+                        .textContentType(.emailAddress)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Password")
+                    SecureField("At least 8 characters", text: $password)
+                        .textContentType(.password)
+                        .onSubmit { signIn() }
+                }
+                Button("Email me a sign-in link instead") { sendLink() }
                     .buttonStyle(.plain)
+                    .font(.graspUI(size: 12.5, weight: .semibold))
                     .foregroundStyle(GRASPColor.accent)
                     .disabled(!emailLooksValid || isWorking)
                     .help("No password needed: open the link on this Mac and you're signed in.")
-                Spacer()
-                if isWorking { ProgressView().controlSize(.small) }
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Create Account") { signUp() }
-                    .disabled(!emailLooksValid || password.count < 8 || isWorking)
-                    .help(password.count < 8 ? "Passwords need at least 8 characters." : "")
-                Button("Sign In") { signIn() }
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!emailLooksValid || password.isEmpty || isWorking)
+
+                if let message {
+                    Text(message)
+                        .graspType(.meta)
+                        .foregroundStyle(isError ? GRASPColor.rejected : GRASPColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+        } footer: {
+            if isWorking { ProgressView().controlSize(.small) }
+            Spacer()
+            Button("Create account") { signUp() }
+                .disabled(!emailLooksValid || password.count < 8 || isWorking)
+                .help(password.count < 8 ? "Passwords need at least 8 characters." : "")
+            Button("Sign in") { signIn() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(!emailLooksValid || password.isEmpty || isWorking)
         }
-        .padding(24)
-        .frame(width: 520)
-        .background(GRASPColor.canvas)
     }
 
     private func signIn() {
@@ -195,69 +196,57 @@ struct AccountLinkSheet: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Signed in as \(account.email ?? "your account")")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .foregroundStyle(GRASPColor.textPrimary)
-                Text(explanation)
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        GRASPSheet(
+            eyebrow: "Signed in", title: account.email ?? "Your account",
+            message: explanation.isEmpty ? nil : explanation,
+            icon: "person.crop.circle.badge.checkmark", width: 500, showsClose: false
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !checked {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking your account…").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                    }
+                } else {
+                    option(
+                        title: accountHasData == true ? "Download my library" : "Start a new profile",
+                        detail: accountHasData == true
+                            ? "A new profile on this Mac fills with your library from your other devices."
+                            : "An empty profile that syncs from now on.",
+                        recommended: accountHasData != false
+                    ) { finish(with: nil) }
 
-            if !checked {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Checking your account…").graspType(.meta)
-                }
-            } else {
-                option(
-                    title: accountHasData == true ? "Download my library" : "Start a new profile",
-                    detail: accountHasData == true
-                        ? "A new profile on this Mac fills with your library from your other devices."
-                        : "An empty profile that syncs from now on.",
-                    recommended: accountHasData != false
-                ) { finish(with: nil) }
-
-                if !localProfiles.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        option(
-                            title: "Use a profile on this Mac",
-                            detail: accountHasData == true
-                                ? "Its library is added to the one already in your account -- if both came from the same notes you'll get duplicates."
-                                : "Its library is uploaded, and your other devices download it when they sign in.",
-                            recommended: accountHasData == false
-                        ) {
-                            if let chosenProfileId,
-                               let profile = localProfiles.first(where: { $0.id == chosenProfileId }) {
-                                finish(with: profile)
+                    if !localProfiles.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            option(
+                                title: "Use a profile on this Mac",
+                                detail: accountHasData == true
+                                    ? "Its library is added to the one already in your account -- if both came from the same notes you'll get duplicates."
+                                    : "Its library is uploaded, and your other devices download it when they sign in.",
+                                recommended: accountHasData == false
+                            ) {
+                                if let chosenProfileId,
+                                   let profile = localProfiles.first(where: { $0.id == chosenProfileId }) {
+                                    finish(with: profile)
+                                }
                             }
+                            GRASPPicker(
+                                selection: $chosenProfileId,
+                                options: localProfiles.map { (Optional($0.id), $0.name) }
+                            )
+                            .frame(maxWidth: 240)
+                            .padding(.leading, 12)
                         }
-                        Picker("Profile", selection: $chosenProfileId) {
-                            ForEach(localProfiles) { profile in
-                                Text(profile.name).tag(Optional(profile.id))
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 240)
-                        .padding(.leading, 12)
                     }
                 }
-            }
 
-            if let error {
-                Text(error).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                if let error {
+                    Text(error).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                }
             }
-
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-            }
+        } footer: {
+            Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
         }
-        .padding(24)
-        .frame(width: 480)
-        .background(GRASPColor.canvas)
         .task {
             chosenProfileId = localProfiles.first?.id
             accountHasData = await AccountService.shared.accountHasData(userId: account.userId)
@@ -288,8 +277,13 @@ struct AccountLinkSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(14)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                    .strokeBorder(recommended ? GRASPColor.accent.opacity(0.6) : GRASPColor.hairline, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

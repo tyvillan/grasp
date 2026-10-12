@@ -94,17 +94,18 @@ struct AISettingsScreen: View {
             if AIKeyStore.read() != nil { await store.testCloudConnection() }
             await store.refreshGeneratorStatus()
         }
-        .alert("Send your notes to Google?", isPresented: Binding(
+        .sheet(isPresented: Binding(
             get: { pendingMode != nil }, set: { if !$0 { pendingMode = nil } }
         )) {
-            Button("Use Gemini") {
+            ConfirmationSheet(
+                icon: "cloud", title: "Send your notes to Google?",
+                message: Self.freeTierNotice + " You can switch back to Local at any time.",
+                confirmTitle: "Use Gemini", isDestructive: false
+            ) {
                 AIPreferences.hasAcceptedCloudNotice = true
                 if let pendingMode { store.setAIMode(pendingMode) }
                 pendingMode = nil
             }
-            Button("Cancel", role: .cancel) { pendingMode = nil }
-        } message: {
-            Text(Self.freeTierNotice + " You can switch back to Local at any time.")
         }
     }
 

@@ -107,17 +107,18 @@ private struct AISettingsTab: View {
         .sheet(isPresented: $showingOllamaSetup) {
             OllamaSetupSheet(onStartService: startOllamaAndRecheck)
         }
-        .alert("Send your notes to Google?", isPresented: Binding(
+        .sheet(isPresented: Binding(
             get: { pendingMode != nil }, set: { if !$0 { pendingMode = nil } }
         )) {
-            Button("Use Gemini") {
+            ConfirmationSheet(
+                icon: "cloud", title: "Send your notes to Google?",
+                message: Self.freeTierNotice + " You can switch back to Local at any time.",
+                confirmTitle: "Use Gemini", isDestructive: false
+            ) {
                 AIPreferences.hasAcceptedCloudNotice = true
                 if let pendingMode { store.setAIMode(pendingMode) }
                 pendingMode = nil
             }
-            Button("Cancel", role: .cancel) { pendingMode = nil }
-        } message: {
-            Text(Self.freeTierNotice + " You can switch back to Local at any time.")
         }
     }
 
@@ -424,47 +425,55 @@ private struct OllamaSetupSheet: View {
     let onStartService: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Set Up Local AI").font(.graspHeadline)
-            Text("Ollama runs a small language model on this Mac, so AI features work offline and your notes never leave it.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    OllamaLauncher.openDownloadPage()
-                } label: {
-                    Label("Download & Install Ollama", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-                Text("Opens the official installer page in your browser.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
+        GRASPSheet(
+            eyebrow: "AI", title: "Set up local AI",
+            message: "Ollama runs a small language model on this Mac, so AI features work offline and your notes never leave it.",
+            icon: "cpu", width: 440
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                setupStep(
+                    number: 1, title: "Download and install Ollama",
+                    detail: "Opens the official installer page in your browser.",
+                    button: "Open download page", icon: "arrow.down.circle"
+                ) { OllamaLauncher.openDownloadPage() }
+                setupStep(
+                    number: 2, title: "Start the Ollama service",
+                    detail: "Already installed? This launches it in the background and re-checks the connection.",
+                    button: "Start Ollama", icon: "play.circle"
+                ) {
                     onStartService()
                     dismiss()
-                } label: {
-                    Label("Start Local Ollama Service", systemImage: "play.circle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
-                Text("Already installed? This launches it in the background and re-checks the connection.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
             }
-
-            HStack {
-                Spacer()
-                Button("Close") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
+        } footer: {
+            Button("Close") { dismiss() }
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(20)
-        .frame(width: 380)
+    }
+
+    private func setupStep(number: Int, title: String, detail: String, button: String, icon: String,
+                           action: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: GRASPSpace.m) {
+            Text("\(number)")
+                .font(.graspDisplay(16))
+                .foregroundStyle(GRASPColor.ink)
+                .frame(width: 26, height: 26)
+                .background(GRASPColor.brand, in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.graspUI(size: 14, weight: .semibold)).foregroundStyle(GRASPColor.textPrimary)
+                Text(detail).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: action) {
+                    HStack(spacing: 6) {
+                        Image(systemName: icon).font(.graspUI(size: 11, weight: .semibold))
+                        Text(button)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .popupGroup(padding: 14)
     }
 }
 
@@ -587,21 +596,21 @@ private struct AccountSyncSection: View {
             guard let signedIn = AccountService.shared.consumeCompletedFromLink() else { return }
             if sync.account == nil { link(signedIn) } else { sync.resume(signedIn) }
         }
-        .confirmationDialog("Sign out of sync?", isPresented: $confirmingSignOut) {
-            Button("Sign Out", role: .destructive) { Task { await sync.signOut() } }
-        } message: {
-            Text("Your library stays on this Mac as a local profile. It stops syncing, and your other devices keep their own copies.")
+        .sheet(isPresented: $confirmingSignOut) {
+            ConfirmationSheet(
+                icon: "rectangle.portrait.and.arrow.right", title: "Sign out of sync?",
+                message: "Your library stays on this Mac as a local profile. It stops syncing, and your other devices keep their own copies.",
+                confirmTitle: "Sign out"
+            ) { Task { await sync.signOut() } }
         }
-        .confirmationDialog(
-            "Your account already has a library",
-            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } })
-        ) {
-            Button("Combine Them") {
+        .sheet(isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } })) {
+            ConfirmationSheet(
+                icon: "arrow.triangle.merge", title: "Your account already has a library",
+                message: "This profile's library will be added to the one already in your account. If both came from the same notes you'll get duplicate cards -- to use your account's library on this Mac instead, switch profile and sign in from there.",
+                confirmTitle: "Combine them", isDestructive: false
+            ) {
                 if let pendingLink { finishLink(pendingLink) }
             }
-            Button("Cancel", role: .cancel) { pendingLink = nil }
-        } message: {
-            Text("This profile's library will be added to the one already in your account. If both came from the same notes you'll get duplicate cards -- to use your account's library on this Mac instead, switch profile and sign in from there.")
         }
     }
 

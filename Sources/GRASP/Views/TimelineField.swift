@@ -29,16 +29,19 @@ struct TimelineField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField("Timeline (e.g. Fall 2026)", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isFocused)
+            HStack {
+                FieldLabel("Timeline")
+                Spacer()
                 if allowsNoTimeline, !text.isEmpty {
-                    Button("No Timeline") { text = "" }
-                        .buttonStyle(.link)
-                        .font(.graspCaption)
+                    Button("No timeline") { text = "" }
+                        .buttonStyle(.plain)
+                        .font(.graspUI(size: 12, weight: .medium))
+                        .foregroundStyle(GRASPColor.accent)
                 }
             }
+            TextField("e.g. Fall 2026", text: $text)
+                .focused($isFocused)
+                .graspFieldChrome(focused: isFocused)
 
             if isFocused, !suggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
@@ -49,20 +52,36 @@ struct TimelineField: View {
                         } label: {
                             Text(semester.name)
                                 .font(.graspCallout)
+                                .foregroundStyle(GRASPColor.textPrimary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SuggestionRowStyle())
                     }
                 }
-                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .padding(4)
+                .background(GRASPColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(GRASPColor.hairline)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(GRASPColor.hairlineStrong)
                 )
             }
         }
+    }
+}
+
+/// A suggestion row that lights up like a pill-menu row on hover.
+private struct SuggestionRowStyle: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hovering || configuration.isPressed ? GRASPColor.accentSoft : .clear)
+            )
+            .onHover { hovering = $0 }
     }
 }

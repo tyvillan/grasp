@@ -409,34 +409,38 @@ private struct AddCourseSheet: View {
     @State private var timelineText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add a Course")
-                .font(.graspHeadline)
-            Text("For a class with no vault folder yet -- import its notes later once you write them.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-            TextField("Course name (e.g. Intro to Software Design)", text: $name)
-            TextField("Course code (optional, e.g. COP 3014)", text: $code)
-            TimelineField(text: $timelineText, allowsNoTimeline: false)
-            HStack {
-                Spacer()
+        GRASPSheet(
+            eyebrow: "Course", title: "Add a course",
+            message: "For a class with no vault folder yet. Import its notes later, once you write them.",
+            width: 440
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Name")
+                    TextField("e.g. Intro to Software Design", text: $name)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Code (optional)")
+                    TextField("e.g. COP 3014", text: $code)
+                }
+                TimelineField(text: $timelineText, allowsNoTimeline: false)
+            }
+        } footer: {
                 Button("Cancel") { dismiss() }
-                Button("Add") {
+                Button("Add course") {
                     guard let semesterId = try? store.findOrCreateSemester(
                         name: timelineText.trimmingCharacters(in: .whitespacesAndNewlines)
                     ) else { return }
                     try? store.addManualCourse(name: name, code: code.isEmpty ? nil : code, semesterId: semesterId)
                     dismiss()
                 }
+                .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(
                     name.trimmingCharacters(in: .whitespaces).isEmpty
                         || timelineText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
-            }
         }
-        .padding(20)
-        .frame(width: 380)
     }
 }
 
@@ -448,26 +452,35 @@ private struct UploadToCourseSheet: View {
     @Binding var selection: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Upload Document to Course")
-                .font(.graspHeadline)
-            Text("Choose a course, then pick the files or folder to add to it.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-
-            List(selection: $selection) {
-                ForEach(store.coursePickerGroups(), id: \.title) { group in
-                    Section(group.title) {
-                        ForEach(group.courses) { course in
-                            Text(course.name).tag(course.id as String?)
+        GRASPSheet(
+            eyebrow: "Upload", title: "Add files to a course",
+            message: "Choose a course, then pick the files or folder to add to it.",
+            width: 460, showsClose: false
+        ) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                    ForEach(store.coursePickerGroups(), id: \.title) { group in
+                        VStack(alignment: .leading, spacing: 2) {
+                            SectionLabel(group.title)
+                                .padding(.bottom, 4)
+                            ForEach(group.courses) { course in
+                                CoursePickRow(name: course.name, color: course.colorHex.map(CoursePalette.color(hex:)),
+                                              isOn: selection == course.id) {
+                                    selection = course.id
+                                }
+                            }
                         }
                     }
                 }
+                .padding(GRASPSpace.m)
             }
-            .frame(minHeight: 220)
-
-            HStack {
-                Spacer()
+            .frame(height: 260)
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+            )
+        } footer: {
                 Button("Cancel") {
                     selection = nil
                     dismiss()
@@ -476,13 +489,53 @@ private struct UploadToCourseSheet: View {
                 // with the course still chosen and the file panel opened
                 // anyway.
                 .keyboardShortcut(.cancelAction)
-                Button("Choose Files…") { dismiss() }
+                Button("Choose files…") { dismiss() }
+                    .buttonStyle(GRASPProminentButton())
                     .keyboardShortcut(.defaultAction)
                     .disabled(selection == nil)
-            }
         }
-        .padding(20)
-        .frame(width: 420)
+    }
+}
+
+/// A course to pick in a popup: its color dot and name; the chosen one
+/// gets the yellow edge and a check.
+struct CoursePickRow: View {
+    let name: String
+    let color: Color?
+    let isOn: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                CourseDot(color: color)
+                Text(name)
+                    .font(.graspUI(size: 13.5, weight: isOn ? .semibold : .regular))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Spacer()
+                if isOn {
+                    Image(systemName: "checkmark")
+                        .font(.graspUI(size: 11, weight: .bold))
+                        .foregroundStyle(GRASPColor.accent)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isOn ? GRASPColor.accentSoft : (hovering ? GRASPColor.surfaceRaised : .clear))
+                    .overlay(alignment: .leading) {
+                        if isOn {
+                            Capsule().fill(GRASPColor.brand).frame(width: 3, height: 16).padding(.leading, 3)
+                        }
+                    }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

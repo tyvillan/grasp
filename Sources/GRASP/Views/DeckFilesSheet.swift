@@ -27,71 +27,67 @@ struct DeckFilesSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 14)
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
-            if files.isEmpty {
-                ContentUnavailableView {
-                    Label("No source files", systemImage: "doc.questionmark")
-                } description: {
-                    Text(handTypedCount > 0
-                         ? "Every card in this \(scopeNoun) was typed by hand, so none of them came from a file."
-                         : "This \(scopeNoun) has no cards yet, so no files are behind it.")
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(filtered) { file in
-                        row(file)
+        GRASPSheet(eyebrow: "Source files", title: scopeName, message: summary, icon: "doc.on.doc", width: 640) {
+            VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                if files.count > 5 {
+                    FieldChrome {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                            TextField("Filter by name or folder", text: $query)
+                        }
                     }
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-                .overlay {
-                    if filtered.isEmpty {
-                        Text("No files match \"\(query)\"")
-                            .graspType(.body)
+                if files.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "doc.questionmark")
+                            .font(.graspUI(size: 22))
                             .foregroundStyle(GRASPColor.textTertiary)
+                        Text(handTypedCount > 0
+                             ? "Every card in this \(scopeNoun) was typed by hand, so none of them came from a file."
+                             : "This \(scopeNoun) has no cards yet, so no files are behind it.")
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 48)
+                    .popupGroup()
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(filtered.enumerated()), id: \.element.id) { index, file in
+                                if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                                row(file)
+                            }
+                        }
+                        .padding(.horizontal, GRASPSpace.m)
+                    }
+                    .frame(height: 320)
+                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                            .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+                    )
+                    .overlay {
+                        if filtered.isEmpty {
+                            Text("No files match \u{201C}\(query)\u{201D}")
+                                .graspType(.body)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
                     }
                 }
             }
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+        } footer: {
             footer
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
         }
-        .frame(width: 620, height: 520)
-        .background(GRASPColor.canvas)
         .task { load() }
         .sheet(item: Binding(
             get: { viewingMaterialId.map { FileIdentifier(id: $0) } },
             set: { viewingMaterialId = $0?.id }
         )) { wrapped in
             NoteViewerView(materialId: wrapped.id)
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Files in \(scopeName)")
-                        .font(.graspUI(size: 18, weight: .semibold))
-                        .tracking(-0.3)
-                        .foregroundStyle(GRASPColor.textPrimary)
-                    Text(summary)
-                        .graspType(.meta)
-                        .foregroundStyle(GRASPColor.textTertiary)
-                }
-                Spacer()
-            }
-            if files.count > 5 {
-                TextField("Filter by name or folder", text: $query)
-                    .textFieldStyle(.roundedBorder)
-            }
         }
     }
 
@@ -142,41 +138,36 @@ struct DeckFilesSheet: View {
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
             }
-            Menu {
-                Button("View Note Text") { viewingMaterialId = file.id }
-                Button("Open in Default App") { NSWorkspace.shared.open(file.url) }
-                    .disabled(!exists)
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
-                    .disabled(!exists)
-                Divider()
-                Button("Copy Path") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(file.url.path, forType: .string)
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.graspUI(size: 14))
-                    .foregroundStyle(GRASPColor.textSecondary)
+            IconMenu(help: "File actions") {
+                [
+                    .action("View note text", systemImage: "doc.text.magnifyingglass") { viewingMaterialId = file.id },
+                    .action("Open in default app", systemImage: "arrow.up.forward.app", disabled: !exists) {
+                        NSWorkspace.shared.open(file.url)
+                    },
+                    .action("Show in Finder", systemImage: "folder", disabled: !exists) {
+                        NSWorkspace.shared.activateFileViewerSelecting([file.url])
+                    },
+                    .divider,
+                    .action("Copy path", systemImage: "doc.on.clipboard") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(file.url.path, forType: .string)
+                    },
+                ]
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { viewingMaterialId = file.id }
     }
 
-    private var footer: some View {
-        HStack {
-            Text("Double-click a file to read its text here.")
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textTertiary)
-            Spacer()
-            Button("Done") { dismiss() }
-                .buttonStyle(GRASPProminentButton())
-                .keyboardShortcut(.defaultAction)
-        }
+    @ViewBuilder private var footer: some View {
+        Text("Double-click a file to read its text here.")
+            .graspType(.meta)
+            .foregroundStyle(GRASPColor.textTertiary)
+        Spacer()
+        Button("Done") { dismiss() }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
     }
 
     // MARK: - Helpers

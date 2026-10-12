@@ -768,16 +768,25 @@ struct GuidePageSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("\(target.title) · page \(target.page)")
-                    .graspType(.rowTitle)
+            HStack(spacing: GRASPSpace.m) {
+                VStack(alignment: .leading, spacing: 3) {
+                    SectionLabel("Page \(target.page)")
+                    Text(target.title)
+                        .font(.graspDisplay(18))
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Button("Done") { dismiss() }
+                    .buttonStyle(GRASPProminentButton())
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(12)
+            .padding(.horizontal, GRASPSpace.xl)
+            .padding(.vertical, 14)
+            .background(alignment: .bottom) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
             PDFPageView(url: target.url, page: target.page)
         }
+        .graspPopupBackground()
         #if os(macOS)
         .frame(minWidth: 760, minHeight: 620)
         #endif

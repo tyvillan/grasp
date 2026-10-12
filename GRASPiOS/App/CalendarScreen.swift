@@ -59,10 +59,8 @@ struct CalendarScreen: View {
             EventEditor(event: CalendarEvent(kind: .exam, title: "", startsAt: Calendar.current.startOfDay(
                 for: Date().addingTimeInterval(7 * 86400))), isNew: true)
         }
-        .alert("Calendar import", isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
-            Button("OK") { importMessage = nil }
-        } message: {
-            Text(importMessage ?? "")
+        .sheet(isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })) {
+            ResultSheet(icon: "calendar.badge.checkmark", title: "Calendar import", leadText: importMessage)
         }
     }
 

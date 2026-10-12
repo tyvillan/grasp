@@ -99,10 +99,8 @@ struct DeckScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
         }
-        .alert("AI", isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
-            Button("OK") { aiMessage = nil }
-        } message: {
-            Text(aiMessage ?? "")
+        .sheet(isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
+            ResultSheet(icon: AIGlyph.symbol, title: "AI", leadText: aiMessage)
         }
         .task { await store.refreshGeneratorStatus() }
     }

@@ -188,13 +188,7 @@ struct CalendarView: View {
                 }
             }
 
-            Picker("", selection: $mode) {
-                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
+            GRASPSegmented(selection: $mode, options: Mode.allCases.map { ($0, $0.rawValue) })
 
             Button(action: syncSystemCalendar) {
                 HStack(spacing: 5) {
@@ -749,104 +743,87 @@ struct CalendarEventEditSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: kind.icon)
-                    .font(.graspUI(size: 24))
-                    .foregroundStyle(kind.tint)
-                Text(isNew ? "New Event" : "Edit Event")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
+        GRASPSheet(
+            eyebrow: isNew ? "Calendar" : kind.label,
+            title: isNew ? "New event" : "Edit event",
+            icon: kind.icon, width: 480
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
                 field("Title") {
                     TextField("e.g. ECON 201 Midterm", text: $title)
-                        .textFieldStyle(.roundedBorder)
                 }
                 field("Type") {
-                    Picker("", selection: $kind) {
-                        ForEach(CalendarEventKind.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    GRASPSegmented(
+                        selection: $kind,
+                        options: CalendarEventKind.allCases.map { ($0, $0.label) },
+                        fillsWidth: true
+                    )
                 }
-                field("Date") {
-                    HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: GRASPSpace.l) {
+                    field("Date") {
                         DatePicker("", selection: $day, displayedComponents: .date)
                             .labelsHidden()
-                        Toggle("All day", isOn: $isAllDay)
-                        Spacer(minLength: 0)
                     }
-                }
-                if !isAllDay {
-                    field("Time") {
-                        HStack(spacing: 8) {
-                            DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                            Text("to").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
-                            DatePicker("", selection: $endTime, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                            Spacer(minLength: 0)
+                    if !isAllDay {
+                        field("Time") {
+                            HStack(spacing: 8) {
+                                DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
+                                    .labelsHidden()
+                                Text("to").graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                                DatePicker("", selection: $endTime, displayedComponents: .hourAndMinute)
+                                    .labelsHidden()
+                            }
                         }
+                        .transition(.opacity)
                     }
+                    Spacer(minLength: 0)
                 }
-                field("Course") {
-                    Picker("", selection: $courseId) {
-                        Text("None").tag(String?.none)
-                        ForEach(store.coursePickerGroups(), id: \.title) { group in
-                            Section(group.title) {
-                                ForEach(group.courses) { course in
-                                    Text(course.name).tag(String?.some(course.id))
+                Toggle("All day", isOn: $isAllDay)
+                HStack(alignment: .top, spacing: GRASPSpace.m) {
+                    field("Course") {
+                        GRASPDropdown(
+                            selection: $courseId,
+                            groups: [.init(title: nil, options: [(nil, "None")])]
+                                + store.coursePickerGroups().map { group in
+                                    .init(title: group.title, options: group.courses.map { (String?.some($0.id), $0.name) })
                                 }
-                            }
+                        )
+                    }
+                    // Only meaningful once a course is picked: the deck list
+                    // is that course's decks, and a deck from some other
+                    // course would be a link to study the wrong material.
+                    if courseId != nil {
+                        field("Deck to study") {
+                            GRASPDropdown(
+                                selection: $deckId,
+                                options: [(nil, "All cards in the course")] + decks.map { (String?.some($0.id), $0.name) }
+                            )
                         }
                     }
-                    .labelsHidden()
                 }
-                // Only meaningful once a course is picked: the deck list
-                // is that course's decks, and a deck from some other
-                // course would be a link to study the wrong material.
-                if courseId != nil {
-                    field("Deck to study") {
-                        Picker("", selection: $deckId) {
-                            Text("All cards in the course").tag(String?.none)
-                            ForEach(decks) { deck in
-                                Text(deck.name).tag(String?.some(deck.id))
-                            }
-                        }
-                        .labelsHidden()
-                    }
-                }
-            }
 
-            if canPlan {
-                studyPlanSection
-            }
-
-            HStack {
-                if !isNew {
-                    Button("Delete") { showingDeleteConfirmation = true }
-                        .buttonStyle(GRASPQuietButton())
+                if canPlan {
+                    studyPlanSection
                 }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(isNew ? "Add Event" : "Save") { save() }
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            .animation(Motion.snappy, value: isAllDay)
+        } footer: {
+            if !isNew {
+                Button("Delete", role: .destructive) { showingDeleteConfirmation = true }
+            }
+            Spacer()
+            Button("Cancel") { dismiss() }
+            Button(isNew ? "Add event" : "Save") { save() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(24)
-        .frame(width: 460)
-        .background(GRASPColor.canvas)
         .task(id: courseId) { loadDecks() }
         .onChange(of: courseId) { _, _ in deckId = nil }
         .sheet(isPresented: $showingDeleteConfirmation) {
             ConfirmationSheet(
                 icon: "trash",
-                title: "Delete \"\(original.title)\"?",
+                title: "Delete \u{201C}\(original.title)\u{201D}?",
                 message: "This removes the event from your GRASP calendar. "
                     + "If it was an exam, its cards go back to ordinary spaced-repetition scheduling.",
                 confirmTitle: "Delete"
@@ -872,12 +849,9 @@ struct CalendarEventEditSheet: View {
     /// see.
     private var studyPlanSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Divider()
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Study plan")
-                        .graspType(.eyebrow)
-                        .foregroundStyle(GRASPColor.textTertiary)
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionLabel("Study plan")
                     Text(planDescription)
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textSecondary)
@@ -893,6 +867,7 @@ struct CalendarEventEditSheet: View {
                 .disabled(plannableCards == 0)
             }
         }
+        .popupGroup(padding: 14)
     }
 
     private var hasPlan: Bool { store.hasStudyPlan(for: original.id) }
@@ -914,10 +889,8 @@ struct CalendarEventEditSheet: View {
     }
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .graspType(.eyebrow)
-                .foregroundStyle(GRASPColor.textTertiary)
+        VStack(alignment: .leading, spacing: 6) {
+            FieldLabel(label)
             content()
         }
     }

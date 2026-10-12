@@ -30,72 +30,72 @@ struct PracticeProblemsSheet: View {
     private var showsProblemKinds: Bool { style != .code }
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "function")
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(GRASPColor.accent)
-                Text("Practice Problems: \(scopeName)")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                Text("Worked problems written from your notes: code to complete, calculations, matrices. Not flashcards, and "
-                     + "separate from Test, which quizzes you on your cards. Each is checked before it's kept, and tests mix "
-                     + "in some when \"Include AI-written questions\" is on.")
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Picker("", selection: $tab) {
-                    Text("Saved (\(questions.count))").tag(Tab.saved)
-                    Text("Write New").tag(Tab.write)
+        GRASPSheet(
+            eyebrow: "Practice problems", title: scopeName,
+            message: "Worked problems written from your notes: code to complete, calculations, matrices. Each is checked "
+                + "before it's kept, and tests mix some in when \u{201C}Include AI-written questions\u{201D} is on.",
+            icon: "function", width: 660, height: 620
+        ) {
+            VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                GRASPSegmented(selection: $tab, options: [(.saved, "Saved (\(questions.count))"), (.write, "Write new")])
+
+                if let job {
+                    AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(jobKey) },
+                                    stopHelp: "Stops now. Problems already checked are kept.", isInline: true)
+                        .popupGroup(padding: 12)
+                } else if let run = store.lastCodeQuestionRun {
+                    banner(run)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(24)
-            Divider()
 
-            if let job {
-                AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(jobKey) },
-                                stopHelp: "Stops now. Problems already checked are kept.")
-            } else if let run = store.lastCodeQuestionRun {
-                banner(run)
-            }
-
-            if tab == .saved {
-                if questions.isEmpty {
-                    VStack(spacing: 10) {
-                        Text("No saved problems yet.").foregroundStyle(GRASPColor.textSecondary)
-                        Button("Write Some") { tab = .write }.buttonStyle(GRASPQuietButton())
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(questions) { record in
-                                row(record)
-                                    .padding(14)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                if tab == .saved {
+                    if questions.isEmpty {
+                        VStack(spacing: 10) {
+                            Text("No saved problems yet.")
+                                .graspType(.body)
+                                .foregroundStyle(GRASPColor.textSecondary)
+                            Button("Write some") { tab = .write }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .popupGroup()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 10) {
+                                ForEach(questions) { record in
+                                    row(record)
+                                        .popupGroup(padding: 14)
+                                }
                             }
                         }
-                        .padding(20)
+                    }
+                } else {
+                    ScrollView { writeControls }
+                }
+            }
+        } footer: {
+            Button("Done") { dismiss() }
+                .keyboardShortcut(tab == .saved ? .defaultAction : .cancelAction)
+            if tab == .write {
+                Button {
+                    tab = .saved
+                    store.writePractice(
+                        PracticeBuilder.Request(
+                            deckIds: deckIds, style: style,
+                            codeKinds: CodeQuestionKind.allCases.filter(codeKinds.contains),
+                            problemKinds: ProblemKind.allCases.filter(problemKinds.contains), count: count),
+                        courseId: courseId)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: AIGlyph.symbol).font(.graspUI(size: 11, weight: .semibold))
+                        Text("Write problems")
                     }
                 }
-                Divider()
-                HStack {
-                    Spacer()
-                    Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-                }
-                .padding(.horizontal, 24).padding(.vertical, 14)
-            } else {
-                ScrollView { writeControls }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+                .disabled(job != nil || !store.canWriteCodeQuestions
+                          || (showsCodeKinds && codeKinds.isEmpty && !showsProblemKinds)
+                          || (showsProblemKinds && problemKinds.isEmpty && !showsCodeKinds))
             }
         }
-        .macSheetFrame(width: 640, height: 600)
-        .background(GRASPColor.canvas)
         .task {
             store.addMissingChoicesInBackground()
             load()
@@ -111,23 +111,25 @@ struct PracticeProblemsSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(record.summary)
-                    .font(.graspCaption.weight(.semibold))
+                    .font(.graspUI(size: 12, weight: .semibold))
                     .foregroundStyle(GRASPColor.accent)
                 if store.isCodeQuestionStale(record) {
-                    Text("Note changed since")
-                        .font(.graspCaption2)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(GRASPColor.accentSoft, in: Capsule())
+                    PreviewChip(text: "Note changed since", tint: GRASPColor.accent, tintSoft: GRASPColor.accentSoft)
                 }
                 Spacer()
-                Button(expanded.contains(record.id) ? "Hide" : "Show") {
-                    if expanded.contains(record.id) { expanded.remove(record.id) } else { expanded.insert(record.id) }
+                Button(expanded.contains(record.id) ? "Hide answer" : "Show answer") {
+                    withAnimation(Motion.snappy) {
+                        if expanded.contains(record.id) { expanded.remove(record.id) } else { expanded.insert(record.id) }
+                    }
                 }
-                .buttonStyle(.borderless)
-                Button(role: .destructive) { store.deleteCodeQuestion(record.id) } label: {
-                    Image(systemName: "trash")
+                .buttonStyle(.plain)
+                .font(.graspUI(size: 12, weight: .semibold))
+                .foregroundStyle(GRASPColor.textSecondary)
+                Button { store.deleteCodeQuestion(record.id) } label: {
+                    Image(systemName: "trash").font(.graspUI(size: 12))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .foregroundStyle(GRASPColor.rejected)
                 .help("Delete this problem")
             }
             if !expanded.contains(record.id) {
@@ -136,16 +138,17 @@ struct PracticeProblemsSheet: View {
                 if let problem = record.problem {
                     GuideText(text: problem.prompt, style: .body, color: GRASPColor.textPrimary)
                 } else {
-                    Text(record.promptText).font(.graspCallout).lineLimit(3)
+                    Text(record.promptText).graspType(.body).foregroundStyle(GRASPColor.textPrimary).lineLimit(3)
                 }
             } else if let question = record.question {
-                Text(question.prompt).font(.graspCallout)
+                Text(question.prompt).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
                 Text(question.code)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.graspMono(12))
+                    .foregroundStyle(GRASPColor.textPrimary)
                     .textSelection(.enabled)
-                    .padding(8)
+                    .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 answerLine(question.answerText)
                 footer(record)
             } else if let problem = record.problem {
@@ -153,14 +156,14 @@ struct PracticeProblemsSheet: View {
                 if let choices = problem.choices {
                     ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
                         Text("\(["A", "B", "C", "D"][min(index, 3)])) \(choice)")
-                            .font(.graspCallout)
-                            .foregroundStyle(index == problem.correct ? GRASPColor.success : .primary)
+                            .graspType(.body)
+                            .foregroundStyle(index == problem.correct ? GRASPColor.success : GRASPColor.textPrimary)
                     }
                 } else {
                     answerLine(problem.answerText)
                 }
                 if let explanation = problem.explanation {
-                    Text(explanation).font(.graspCallout).foregroundStyle(.secondary)
+                    Text(explanation).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
                 }
                 footer(record)
             }
@@ -169,15 +172,15 @@ struct PracticeProblemsSheet: View {
 
     private func answerLine(_ text: String) -> some View {
         Text("Answer: \(text)")
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(.secondary)
+            .font(.graspMono(12))
+            .foregroundStyle(GRASPColor.success)
             .textSelection(.enabled)
     }
 
     private func footer(_ record: TestQuestion) -> some View {
         Text(record.verifiedBy.prefix(1).uppercased() + record.verifiedBy.dropFirst()
              + (record.model.map { " · written by \($0)" } ?? ""))
-            .font(.graspCaption2).foregroundStyle(.tertiary)
+            .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
     }
 
     private func banner(_ run: AppStore.CodeQuestionRunResult) -> some View {
@@ -188,88 +191,83 @@ struct PracticeProblemsSheet: View {
             Text(run.failure ?? "Saved \(run.saved) problem\(run.saved == 1 ? "" : "s")"
                  + (run.rejected > 0 ? " (\(run.rejected) didn't check out and were dropped" + (run.topReason.map { ", mostly because \($0)" } ?? "") + ")" : "")
                  + (run.wasStopped ? ", then stopped." : "."))
-                .font(.graspCallout)
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button("Dismiss") { store.lastCodeQuestionRun = nil }.buttonStyle(.borderless)
+            Button { store.lastCodeQuestionRun = nil } label: {
+                Image(systemName: "xmark").font(.graspUI(size: 10, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(GRASPColor.textTertiary)
+            .help("Dismiss")
         }
-        .padding(.horizontal, 20).padding(.vertical, 10)
-        .background((failed ? GRASPColor.rejectedSoft : GRASPColor.accentSoft).opacity(0.55))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(failed ? GRASPColor.rejectedSoft : GRASPColor.successSoft,
+                    in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
     }
 
     private var writeControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 16) {
-                Picker("How many", selection: $count) {
-                    ForEach([5, 10, 20], id: \.self) { Text("\($0)").tag($0) }
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: GRASPSpace.xl) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("How many")
+                        GRASPSegmented(selection: $count, options: [5, 10, 20].map { ($0, "\($0)") })
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("Style")
+                        GRASPDropdown(
+                            selection: $style,
+                            options: [(nil, "Automatic")] + ProblemSubject.allCases.map { (ProblemSubject?.some($0), $0.label) }
+                        )
+                        .frame(width: 200)
+                        .help("Automatic reads each note: code, matrices and equations, economics, or concepts.")
+                    }
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                Picker("Style", selection: $style) {
-                    Text("Automatic").tag(ProblemSubject?.none)
-                    ForEach(ProblemSubject.allCases, id: \.self) { Text($0.label).tag(ProblemSubject?.some($0)) }
+                if showsCodeKinds {
+                    kindRow("Code", CodeQuestionKind.allCases, selection: $codeKinds, label: \.label)
                 }
-                .fixedSize()
-                .help("Automatic reads each note: code, matrices and equations, economics, or concepts.")
+                if showsProblemKinds {
+                    kindRow("Problems", ProblemKind.allCases, selection: $problemKinds, label: \.label)
+                }
             }
-            if showsCodeKinds {
-                kindRow("Code", CodeQuestionKind.allCases, selection: $codeKinds, label: \.label)
-            }
-            if showsProblemKinds {
-                kindRow("Problems", ProblemKind.allCases, selection: $problemKinds, label: \.label)
-            }
+            .popupGroup()
+
             if !store.canWriteCodeQuestions {
                 Label(store.isGeneratorAvailable
                       ? "Writing practice needs a Mac with Xcode's command line tools to check the answers."
                       : "No AI model is set up. Settings → AI has the setup.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.graspCaption).foregroundStyle(GRASPColor.rejected)
+                    .graspType(.meta).foregroundStyle(GRASPColor.rejected)
             } else {
-                Text("Written by \(store.generatorStatus). About \(requests) request\(requests == 1 ? "" : "s"); "
-                     + "with a cloud model several notes are written at once.")
-                    .font(.graspCaption).foregroundStyle(.secondary)
-                if store.aiMode.usesCloud, store.hasCloudKey {
-                    Label("The notes' text is sent to Google Gemini. Its free tier may use what you send to improve Google's products.",
-                          systemImage: "cloud")
-                        .font(.graspCaption).foregroundStyle(.secondary)
-                    if let warning = AIQuotaEstimate.warning(needed: requests, mode: store.aiMode) {
-                        Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.graspCaption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Written by \(store.generatorStatus). About \(requests) request\(requests == 1 ? "" : "s"); "
+                         + "with a cloud model several notes are written at once.")
+                    if store.aiMode.usesCloud, store.hasCloudKey {
+                        Label("The notes' text is sent to Google Gemini. Its free tier may use what you send to improve Google's products.",
+                              systemImage: "cloud")
+                        if let warning = AIQuotaEstimate.warning(needed: requests, mode: store.aiMode) {
+                            Label(warning, systemImage: "gauge.with.dots.needle.67percent")
+                        }
                     }
                 }
-            }
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                Button("Write Problems") {
-                    tab = .saved
-                    store.writePractice(
-                        PracticeBuilder.Request(
-                            deckIds: deckIds, style: style,
-                            codeKinds: CodeQuestionKind.allCases.filter(codeKinds.contains),
-                            problemKinds: ProblemKind.allCases.filter(problemKinds.contains), count: count),
-                        courseId: courseId)
-                }
-                .buttonStyle(GRASPProminentButton())
-                .keyboardShortcut(.defaultAction)
-                .disabled(job != nil || !store.canWriteCodeQuestions
-                          || (showsCodeKinds && codeKinds.isEmpty && !showsProblemKinds)
-                          || (showsProblemKinds && problemKinds.isEmpty && !showsCodeKinds))
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(24)
     }
 
     private func kindRow<Kind: Hashable>(_ title: String, _ kinds: [Kind], selection: Binding<Set<Kind>>,
                                          label: KeyPath<Kind, String>) -> some View {
         HStack(spacing: 14) {
-            Text(title).font(.graspCaption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
+            FieldLabel(title).frame(width: 64, alignment: .leading)
             ForEach(kinds, id: \.self) { kind in
                 Toggle(kind[keyPath: label], isOn: Binding(
                     get: { selection.wrappedValue.contains(kind) },
                     set: { if $0 { selection.wrappedValue.insert(kind) } else { selection.wrappedValue.remove(kind) } }
                 ))
-                .toggleStyle(.checkbox)
                 .font(.graspCallout)
             }
         }

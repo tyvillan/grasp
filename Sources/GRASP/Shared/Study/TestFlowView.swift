@@ -92,163 +92,168 @@ struct TestSetupSheet: View {
     @State private var noQuestions = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "checklist")
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(GRASPColor.accent)
-                Text("Test: \(deckName)")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                Text(guide != nil
-                     ? "Built from what the exam will ask: this guide's worked examples (code answers become "
-                       + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
-                       + "problems saved for the lectures it covers."
-                     : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
-                       + "Worked problems with code or calculations live under Problems instead.")
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let unfinished, let onResume {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Unfinished test")
-                        .graspType(.eyebrow).textCase(.uppercase).foregroundStyle(GRASPColor.textTertiary)
-                    Text("\(unfinished.answered) of \(unfinished.total) answered, started "
-                         + unfinished.startedAt.formatted(.relative(presentation: .named)) + ".")
-                        .graspType(.body).foregroundStyle(GRASPColor.textPrimary)
-                    HStack(spacing: 8) {
-                        Button("Continue Test") { onResume(unfinished.attemptId) }
-                            .buttonStyle(GRASPProminentButton())
-                        Button("Discard") {
-                            store.discardTest(attemptId: unfinished.attemptId)
-                            self.unfinished = nil
-                        }
-                        .buttonStyle(GRASPQuietButton())
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(GRASPColor.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-
-            Stepper("Questions: \(questionCount)", value: $questionCount, in: 5...100, step: 5)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Question types")
-                    .graspType(.eyebrow)
-                    .textCase(.uppercase)
-                    .foregroundStyle(GRASPColor.textTertiary)
-                Toggle("Multiple choice", isOn: $allowMultipleChoice)
-                Toggle("Written", isOn: $allowWritten)
-                if guide == nil {
-                    // A guide's questions come from its worked examples,
-                    // which have no true/false form.
-                    Toggle("True / False", isOn: $allowTrueFalse)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            historyBlock
-            if guide == nil {
-            Toggle("Include AI-written questions", isOn: Binding(
-                get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
-            ))
-            if store.isAITestQuestionsEnabled {
-                let saved = store.codeQuestionCount(inDecks: deckIds)
-                Text(saved > 0
-                     ? "Also mixes in some of this deck's \(saved) saved practice problem\(saved == 1 ? "" : "s"), up to a third of the test."
-                     : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
-                    .graspType(.meta)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            }
-
-            if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
-                Text("Enable at least one question type.").font(.graspCaption).foregroundStyle(.red)
-            } else if noQuestions {
-                Text("No cards match these settings, so there's nothing to test.")
-                    .font(.graspCaption).foregroundStyle(.red)
-            }
-
-            if let aiActivity {
-                AIProgressStrip(
-                    activity: aiActivity,
-                    onStop: { store.skipAITestQuestions() },
-                    stopTitle: "Skip",
-                    stoppingTitle: "Starting…",
-                    stopHelp: "Starts the test now, with any AI questions already written.",
-                    isInline: true
-                )
-            }
-
-            HStack(spacing: 8) {
-                if isStarting, aiActivity == nil {
-                    ProgressView().controlSize(.small)
-                    Text(store.isAITestQuestionsEnabled ? "Generating AI questions…" : "Starting test…")
-                        .font(.graspCaption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .disabled(isStarting)
-                Button("Start Test") {
-                    let config = TestBuilder.Config(
-                        questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
-                        allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
-                        excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
-                    )
-                    isStarting = true
-                    noQuestions = false
-                    let run = guide != nil ? nil
-                        : (store.isAITestQuestionsEnabled && allowWritten)
-                        ? AIActivity(headline: "Writing AI questions from your notes")
-                        : nil
-                    aiActivity = run
-                    Task {
-                        defer {
-                            run?.finish()
-                            aiActivity = nil
-                            isStarting = false
-                        }
-                        let guide = self.guide
-                        let start = {
-                            if let guide {
-                                return try await store.startGuideTest(page: guide.page, scopeKey: guide.scopeKey, config: config)
+        GRASPSheet(
+            eyebrow: "Test", title: deckName,
+            message: guide != nil
+                ? "Built from what the exam will ask: this guide's worked examples (code answers become "
+                  + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
+                  + "problems saved for the lectures it covers."
+                : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
+                  + "Worked problems with code or calculations live under Problems instead.",
+            icon: "checklist", width: 460
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                if let unfinished, let onResume {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionLabel("Unfinished test")
+                        Text("\(unfinished.answered) of \(unfinished.total) answered, started "
+                             + unfinished.startedAt.formatted(.relative(presentation: .named)) + ".")
+                            .graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                        HStack(spacing: 8) {
+                            Button("Continue test") { onResume(unfinished.attemptId) }
+                                .buttonStyle(GRASPProminentButton())
+                            Button("Discard", role: .destructive) {
+                                store.discardTest(attemptId: unfinished.attemptId)
+                                self.unfinished = nil
                             }
-                            return try await store.startTest(deckIds: deckIds, config: config)
+                            .buttonStyle(GRASPQuietButton())
                         }
-                        let result = if let run {
-                            try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }
-                        } else {
-                            try? await start()
-                        }
-                        guard let (attemptId, questions, aiWarning) = result, !questions.isEmpty else {
-                            noQuestions = true
-                            return
-                        }
-                        onStart(attemptId, questions, aiWarning)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(GRASPColor.accentSoft, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Questions").graspType(.body)
+                        Spacer()
+                        Text("\(questionCount)")
+                            .font(.graspUI(size: 15, weight: .semibold))
+                            .monospacedDigit()
+                            .contentTransition(.numericText(value: Double(questionCount)))
+                            .foregroundStyle(GRASPColor.textPrimary)
+                        Stepper("", value: $questionCount.animation(Motion.snappy), in: 5...100, step: 5)
+                            .labelsHidden()
+                    }
+                    Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                    FieldLabel("Question types")
+                    Toggle("Multiple choice", isOn: $allowMultipleChoice)
+                    Toggle("Written", isOn: $allowWritten)
+                    if guide == nil {
+                        // A guide's questions come from its worked examples,
+                        // which have no true/false form.
+                        Toggle("True / False", isOn: $allowTrueFalse)
                     }
                 }
+                .popupGroup()
+
+                historyBlock
+
+                if guide == nil {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(isOn: Binding(
+                            get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
+                        )) {
+                            HStack(spacing: 6) {
+                                Image(systemName: AIGlyph.symbol)
+                                    .font(.graspUI(size: 11, weight: .semibold))
+                                    .foregroundStyle(GRASPColor.accent)
+                                Text("Include AI-written questions")
+                            }
+                        }
+                        .toggleStyle(GRASPSwitchStyle())
+                        if store.isAITestQuestionsEnabled {
+                            let saved = store.codeQuestionCount(inDecks: deckIds)
+                            Text(saved > 0
+                                 ? "Also mixes in some of this deck's \(saved) saved practice problem\(saved == 1 ? "" : "s"), up to a third of the test."
+                                 : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
+                                .graspType(.meta)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .popupGroup()
+                }
+
+                if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
+                    Text("Turn on at least one question type.").graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                } else if noQuestions {
+                    Text("No cards match these settings, so there's nothing to test.")
+                        .graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                }
+
+                if let aiActivity {
+                    AIProgressStrip(
+                        activity: aiActivity,
+                        onStop: { store.skipAITestQuestions() },
+                        stopTitle: "Skip",
+                        stoppingTitle: "Starting…",
+                        stopHelp: "Starts the test now, with any AI questions already written.",
+                        isInline: true
+                    )
+                    .popupGroup(padding: 12)
+                }
+            }
+        } footer: {
+            if isStarting, aiActivity == nil {
+                ProgressView().controlSize(.small)
+                Text(store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            Spacer()
+            Button("Cancel") { dismiss() }
+                .disabled(isStarting)
+            Button("Start test") { start() }
                 .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse))
-            }
         }
-        .padding(24)
-        .macSheetFrame(width: 420)
-        .background(GRASPColor.canvas)
         .task {
             store.addMissingChoicesInBackground()
             unfinished = store.unfinishedTest(forDecks: deckIds, scopeKey: guide?.scopeKey)
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
+        }
+    }
+
+    private func start() {
+        let config = TestBuilder.Config(
+            questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
+            allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
+            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
+        )
+        isStarting = true
+        noQuestions = false
+        let run = guide != nil ? nil
+            : (store.isAITestQuestionsEnabled && allowWritten)
+            ? AIActivity(headline: "Writing AI questions from your notes")
+            : nil
+        aiActivity = run
+        Task {
+            defer {
+                run?.finish()
+                aiActivity = nil
+                isStarting = false
+            }
+            let guide = self.guide
+            let start = {
+                if let guide {
+                    return try await store.startGuideTest(page: guide.page, scopeKey: guide.scopeKey, config: config)
+                }
+                return try await store.startTest(deckIds: deckIds, config: config)
+            }
+            let result = if let run {
+                try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }
+            } else {
+                try? await start()
+            }
+            guard let (attemptId, questions, aiWarning) = result, !questions.isEmpty else {
+                noQuestions = true
+                return
+            }
+            onStart(attemptId, questions, aiWarning)
         }
     }
 
@@ -258,10 +263,7 @@ struct TestSetupSheet: View {
     private var historyBlock: some View {
         if !history.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Recent scores")
-                    .graspType(.eyebrow)
-                    .textCase(.uppercase)
-                    .foregroundStyle(GRASPColor.textTertiary)
+                FieldLabel("Recent scores")
                 HStack(alignment: .bottom, spacing: 6) {
                     ForEach(history) { entry in
                         VStack(spacing: 3) {
@@ -284,9 +286,7 @@ struct TestSetupSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .popupGroup()
         }
     }
 }
@@ -341,15 +341,15 @@ struct TestRunView: View {
                 index = answered.count
             }
         }
-        .confirmationDialog("Leave this test?", isPresented: $confirmingExit, titleVisibility: .visible) {
-            Button("Save and Exit") { dismiss() }
-            Button("Discard Test", role: .destructive) {
-                store.discardTest(attemptId: attemptId)
-                dismiss()
-            }
-            Button("Keep Going", role: .cancel) {}
-        } message: {
-            Text("Saved tests can be continued from the deck, on this device or another.")
+        .sheet(isPresented: $confirmingExit) {
+            LeaveTestSheet(
+                onSave: { confirmingExit = false; dismiss() },
+                onDiscard: {
+                    store.discardTest(attemptId: attemptId)
+                    confirmingExit = false
+                    dismiss()
+                }
+            )
         }
     }
 
@@ -876,5 +876,30 @@ struct TestResultsView: View {
         guard let index = graded.firstIndex(where: { $0.id == item.id }) else { return }
         graded[index].isCorrect = true
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: item.ordinal, cardId: item.question.cardId)
+    }
+}
+
+/// "Leave this test?": save it for later, throw it away, or keep going.
+private struct LeaveTestSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSave: () -> Void
+    let onDiscard: () -> Void
+
+    var body: some View {
+        GRASPSheet(
+            title: "Leave this test?",
+            message: "Saved tests can be continued from the deck, on this device or another.",
+            icon: "pause.circle", width: 440
+        ) {
+            EmptyView()
+        } footer: {
+            Button("Discard test", role: .destructive, action: onDiscard)
+            Spacer()
+            Button("Keep going") { dismiss() }
+            Button("Save and exit", action: onSave)
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+        }
+        .presentationDetents([.medium])
     }
 }

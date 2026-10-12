@@ -13,38 +13,27 @@ struct ConfirmationSheet: View {
     let message: String
     let confirmTitle: String
     var isDestructive: Bool = true
+    var cancelTitle: String = "Cancel"
     let onConfirm: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: icon)
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(isDestructive ? GRASPColor.rejected : GRASPColor.accent)
-                Text(title)
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
+        GRASPSheet(
+            title: title, message: message, icon: icon,
+            tone: isDestructive ? .destructive : .accent, width: 420
+        ) {
+            EmptyView()
+        } footer: {
+            Button(cancelTitle) { dismiss() }
+            Button(confirmTitle) {
+                onConfirm()
+                dismiss()
             }
-            Text(message)
-                .graspType(.body)
-                .foregroundStyle(GRASPColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(confirmTitle) {
-                    onConfirm()
-                    dismiss()
-                }
-                .buttonStyle(GRASPProminentButton(tint: isDestructive ? GRASPColor.rejected : GRASPColor.accent))
-                .keyboardShortcut(.defaultAction)
-            }
+            .buttonStyle(GRASPProminentButton(tint: isDestructive ? GRASPColor.rejected : GRASPColor.brand))
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .frame(width: 400)
-        .background(GRASPColor.canvas)
+        #if os(iOS)
+        .presentationDetents([.medium])
+        #endif
     }
 }
 
@@ -70,23 +59,7 @@ struct ResultSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: icon)
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(GRASPColor.accent)
-                Text(title)
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                if let leadText {
-                    Text(leadText)
-                        .graspType(.body)
-                        .foregroundStyle(GRASPColor.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
+        GRASPSheet(title: title, message: leadText, icon: icon, width: 460) {
             if !sections.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -112,19 +85,15 @@ struct ResultSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 260)
-                .padding(14)
-                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .popupGroup(padding: 14)
             }
-
-            HStack {
-                Spacer()
-                Button(doneTitle) { dismiss() }
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
-            }
+        } footer: {
+            Button(doneTitle) { dismiss() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .frame(width: 440)
-        .background(GRASPColor.canvas)
+        #if os(iOS)
+        .presentationDetents(sections.isEmpty ? [.medium] : [.medium, .large])
+        #endif
     }
 }

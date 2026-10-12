@@ -88,20 +88,19 @@ struct SettingsScreen: View {
         }
         .graspList()
         .navigationTitle("Settings")
-        .confirmationDialog("Sign out of sync?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
-            Button("Sign Out", role: .destructive) { Task { await sync.signOut() } }
-        } message: {
-            Text("Your library stays on this iPhone as a local profile and stops syncing.")
+        .sheet(isPresented: $confirmingSignOut) {
+            ConfirmationSheet(
+                icon: "rectangle.portrait.and.arrow.right", title: "Sign out of sync?",
+                message: "Your library stays on this iPhone as a local profile and stops syncing.",
+                confirmTitle: "Sign out"
+            ) { Task { await sync.signOut() } }
         }
-        .confirmationDialog(
-            "Your account already has a library",
-            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Combine Them") { if let pendingLink { finishLink(pendingLink) } }
-            Button("Cancel", role: .cancel) { pendingLink = nil }
-        } message: {
-            Text("This profile's cards will be added to your account's library. To use your account's library on this iPhone instead, switch profile and sign in from there.")
+        .sheet(isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } })) {
+            ConfirmationSheet(
+                icon: "arrow.triangle.merge", title: "Your account already has a library",
+                message: "This profile's cards will be added to your account's library. To use your account's library on this iPhone instead, switch profile and sign in from there.",
+                confirmTitle: "Combine them", isDestructive: false
+            ) { if let pendingLink { finishLink(pendingLink) } }
         }
         .onChange(of: AccountService.shared.completedFromLink) { _, _ in
             guard let signedIn = AccountService.shared.consumeCompletedFromLink() else { return }

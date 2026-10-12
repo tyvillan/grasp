@@ -1212,72 +1212,58 @@ private struct RefineDeckConfirmationSheet: View {
     let onConfirm: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "checkmark.seal")
-                    .font(.graspUI(size: 26))
-                    .foregroundStyle(GRASPColor.accent)
-                Text(includesApproved
-                     ? "Refine \(cardCount) Card\(cardCount == 1 ? "" : "s") with AI?"
-                     : "Refine \(cardCount) Draft Card\(cardCount == 1 ? "" : "s") with AI?")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                Text(includesApproved
-                     ? "Checks every card in this deck, drafts and approved, against its own note and this course. Review history is kept."
-                     : "Checks every draft against its own note and this course.")
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-            }
-
+        GRASPSheet(
+            eyebrow: "Refine with AI",
+            title: includesApproved
+                ? "Refine \(cardCount) card\(cardCount == 1 ? "" : "s")?"
+                : "Refine \(cardCount) draft\(cardCount == 1 ? "" : "s")?",
+            message: includesApproved
+                ? "Checks every card in this deck, drafts and approved, against its own note and this course. Review history is kept."
+                : "Checks every draft against its own note and this course.",
+            icon: AIGlyph.symbol, width: 460
+        ) {
             VStack(alignment: .leading, spacing: 14) {
-                effectRow(
-                    icon: "trash", tint: GRASPColor.accent,
-                    text: "Removes cards that aren't real course concepts -- assignment text, a document-specific label."
-                )
-                effectRow(
-                    icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success,
-                    text: "Rewrites cards with an off-topic or inaccurate definition."
-                )
-                effectRow(
-                    icon: "text.badge.checkmark", tint: GRASPColor.textSecondary,
-                    text: "Cleans up wording on everything else."
-                )
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            Text("This can't be undone in bulk -- a removed card is gone, though a rewritten one can be reverted individually from its \"AI Refined\" badge afterward.")
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let quotaWarning = AIQuotaEstimate.warning(
-                needed: AIQuotaEstimate.contextCheckRequests(cards: cardCount)
-                    + AIQuotaEstimate.refineRequests(cards: cardCount),
-                mode: AIPreferences.mode
-            ), AIKeyStore.read() != nil {
-                Label(quotaWarning, systemImage: "gauge.with.dots.needle.67percent")
-                    .graspType(.meta)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Refine Deck") {
-                    onConfirm()
-                    dismiss()
+                VStack(alignment: .leading, spacing: 14) {
+                    effectRow(
+                        icon: "trash", tint: GRASPColor.rejected,
+                        text: "Removes cards that aren't real course concepts -- assignment text, a document-specific label."
+                    )
+                    effectRow(
+                        icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success,
+                        text: "Rewrites cards with an off-topic or inaccurate definition."
+                    )
+                    effectRow(
+                        icon: "text.badge.checkmark", tint: GRASPColor.textSecondary,
+                        text: "Cleans up wording on everything else."
+                    )
                 }
-                .buttonStyle(GRASPProminentButton())
-                .keyboardShortcut(.defaultAction)
+                .popupGroup(padding: 14)
+
+                Text("This can't be undone in bulk -- a removed card is gone, though a rewritten one can be reverted individually from its \"AI Refined\" badge afterward.")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let quotaWarning = AIQuotaEstimate.warning(
+                    needed: AIQuotaEstimate.contextCheckRequests(cards: cardCount)
+                        + AIQuotaEstimate.refineRequests(cards: cardCount),
+                    mode: AIPreferences.mode
+                ), AIKeyStore.read() != nil {
+                    Label(quotaWarning, systemImage: "gauge.with.dots.needle.67percent")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Refine deck") {
+                onConfirm()
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .frame(width: 420)
-        .background(GRASPColor.canvas)
     }
 
     private func effectRow(icon: String, tint: Color, text: String) -> some View {
@@ -1310,45 +1296,52 @@ private struct GenerateCardsSheet: View {
     @State private var topic = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add More Cards with AI").font(.graspHeadline)
-            Text("The AI looks for concepts your notes mention but that don't have a card yet.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-
-            Picker("Amount", selection: $amountMode) {
-                Text("AI Suggested Amount").tag(AmountMode.suggested)
-                Text("Custom Amount").tag(AmountMode.custom)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            if amountMode == .custom {
-                Stepper(
-                    "Up to \(customAmount) card\(customAmount == 1 ? "" : "s") per note",
-                    value: $customAmount, in: 1...10
-                )
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Focus on (optional)").font(.graspCaption).foregroundStyle(.secondary)
-                TextField("e.g. mitosis phases", text: $topic)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Generate") {
-                    let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
-                    onGenerate(amountMode == .custom ? customAmount : nil, trimmedTopic.isEmpty ? nil : trimmedTopic)
-                    dismiss()
+        GRASPSheet(
+            eyebrow: "Generate with AI", title: "Add more cards",
+            message: "The AI looks for concepts your notes mention that don't have a card yet.",
+            icon: AIGlyph.symbol, width: 440
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    FieldLabel("How many")
+                    GRASPSegmented(
+                        selection: $amountMode,
+                        options: [(.suggested, "Let the AI decide"), (.custom, "Set a limit")],
+                        fillsWidth: true
+                    )
+                    if amountMode == .custom {
+                        HStack {
+                            Text("Up to \(customAmount) card\(customAmount == 1 ? "" : "s") per note")
+                                .monospacedDigit()
+                            Spacer()
+                            Stepper("", value: $customAmount, in: 1...10).labelsHidden()
+                        }
+                        .popupGroup(padding: 10)
+                        .transition(.opacity)
+                    }
                 }
-                .keyboardShortcut(.defaultAction)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Focus on (optional)")
+                    TextField("e.g. mitosis phases", text: $topic)
+                }
             }
+            .animation(Motion.snappy, value: amountMode)
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button {
+                let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+                onGenerate(amountMode == .custom ? customAmount : nil, trimmedTopic.isEmpty ? nil : trimmedTopic)
+                dismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol).font(.graspUI(size: 11, weight: .semibold))
+                    Text("Generate")
+                }
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
         }
-        .padding(20)
-        .frame(width: 380)
     }
 }
 
@@ -1871,7 +1864,7 @@ private struct CardRow: View {
             }
             .buttonStyle(.plain)
             .help("This definition was rewritten by the context checker -- click to compare with the original")
-            .popover(isPresented: $showingContextRefinementDetail) {
+            .popover(isPresented: $showingContextRefinementDetail, arrowEdge: .bottom) {
                 contextRefinementDetail
             }
         }
@@ -1879,9 +1872,17 @@ private struct CardRow: View {
 
     private var contextRefinementDetail: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("AI Refined", systemImage: "checkmark.shield")
-                .foregroundStyle(GRASPColor.success)
-                .font(.graspUI(size: 12, weight: .semibold))
+            HStack(spacing: 8) {
+                BrandDot(size: 6)
+                Text("AI refined")
+                    .graspType(.eyebrow)
+                    .textCase(.uppercase)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                Spacer()
+                Image(systemName: "checkmark.shield")
+                    .font(.graspUI(size: 12, weight: .semibold))
+                    .foregroundStyle(GRASPColor.success)
+            }
 
             Text("The original extraction looked like assignment text or an off-topic fragment. The AI rewrote it using this card's own source note.")
                 .graspType(.meta)
@@ -1889,26 +1890,33 @@ private struct CardRow: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("ORIGINAL").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                FieldLabel("Original")
                 Text(card.originalBack ?? "")
                     .graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                    .strikethrough(color: GRASPColor.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .popupGroup(padding: 10)
             VStack(alignment: .leading, spacing: 3) {
-                Text("CURRENT").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                FieldLabel("Now")
                 Text(card.back)
                     .graspType(.body).foregroundStyle(GRASPColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .popupGroup(padding: 10)
 
-            Button("Revert to Original") {
-                onRevertContextRefinement()
-                showingContextRefinementDetail = false
+            HStack {
+                Spacer()
+                Button("Revert to original") {
+                    onRevertContextRefinement()
+                    showingContextRefinementDetail = false
+                }
+                .buttonStyle(GRASPQuietButton())
             }
-            .buttonStyle(GRASPQuietButton())
         }
         .padding(16)
-        .frame(width: 320)
+        .frame(width: 340)
+        .graspPopupBackground()
     }
 }
 
@@ -1975,52 +1983,40 @@ struct DuplicateReviewSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Review Duplicates").font(.graspHeadline)
-                Text("\(groups.count) group\(groups.count == 1 ? "" : "s") found. Pick the card to keep in each group, "
-                     + "or tap the selected card again to keep none and delete them all.")
-                    .font(.graspCallout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(20)
-
-            Divider()
-
+        GRASPSheet(
+            eyebrow: "Duplicates",
+            title: "\(groups.count) group\(groups.count == 1 ? "" : "s") of near-identical cards",
+            message: "Pick the card to keep in each group, or click the kept card again to keep none and delete them all.",
+            icon: "square.on.square", width: 600
+        ) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     ForEach(groups) { group in
                         groupBlock(group)
                     }
                 }
-                .padding(20)
             }
-
-            Divider()
-
-            HStack {
-                Text(summary)
-                    .font(.graspCaption)
-                    .foregroundStyle(deletedCount > 0 ? GRASPColor.rejected : .secondary)
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(actionTitle, role: .destructive) {
-                    if deletedCount > 0 { confirmingDelete = true } else { apply() }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(mergedCount + deletedCount == 0)
+            .frame(height: 360)
+        } footer: {
+            Text(summary)
+                .graspType(.meta)
+                .foregroundStyle(deletedCount > 0 ? GRASPColor.rejected : GRASPColor.textTertiary)
+            Spacer()
+            Button("Cancel") { dismiss() }
+            Button(actionTitle) {
+                if deletedCount > 0 { confirmingDelete = true } else { apply() }
             }
-            .padding(20)
+            .buttonStyle(GRASPProminentButton(tint: deletedCount > 0 ? GRASPColor.rejected : GRASPColor.brand))
+            .keyboardShortcut(.defaultAction)
+            .disabled(mergedCount + deletedCount == 0)
         }
-        .frame(width: 560, height: 520)
-        .confirmationDialog(
-            "Delete \(deletedCount) card\(deletedCount == 1 ? "" : "s") you chose to keep none of?",
-            isPresented: $confirmingDelete, titleVisibility: .visible
-        ) {
-            Button("Delete \(deletedCount) Card\(deletedCount == 1 ? "" : "s")", role: .destructive) { apply() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("They leave every deck. Their review history is kept, and importing the same notes again won't bring them back.")
+        .sheet(isPresented: $confirmingDelete) {
+            ConfirmationSheet(
+                icon: "trash",
+                title: "Delete \(deletedCount) card\(deletedCount == 1 ? "" : "s")?",
+                message: "These are the groups you chose to keep none of. They leave every deck. Their review history is kept, and importing the same notes again won't bring them back.",
+                confirmTitle: "Delete \(deletedCount) card\(deletedCount == 1 ? "" : "s")"
+            ) { apply() }
         }
     }
 
@@ -2044,9 +2040,11 @@ struct DuplicateReviewSheet: View {
         let current = choice(for: group)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(group.cards.count) near-identical cards").font(.graspSubheadline.weight(.medium))
+                Text("\(group.cards.count) near-identical cards")
+                    .font(.graspUI(size: 13, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
                 if group.hasCompetingHistory {
-                    Text("· multiple have review history").font(.graspCaption).foregroundStyle(.orange)
+                    Text("· more than one has review history").graspType(.meta).foregroundStyle(GRASPColor.accent)
                 }
                 Spacer()
                 if current == .deleteAll {
@@ -2063,14 +2061,16 @@ struct DuplicateReviewSheet: View {
                     Button(current == .keepAll ? "Keeping all" : "Keep all instead") {
                         choices[group.id] = .keepAll
                     }
+                    .foregroundStyle(current == .keepAll ? GRASPColor.textPrimary : GRASPColor.accent)
                     Button(current == .deleteAll ? "Deleting all" : "Delete all") {
                         choices[group.id] = .deleteAll
                     }
                     .foregroundStyle(GRASPColor.rejected)
                     Spacer()
                 }
-                .buttonStyle(.link)
-                .font(.graspCaption)
+                .buttonStyle(.plain)
+                .font(.graspUI(size: 12, weight: .semibold))
+                .padding(.top, 2)
             }
         }
         .padding(12)
@@ -2088,12 +2088,14 @@ struct DuplicateReviewSheet: View {
             choices[group.id] = isKept ? .deleteAll : .keep(card.id)
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: isKept ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(isKept ? GRASPColor.accent : .secondary)
-                    .padding(.top, 2)
+                Circle()
+                    .strokeBorder(isKept ? GRASPColor.brand : GRASPColor.hairlineStrong, lineWidth: isKept ? 5 : 1)
+                    .background(Circle().fill(isKept ? GRASPColor.ink : GRASPColor.surfaceRaised))
+                    .frame(width: 16, height: 16)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(card.front).font(.graspCallout.weight(.medium)).strikethrough(isDeleted)
-                    Text(card.back).font(.graspCaption).foregroundStyle(.secondary).lineLimit(3)
+                    Text(card.front).font(.graspUI(size: 13.5, weight: .medium)).strikethrough(isDeleted)
+                    Text(card.back).graspType(.meta).foregroundStyle(GRASPColor.textSecondary).lineLimit(3)
                     Text(memberMeta(card))
                         .font(.graspCaption2)
                         .foregroundStyle(GRASPColor.textTertiary)
@@ -2137,54 +2139,56 @@ private struct CardCreateSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Card").font(.graspHeadline)
-
-            HStack(spacing: 8) {
-                Picker("Course", selection: $selectedCourseId) {
-                    ForEach(store.coursePickerGroups(), id: \.title) { group in
-                        Section(group.title) {
-                            ForEach(group.courses) { course in
-                                Text(course.name).tag(course.id as String?)
+        GRASPSheet(eyebrow: "Card", title: "New card", width: 480) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: GRASPSpace.m) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("Course")
+                        GRASPDropdown(
+                            selection: $selectedCourseId,
+                            groups: store.coursePickerGroups().map { group in
+                                .init(title: group.title, options: group.courses.map { ($0.id as String?, $0.name) })
                             }
-                        }
+                        )
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("Deck")
+                        GRASPDropdown(
+                            selection: $selectedDeckId,
+                            options: decksInCourse.map { ($0.id as String?, $0.name) },
+                            placeholder: "No decks"
+                        )
+                        .disabled(decksInCourse.isEmpty)
                     }
                 }
-                Picker("Deck", selection: $selectedDeckId) {
-                    ForEach(decksInCourse) { deck in
-                        Text(deck.name).tag(deck.id as String?)
-                    }
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Front")
+                    TextEditor(text: $front).graspEditorChrome(minHeight: 56)
                 }
-                .disabled(decksInCourse.isEmpty)
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Back")
+                    TextEditor(text: $back).graspEditorChrome(minHeight: 96)
+                }
             }
-
-            Text("Front").font(.graspCaption).foregroundStyle(.secondary)
-            TextEditor(text: $front).frame(height: 60).border(.separator)
-            Text("Back").font(.graspCaption).foregroundStyle(.secondary)
-            TextEditor(text: $back).frame(height: 100).border(.separator)
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Create") {
-                    guard let deckId = selectedDeckId else { return }
-                    try? store.createManualCard(
-                        front: front.trimmingCharacters(in: .whitespacesAndNewlines),
-                        back: back.trimmingCharacters(in: .whitespacesAndNewlines),
-                        deckId: deckId
-                    )
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(
-                    selectedDeckId == nil
-                        || front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Create card") {
+                guard let deckId = selectedDeckId else { return }
+                try? store.createManualCard(
+                    front: front.trimmingCharacters(in: .whitespacesAndNewlines),
+                    back: back.trimmingCharacters(in: .whitespacesAndNewlines),
+                    deckId: deckId
                 )
+                dismiss()
             }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(
+                selectedDeckId == nil
+                    || front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
         }
-        .padding(20)
-        .frame(width: 440)
         .task { loadDecks(for: selectedCourseId) }
         .onChange(of: selectedCourseId) { _, newValue in loadDecks(for: newValue) }
     }
@@ -2204,25 +2208,27 @@ private struct CardEditSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Card").font(.graspHeadline)
-            Text("Front").font(.graspCaption).foregroundStyle(.secondary)
-            TextEditor(text: $card.front).frame(height: 60).border(.separator)
-            Text("Back").font(.graspCaption).foregroundStyle(.secondary)
-            TextEditor(text: $card.back).frame(height: 100).border(.separator)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    onSave(card)
-                    dismiss()
+        GRASPSheet(eyebrow: "Card", title: "Edit card", width: 480) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Front")
+                    TextEditor(text: $card.front).graspEditorChrome(minHeight: 56)
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel("Back")
+                    TextEditor(text: $card.back).graspEditorChrome(minHeight: 110)
+                }
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Save") {
+                onSave(card)
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(card.front.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      || card.back.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(20)
-        .frame(width: 420)
     }
 }

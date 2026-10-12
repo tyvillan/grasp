@@ -29,28 +29,27 @@ struct DeckCreateSheet: View {
     @State private var name = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Deck").font(.graspHeadline)
-            Text("A custom module or unit for cards you organize by hand.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-            TextField("Deck name (e.g. Midterm Review)", text: $name)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Create") {
-                    let trimmed = name.trimmingCharacters(in: .whitespaces)
-                    if let id = try? store.createDeck(courseId: courseId, name: trimmed) {
-                        onCreated(id)
-                    }
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+        GRASPSheet(
+            eyebrow: "Deck", title: "New deck",
+            message: "A custom module or unit for cards you organize by hand.", width: 400
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel("Name")
+                TextField("e.g. Midterm Review", text: $name)
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Create deck") {
+                let trimmed = name.trimmingCharacters(in: .whitespaces)
+                if let id = try? store.createDeck(courseId: courseId, name: trimmed) {
+                    onCreated(id)
+                }
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(20)
-        .frame(width: 360)
     }
 }
 
@@ -69,23 +68,22 @@ struct DeckRenameSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Deck").font(.graspHeadline)
-            TextField("Deck name", text: $name)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    try? store.renameDeck(deck.id, name: name.trimmingCharacters(in: .whitespaces))
-                    onRenamed()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+        GRASPSheet(eyebrow: "Deck", title: "Rename deck", width: 400) {
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel("Name")
+                TextField("Deck name", text: $name)
             }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button("Save") {
+                try? store.renameDeck(deck.id, name: name.trimmingCharacters(in: .whitespaces))
+                onRenamed()
+                dismiss()
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding(20)
-        .frame(width: 360)
     }
 }
 
@@ -116,53 +114,41 @@ struct DeckDeleteSheet: View {
     private var cardWord: String { cardCount == 1 ? "card" : "cards" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Delete \"\(deck.name)\"?").font(.graspHeadline)
-            Text("This deck has \(cardCount) \(cardWord). Choose what happens to them.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 10) {
+        GRASPSheet(
+            title: "Delete \u{201C}\(deck.name)\u{201D}?",
+            message: "This deck has \(cardCount) \(cardWord). Choose what happens to them.",
+            icon: "trash", tone: .destructive, width: 440
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
                 if !siblings.isEmpty {
-                    Toggle(isOn: Binding(get: { choice == .move }, set: { if $0 { choice = .move } })) {
+                    GRASPRadioRow(isOn: choice == .move, action: { choice = .move }) {
                         Text("Move \(cardCount) \(cardWord) to another deck")
                     }
-                    .toggleStyle(.radioGroupCompat)
-
                     if choice == .move {
-                        Picker("Move to", selection: $targetId) {
-                            ForEach(siblings) { sibling in
-                                Text(sibling.name).tag(sibling.id as String?)
-                            }
-                        }
-                        .labelsHidden()
-                        .padding(.leading, 20)
+                        GRASPDropdown(selection: $targetId, options: siblings.map { ($0.id as String?, $0.name) })
+                            .frame(maxWidth: 260)
+                            .padding(.leading, 25)
                     }
                 }
-
-                Toggle(isOn: Binding(get: { choice == .deleteAll }, set: { if $0 { choice = .deleteAll } })) {
+                GRASPRadioRow(isOn: choice == .deleteAll, action: { choice = .deleteAll }) {
                     Text("Delete \(cardCount) \(cardWord) along with the deck")
                 }
-                .toggleStyle(.radioGroupCompat)
                 Text("Review history is kept even when cards are deleted.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 20)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .padding(.leading, 25)
             }
-
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button(choice == .move ? "Move and Delete Deck" : "Delete Everything", role: .destructive) {
-                    onConfirm(choice == .move ? targetId : nil)
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(choice == .move && targetId == nil)
+            .popupGroup()
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button(choice == .move ? "Move and delete deck" : "Delete everything") {
+                onConfirm(choice == .move ? targetId : nil)
+                dismiss()
             }
+            .buttonStyle(GRASPProminentButton(tint: GRASPColor.rejected))
+            .keyboardShortcut(.defaultAction)
+            .disabled(choice == .move && targetId == nil)
         }
-        .padding(20)
-        .frame(width: 420)
     }
 }
 
@@ -190,58 +176,44 @@ struct DeckLectureDateSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Lecture Date for \"\(deck.name)\"").font(.graspHeadline)
-            Text("Shown in the sidebar when GRASP can't read a date from this deck's notes.")
-                .font(.graspCallout)
-                .foregroundStyle(.secondary)
-            DatePicker(isRange ? "Starts" : "Date", selection: $date, displayedComponents: .date)
-            Toggle("This deck covers more than one lecture", isOn: $isRange)
-            if isRange {
-                DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
-            }
-            HStack {
-                if deck.manualLessonDate != nil {
-                    Button("Clear", role: .destructive) {
-                        try? store.setDeckManualLessonDate(deck.id, start: nil)
-                        onSaved()
-                        dismiss()
+        GRASPSheet(
+            eyebrow: deck.name, title: "Lecture date",
+            message: "Shown in the sidebar when GRASP can't read a date from this deck's notes.",
+            icon: "calendar", width: 420
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                GRASPSegmented(selection: $isRange, options: [(false, "One lecture"), (true, "A range")])
+                HStack(spacing: GRASPSpace.l) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel(isRange ? "Starts" : "Date")
+                        DatePicker("", selection: $date, displayedComponents: .date).labelsHidden()
+                    }
+                    if isRange {
+                        VStack(alignment: .leading, spacing: 6) {
+                            FieldLabel("Ends")
+                            DatePicker("", selection: $endDate, in: date..., displayedComponents: .date).labelsHidden()
+                        }
                     }
                 }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    try? store.setDeckManualLessonDate(deck.id, start: date, end: isRange ? endDate : nil)
+            }
+            .popupGroup()
+        } footer: {
+            if deck.manualLessonDate != nil {
+                Button("Clear date", role: .destructive) {
+                    try? store.setDeckManualLessonDate(deck.id, start: nil)
                     onSaved()
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
             }
-        }
-        .padding(20)
-        .frame(width: 360)
-    }
-}
-
-private extension ToggleStyle where Self == RadioGroupCompatToggleStyle {
-    static var radioGroupCompat: RadioGroupCompatToggleStyle { RadioGroupCompatToggleStyle() }
-}
-
-/// A plain checkbox-style toggle reads as "on/off", not "pick one of
-/// these" -- this renders as a filled/empty circle instead, the shape a
-/// mutually-exclusive choice actually needs, without pulling in a second
-/// `Picker` just for two radio options.
-private struct RadioGroupCompatToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: configuration.isOn ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(configuration.isOn ? GRASPColor.accent : .secondary)
-                configuration.label
+            Spacer()
+            Button("Cancel") { dismiss() }
+            Button("Save") {
+                try? store.setDeckManualLessonDate(deck.id, start: date, end: isRange ? endDate : nil)
+                onSaved()
+                dismiss()
             }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
         }
-        .buttonStyle(.plain)
     }
 }

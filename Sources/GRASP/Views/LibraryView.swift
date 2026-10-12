@@ -18,87 +18,39 @@ struct LibraryView: View {
     @State private var contextSweepResult: AppStore.ContextCheckSummary?
     private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
 
+    private var totalCards: Int { store.deckCounts.values.reduce(0) { $0 + $1.cardCount } }
+    private var courseCount: Int { store.coursesBySemester.values.reduce(0) { $0 + $1.count } }
+
     var body: some View {
-        @Bindable var store = store
-        Form {
-            Section("Vault") {
-                HStack {
-                    Button {
-                        Task { await store.runImport() }
-                    } label: {
-                        if store.isImporting {
-                            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Importing…") }
-                        } else {
-                            Label("Import Vault", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
-                    .disabled(store.isImporting)
-                    Text(importSummaryText)
-                        .font(.graspCaption)
-                        .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: GRASPSpace.l) {
+                header
+                    .padding(.bottom, GRASPSpace.s)
+                vaultCard
+                    .revealOnAppear(index: 0, distance: 14)
+                HStack(alignment: .top, spacing: GRASPSpace.l) {
+                    LibraryHiddenTile(
+                        icon: "archivebox", title: "Archived courses", count: store.archivedCourses.count,
+                        detail: "Hidden from the sidebar and Home. Notes and cards are untouched."
+                    ) { showingArchivedCourses = true }
+                    LibraryHiddenTile(
+                        icon: "folder.badge.minus", title: "Excluded folders", count: store.excludedFolders.count,
+                        detail: "Skipped on every vault import until you bring them back."
+                    ) { showingExcludedFolders = true }
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Vault Path")
-                        .font(.graspCaption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        TextField("", text: $store.vaultPath)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                        Button("Choose…") { chooseVault() }
-                    }
-                }
-                Text("GRASP only reads from this folder -- it never writes to your Obsidian vault.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .revealOnAppear(index: 1)
+                checksCard
+                    .revealOnAppear(index: 2)
             }
-
-            Section("Hidden") {
-                SettingsManagementRow(
-                    title: "Archived Courses", count: store.archivedCourses.count
-                ) { showingArchivedCourses = true }
-                SettingsManagementRow(
-                    title: "Excluded Folders", count: store.excludedFolders.count
-                ) { showingExcludedFolders = true }
-            }
-
-            Section("Check the Whole Library") {
-                HStack {
-                    Button("Scan All Courses for Duplicates…") { scanForDuplicatesAcrossAllCourses() }
-                    if duplicateScanFoundNone {
-                        Text("No duplicates found").font(.graspCaption).foregroundStyle(.secondary)
-                    }
-                }
-                Text("Looks for near-identical cards across every course, not just within one. Nothing is removed automatically: you review each group and pick which card survives, or delete the whole group.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                if let sweepActivity {
-                    AIProgressStrip(
-                        activity: sweepActivity,
-                        onStop: { store.stopAIJob(AppStore.sweepJobKey) },
-                        stopHelp: "Stops now. Cards already checked keep their changes; the rest are left as they are.",
-                        isInline: true
-                    )
-                } else {
-                    Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
-                }
-                Text("Goes card by card against its own source note: a definition that reads like assignment instructions or a vague fragment is rewritten from the note's text, or removed if the note doesn't support one. Every change is listed afterwards and can be undone from the card's \"AI Refined\" badge.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                if let warning = AIQuotaEstimate.warning(
-                    needed: AIQuotaEstimate.contextCheckRequests(cards: store.deckCounts.values.reduce(0) { $0 + $1.cardCount }),
-                    mode: store.aiMode
-                ), store.hasCloudKey {
-                    Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                        .font(.graspCaption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            .padding(.horizontal, 40)
+            .padding(.top, 32)
+            .padding(.bottom, 48)
+            .frame(maxWidth: 1180, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
-        .navigationTitle("Library")
         .background(GRASPColor.canvas)
+        .navigationTitle("Library")
         .sheet(isPresented: $showingArchivedCourses) { ArchivedCoursesSheet() }
         .sheet(isPresented: $showingExcludedFolders) { ExcludedFoldersSheet() }
         .sheet(isPresented: $showingDuplicateReview) {
@@ -110,7 +62,7 @@ struct LibraryView: View {
             if let contextSweepResult {
                 ResultSheet(
                     icon: "checkmark.shield",
-                    title: "Off-Topic Card Check Complete",
+                    title: "Off-topic check complete",
                     leadText: contextSweepResult.isEmpty
                         ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment. (If no AI model is set up, nothing was checked at all -- see Settings → AI.)"
                         : nil,
@@ -118,6 +70,169 @@ struct LibraryView: View {
                 )
             }
         }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(alignment: .bottom, spacing: GRASPSpace.l) {
+            VStack(alignment: .leading, spacing: 6) {
+                SectionLabel("Library")
+                Text("Everything, all at once")
+                    .font(.graspDisplay(34))
+                    .tracking(-0.8)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text("Where your notes come from, what's hidden, and the checks that run across every course.")
+                    .graspType(.body)
+                    .foregroundStyle(GRASPColor.textTertiary)
+            }
+            Spacer(minLength: GRASPSpace.l)
+            HStack(spacing: GRASPSpace.xl) {
+                LibraryStat(value: courseCount, label: courseCount == 1 ? "course" : "courses")
+                LibraryStat(value: totalCards, label: totalCards == 1 ? "card" : "cards")
+            }
+        }
+    }
+
+    // MARK: - Vault
+
+    private var vaultCard: some View {
+        @Bindable var store = store
+        return VStack(alignment: .leading, spacing: GRASPSpace.l) {
+            HStack(alignment: .top, spacing: GRASPSpace.m) {
+                PopupIconTile(systemImage: "books.vertical")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Obsidian vault")
+                        .font(.graspDisplay(22))
+                        .tracking(-0.4)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    Text(importSummaryText)
+                        .graspType(.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+                Spacer(minLength: GRASPSpace.m)
+                Button {
+                    Task { await store.runImport() }
+                } label: {
+                    HStack(spacing: 7) {
+                        if store.isImporting {
+                            ProgressView().controlSize(.small)
+                            Text("Importing…")
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.graspUI(size: 12, weight: .semibold))
+                            Text("Import vault")
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(GRASPProminentButton())
+                .disabled(store.isImporting)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel("Folder")
+                HStack(spacing: GRASPSpace.s) {
+                    FieldChrome {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder")
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                            TextField("", text: $store.vaultPath)
+                                .font(.graspMono(12.5))
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                    }
+                    Button("Choose…") { chooseVault() }
+                        .buttonStyle(GRASPQuietButton())
+                }
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "lock")
+                    .font(.graspUI(size: 10, weight: .semibold))
+                Text("GRASP only reads from this folder. It never writes to your vault.")
+            }
+            .graspType(.meta)
+            .foregroundStyle(GRASPColor.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .graspCard(padding: 24)
+    }
+
+    // MARK: - Checks
+
+    private var checksCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel("Check the whole library")
+                .padding(.bottom, GRASPSpace.l)
+
+            LibraryCheckRow(
+                icon: "square.on.square",
+                title: "Duplicate cards",
+                detail: "Near-identical cards across every course, not just within one. Nothing is removed on its own: you review each group and pick which card stays, or delete the group."
+            ) {
+                HStack(spacing: GRASPSpace.s) {
+                    if duplicateScanFoundNone {
+                        Label("None found", systemImage: "checkmark")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.success)
+                            .transition(.opacity)
+                    }
+                    Button("Scan for duplicates") { scanForDuplicatesAcrossAllCourses() }
+                        .buttonStyle(GRASPQuietButton())
+                }
+            }
+
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                .padding(.vertical, GRASPSpace.l)
+
+            LibraryCheckRow(
+                icon: AIGlyph.symbol, isAI: true,
+                title: "Off-topic cards",
+                detail: "Checks each card against its own note. A definition that reads like assignment instructions, or a vague fragment, is rewritten from the note or removed. Every change is listed afterwards and can be undone from the card's \u{201C}AI Refined\u{201D} badge."
+            ) {
+                if sweepActivity == nil {
+                    Button {
+                        sweepAllCardsForContext()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: AIGlyph.symbol)
+                                .font(.graspUI(size: 11, weight: .semibold))
+                                .foregroundStyle(GRASPColor.accent)
+                            Text("Check all cards")
+                        }
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                }
+            }
+            if let sweepActivity {
+                AIProgressStrip(
+                    activity: sweepActivity,
+                    onStop: { store.stopAIJob(AppStore.sweepJobKey) },
+                    stopHelp: "Stops now. Cards already checked keep their changes; the rest are left as they are.",
+                    isInline: true
+                )
+                .popupGroup(padding: 14)
+                .padding(.top, GRASPSpace.m)
+                .padding(.leading, 50)
+            }
+            if let warning = AIQuotaEstimate.warning(
+                needed: AIQuotaEstimate.contextCheckRequests(cards: totalCards),
+                mode: store.aiMode
+            ), store.hasCloudKey {
+                Label(warning, systemImage: "gauge.with.dots.needle.67percent")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .padding(.top, GRASPSpace.s)
+                    .padding(.leading, 50)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .graspCard(padding: 24)
+        .animation(Motion.fade, value: duplicateScanFoundNone)
     }
 
     private var importSummaryText: String {
@@ -177,25 +292,191 @@ struct LibraryView: View {
     }
 }
 
-struct SettingsManagementRow: View {
+/// A big count over a small word, for the Library header.
+private struct LibraryStat: View {
+    let value: Int
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text("\(value)")
+                .font(.graspDisplay(30))
+                .monospacedDigit()
+                .contentTransition(.numericText(value: Double(value)))
+                .foregroundStyle(GRASPColor.textPrimary)
+            Text(label)
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        }
+    }
+}
+
+/// One of the two "what's hidden" cards: an icon, the count large, a line
+/// of explanation; the whole card opens its list. Lifts a little on hover.
+private struct LibraryHiddenTile: View {
+    let icon: String
     let title: String
     let count: Int
+    let detail: String
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
-            HStack {
-                Text(title).foregroundStyle(.primary)
-                Spacer()
-                Text("\(count)")
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.right")
-                    .font(.graspCaption2)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.graspUI(size: 14, weight: .semibold))
+                        .foregroundStyle(hovering ? GRASPColor.accent : GRASPColor.textSecondary)
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(hovering ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                        .offset(x: hovering && !reduceMotion ? 3 : 0)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(count)")
+                        .font(.graspDisplay(40))
+                        .monospacedDigit()
+                        .foregroundStyle(count > 0 ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                    Text(title)
+                        .font(.graspUI(size: 14, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textPrimary)
+                }
+                Text(detail)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(22)
+            .background(hovering ? GRASPColor.surfaceRaised : GRASPColor.surface,
+                        in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous)
+                    .strokeBorder(hovering ? GRASPColor.hairlineStrong : GRASPColor.hairline, lineWidth: 1)
+            )
+            .offset(y: hovering && !reduceMotion ? -2 : 0)
+            .contentShape(RoundedRectangle(cornerRadius: GRASPRadius.card))
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .animation(Motion.snappy, value: hovering)
+        .accessibilityLabel("\(title), \(count)")
+    }
+}
+
+/// A library-wide check: icon tile, name and what it does, its button on
+/// the right.
+private struct LibraryCheckRow<Trailing: View>: View {
+    let icon: String
+    var isAI = false
+    let title: String
+    let detail: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .top, spacing: GRASPSpace.m) {
+            PopupIconTile(systemImage: icon)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.graspUI(size: 15, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text(detail)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: 520, alignment: .leading)
+            Spacer(minLength: GRASPSpace.l)
+            trailing()
+        }
+    }
+}
+
+/// A row in one of the Library's lists: the name, a detail line, and its
+/// one action on the right.
+private struct LibraryListRow: View {
+    let title: String
+    var detail: String?
+    let actionTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: GRASPSpace.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.graspUI(size: 14, weight: .medium))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                if let detail {
+                    Text(detail)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: GRASPSpace.s)
+            Button(actionTitle, action: action)
+                .buttonStyle(GRASPQuietButton())
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+/// Shared shell for the Library's two "what's hidden" lists.
+private struct LibraryListSheet<Item, ID: Hashable>: View {
+    let title: String
+    let message: String
+    let icon: String
+    let items: [Item]
+    let id: KeyPath<Item, ID>
+    let emptyTitle: String
+    let emptyDetail: String
+    let row: (Item) -> LibraryListRow
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        GRASPSheet(eyebrow: "Library", title: title, message: message, icon: icon, width: 500) {
+            if items.isEmpty {
+                VStack(spacing: 6) {
+                    Text(emptyTitle)
+                        .font(.graspUI(size: 14, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                    Text(emptyDetail)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 36)
+                .popupGroup()
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                            row(item)
+                        }
+                    }
+                    .padding(.horizontal, GRASPSpace.l)
+                }
+                .frame(maxHeight: 300)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                        .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+                )
+            }
+        } footer: {
+            Button("Done") { dismiss() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
+        }
     }
 }
 
@@ -204,43 +485,19 @@ struct SettingsManagementRow: View {
 /// sidebar nor the dashboard shows it, by design.
 struct ArchivedCoursesSheet: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Archived Courses").font(.graspHeadline)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(20)
-
-            Divider()
-
-            if store.archivedCourses.isEmpty {
-                ContentUnavailableView(
-                    "No Archived Courses", systemImage: "archivebox",
-                    description: Text("Courses you archive from the sidebar or dashboard appear here.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(store.archivedCourses) { course in
-                    HStack {
-                        Text(course.name)
-                        Spacer(minLength: 8)
-                        Button("Unarchive") {
-                            try? store.setCourseArchived(course.id, archived: false)
-                        }
-                    }
-                }
-                Text("Hidden from the sidebar and dashboard, but their notes and cards are untouched.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                    .padding(20)
+        LibraryListSheet(
+            title: "Archived courses",
+            message: "Hidden from the sidebar and Home, but their notes and cards are untouched.",
+            icon: "archivebox", items: store.archivedCourses, id: \.id,
+            emptyTitle: "No archived courses",
+            emptyDetail: "Courses you archive from the sidebar appear here."
+        ) { course in
+            LibraryListRow(title: course.name, detail: course.code, actionTitle: "Unarchive") {
+                try? store.setCourseArchived(course.id, archived: false)
             }
         }
-        .frame(width: 440, height: 380)
     }
 }
 
@@ -250,48 +507,18 @@ struct ArchivedCoursesSheet: View {
 /// course by hand (see `VaultScanner.importPaths`).
 struct ExcludedFoldersSheet: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Excluded Folders").font(.graspHeadline)
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(20)
-
-            Divider()
-
-            if store.excludedFolders.isEmpty {
-                ContentUnavailableView(
-                    "No Excluded Folders", systemImage: "folder.badge.minus",
-                    description: Text("Choosing \"Delete\" on a vault-backed course excludes its folder here.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(store.excludedFolders, id: \.self) { path in
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(URL(fileURLWithPath: path).lastPathComponent)
-                            Text(path)
-                                .font(.graspCaption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                                .textSelection(.enabled)
-                        }
-                        Spacer(minLength: 8)
-                        Button("Re-include") { try? store.includeFolder(path) }
-                    }
-                }
-                Text("Skipped entirely on your next vault import. Adding files back to one of these folders re-includes it automatically.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                    .padding(20)
+        LibraryListSheet(
+            title: "Excluded folders",
+            message: "Skipped on your next vault import. Adding files back to one of these folders includes it again on its own.",
+            icon: "folder.badge.minus", items: store.excludedFolders, id: \.self,
+            emptyTitle: "No excluded folders",
+            emptyDetail: "Deleting a course that came from your vault excludes its folder here."
+        ) { path in
+            LibraryListRow(title: URL(fileURLWithPath: path).lastPathComponent, detail: path, actionTitle: "Re-include") {
+                try? store.includeFolder(path)
             }
         }
-        .frame(width: 480, height: 380)
     }
 }

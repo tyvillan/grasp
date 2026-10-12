@@ -19,23 +19,12 @@ struct ExamsSheet: View {
     @State private var creating: CalendarEvent?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "calendar")
-                    .font(.graspUI(size: 24))
-                    .foregroundStyle(GRASPColor.accent)
-                Text("Dates for This Course")
-                    .font(.graspUI(size: 18, weight: .semibold))
-                    .tracking(-0.3)
-                    .foregroundStyle(GRASPColor.textPrimary)
-            }
-
-            if events.isEmpty {
-                Text("No exams, deadlines, or study blocks set for this course yet.")
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
+        GRASPSheet(
+            eyebrow: "Calendar", title: "Dates for this course",
+            message: events.isEmpty ? "No exams, deadlines, or study blocks set for this course yet." : nil,
+            icon: "calendar", width: 460
+        ) {
+            if !events.isEmpty {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(events) { event in
@@ -43,31 +32,26 @@ struct ExamsSheet: View {
                         }
                     }
                 }
-                .frame(maxHeight: 260)
+                .frame(maxHeight: 280)
+                .fixedSize(horizontal: false, vertical: true)
             }
-
-            HStack {
-                Button {
-                    creating = CalendarEvent(
-                        courseId: courseId, title: "",
-                        startsAt: Calendar.current.startOfDay(for: Date().addingTimeInterval(14 * 86400))
-                    )
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "plus").font(.graspUI(size: 11))
-                        Text("Add Date")
-                    }
+        } footer: {
+            Button {
+                creating = CalendarEvent(
+                    courseId: courseId, title: "",
+                    startsAt: Calendar.current.startOfDay(for: Date().addingTimeInterval(14 * 86400))
+                )
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "plus").font(.graspUI(size: 11, weight: .semibold))
+                    Text("Add date")
                 }
-                .buttonStyle(GRASPQuietButton())
-                Spacer()
-                Button("Done") { dismiss() }
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
             }
+            Spacer()
+            Button("Done") { dismiss() }
+                .buttonStyle(GRASPProminentButton())
+                .keyboardShortcut(.defaultAction)
         }
-        .padding(24)
-        .frame(width: 440)
-        .background(GRASPColor.canvas)
         .task { load() }
         .onChange(of: store.revision) { load() }
         .sheet(item: $editing) { event in
@@ -98,9 +82,14 @@ struct ExamsSheet: View {
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             }
-            .padding(10)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
