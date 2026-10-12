@@ -80,6 +80,7 @@ struct DeckScreen: View {
         return recentAIIds.compactMap { byId[$0] } + base.filter { !recent.contains($0.id) }
     }
 
+    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards }
     private var isGeneratingCards: Bool { runningJob?.activity.purpose == "add" }
     private var selectedDrafts: [String] {
         shownCards.filter { selection.contains($0.id) && $0.status == .draft }.map(\.id)
@@ -93,11 +94,13 @@ struct DeckScreen: View {
                 }
                 .graspSection()
             }
-            if hasLoaded && cards.isEmpty && !isGeneratingCards {
+            if showsEmptyDeck {
+                // A deck with no cards: one action and a quiet way out, no
+                // study buttons, tabs, filters or counts.
                 Section { emptyDeck }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-            }
+            } else {
             Section {
                 studyButtons
                     .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
@@ -113,6 +116,7 @@ struct DeckScreen: View {
             case .cards: cardSections
             case .overview: OverviewSection(deckIds: deckIds)
             }
+            }
         }
         .environment(\.editMode, $editMode)
         .overlay(alignment: .bottom) { floatingApproveBar }
@@ -124,6 +128,16 @@ struct DeckScreen: View {
         .searchable(text: $query, prompt: "Search cards")
         .task(id: store.revision) { load() }
         .onAppear {
+            if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {
+                filter = match
+            }
+            if DebugLaunch.select {
+                editMode = .active
+                selection = Set(cards.filter { $0.status == .draft }.prefix(3).map(\.id))
+            }
+            #if DEBUG
+            if DebugLaunch.simulateGeneration { simulateGeneration() }
+            #endif
             switch DebugLaunch.mode {
             case "study": studying = true
             case "learn": learning = true
@@ -378,6 +392,30 @@ struct DeckScreen: View {
         if filter == .drafts, !cards.contains(where: { $0.status == .draft }) { filter = .all }
         if cards.isEmpty, let courseId { courseFileCount = (try? store.materialCount(inCourse: courseId)) ?? 0 }
     }
+
+    #if DEBUG
+    /// Stand-in for a model: a store-owned "add" job that writes an AI
+    /// draft a second, so the live strip can be watched without one.
+    private func simulateGeneration() {
+        guard let deckId = deckIds.first else { return }
+        let materialId = cards.compactMap(\.materialId).first
+        let run = AIActivity(headline: "Simulated generation", purpose: "add")
+        store.runAIJob(store.cardJobKey(courseId: courseId), activity: run) { [store] run in
+            for index in 1...8 {
+                try? await Task.sleep(for: .seconds(1))
+                if run.stopRequested { break }
+                let card = Card(materialId: materialId, front: "Simulated term \(index)",
+                                back: "A pretend definition written by the simulated model, number \(index).",
+                                origin: .aiGenerated, status: .draft)
+                try? await store.database.queue.write { db in
+                    try card.save(db)
+                    try DeckCard(deckId: deckId, cardId: card.id, sortIndex: 1000 + index).save(db)
+                }
+            }
+            store.reload()
+        }
+    }
+    #endif
 
     private func loadSourceTitles() {
         for id in Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil }) where sourceTitles[id] == nil {

@@ -16,11 +16,21 @@ enum DebugLaunch {
     static var mode: String? { env["GRASP_OPEN_MODE"] }
     /// Open this tab: study, settings.
     static var tab: String? { env["GRASP_TAB"] }
+    /// Deck screen: start on this filter chip (drafts, due, understood).
+    static var filter: String? { env["GRASP_OPEN_FILTER"] }
+    /// Deck screen: enter Select mode with the first three drafts ticked.
+    static var select: Bool { env["GRASP_SELECT"] == "1" }
+    /// Deck screen: run a pretend generation that writes one AI draft
+    /// every second, to watch the live strip.
+    static var simulateGeneration: Bool { env["GRASP_SIM_GENERATE"] == "1" }
     #else
     static let skipWelcome = false
     static let course: String? = nil
     static let deck: String? = nil
     static let mode: String? = nil
     static let tab: String? = nil
+    static let filter: String? = nil
+    static let select = false
+    static let simulateGeneration = false
     #endif
 }
