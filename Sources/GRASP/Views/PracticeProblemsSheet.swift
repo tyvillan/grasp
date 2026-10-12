@@ -132,15 +132,11 @@ struct PracticeProblemsSheet: View {
                 .foregroundStyle(GRASPColor.rejected)
                 .help("Delete this problem")
             }
-            if !expanded.contains(record.id) {
-                // A problem's matrix is part of the question, so it is
-                // shown whole; only the answer waits behind "Show".
-                if let problem = record.problem {
-                    GuideText(text: problem.prompt, style: .body, color: GRASPColor.textPrimary)
-                } else {
-                    Text(record.promptText).graspType(.body).foregroundStyle(GRASPColor.textPrimary).lineLimit(3)
-                }
-            } else if let question = record.question {
+            // The whole problem is always on show -- the prompt, the code to
+            // fill in or trace, a problem's matrix and its choices. Only the
+            // answer (and the explanation) waits behind "Show answer".
+            let revealed = expanded.contains(record.id)
+            if let question = record.question {
                 Text(question.prompt).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
                 Text(question.code)
                     .font(.graspMono(12))
@@ -149,23 +145,29 @@ struct PracticeProblemsSheet: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                answerLine(question.answerText)
-                footer(record)
+                if revealed {
+                    answerLine(question.answerText)
+                    footer(record)
+                }
             } else if let problem = record.problem {
                 GuideText(text: problem.prompt, style: .body, color: GRASPColor.textPrimary)
                 if let choices = problem.choices {
                     ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
                         Text("\(["A", "B", "C", "D"][min(index, 3)])) \(choice)")
                             .graspType(.body)
-                            .foregroundStyle(index == problem.correct ? GRASPColor.success : GRASPColor.textPrimary)
+                            .foregroundStyle(revealed && index == problem.correct ? GRASPColor.success : GRASPColor.textPrimary)
                     }
-                } else {
+                } else if revealed {
                     answerLine(problem.answerText)
                 }
-                if let explanation = problem.explanation {
-                    Text(explanation).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                if revealed {
+                    if let explanation = problem.explanation {
+                        Text(explanation).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                    }
+                    footer(record)
                 }
-                footer(record)
+            } else {
+                Text(record.promptText).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
             }
         }
     }
