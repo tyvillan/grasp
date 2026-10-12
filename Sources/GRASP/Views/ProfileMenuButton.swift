@@ -10,13 +10,24 @@ struct ProfileMenuButton: View {
     @Environment(AppStore.self) private var store
     @Environment(\.switchProfile) private var switchProfile
     @Environment(\.openSettings) private var openSettings
+    /// The sidebar's footer shows the name beside the avatar.
+    var showsName = false
     @State private var showingMenu = false
 
     var body: some View {
         Button {
             showingMenu = true
         } label: {
-            Avatar(name: store.profile.name, size: 28, fontSize: 12)
+            HStack(spacing: 10) {
+                Avatar(name: store.profile.name, size: 28, fontSize: 12)
+                if showsName {
+                    Text(store.profile.name.split(separator: " ").first.map(String.init) ?? store.profile.name)
+                        .font(.graspUI(size: 13.5, weight: .medium))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(store.profile.name)

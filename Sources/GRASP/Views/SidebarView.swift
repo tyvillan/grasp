@@ -1,101 +1,66 @@
 import SwiftUI
 import GRASPCore
 
-/// "Home" plus semesters-as-sections/courses-as-rows, newest semester
-/// first (by `sortKey`, derived from the tag/slug -- never trust folder
-/// name order, several vault folders are misleadingly named). Home shares
-/// the same selection binding as courses via the `ContentView.homeRoute`
-/// sentinel, so picking either is one selection, not two separate states.
+/// The four places (Home, Calendar, Study guides, Library), then the current
+/// term's courses with their full names and color dots, then catch-all
+/// groups like Side Lectures, then every past term folded into one row.
+/// The profile sits at the bottom.
+///
+/// Drawn by hand rather than as a `List` so selection can be GRASP's own: a
+/// yellow bar that slides between rows (`matchedGeometryEffect`) and a bold
+/// label, instead of the system's blue pill. Home, Calendar, Study guides
+/// and Library share the one selection binding with the courses through
+/// `ContentView`'s sentinel routes.
 struct SidebarView: View {
     @Environment(AppStore.self) private var store
     @Binding var selectedCourseId: String?
 
     @State private var editingCourse: Course?
     @State private var deletingCourse: Course?
+    @AppStorage("sidebarPastTermsOpen") private var pastTermsOpen = false
+    @Namespace private var selection
 
     var body: some View {
-        List(selection: $selectedCourseId) {
-            HStack(spacing: 7) {
-                Image(systemName: "house.fill")
-                    .font(.graspUI(size: 12))
-                    .frame(width: 16)
-                Text("Home").graspType(.rowTitle)
-                Spacer(minLength: 0)
-            }
-            .tag(ContentView.homeRoute)
-            .padding(.vertical, 3)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    placeRow(.home, "Home", route: ContentView.homeRoute)
+                    placeRow(.calendar, "Calendar", route: ContentView.calendarRoute)
+                    placeRow(.studyGuides, "Study guides", route: ContentView.studyGuideRoute)
+                    placeRow(.library, "Library", route: ContentView.libraryRoute)
 
-            HStack(spacing: 7) {
-                Image(systemName: "calendar")
-                    .font(.graspUI(size: 12))
-                    .frame(width: 16)
-                Text("Calendar").graspType(.rowTitle)
-                Spacer(minLength: 0)
-            }
-            .tag(ContentView.calendarRoute)
-            .padding(.vertical, 3)
-
-            HStack(spacing: 7) {
-                Image(systemName: "graduationcap")
-                    .font(.graspUI(size: 12))
-                    .frame(width: 16)
-                Text("Study Guide").graspType(.rowTitle)
-                Spacer(minLength: 0)
-            }
-            .tag(ContentView.studyGuideRoute)
-            .padding(.vertical, 3)
-
-            HStack(spacing: 7) {
-                Image(systemName: "books.vertical")
-                    .font(.graspUI(size: 12))
-                    .frame(width: 16)
-                Text("Library").graspType(.rowTitle)
-                Spacer(minLength: 0)
-            }
-            .tag(ContentView.libraryRoute)
-            .padding(.vertical, 3)
-
-            ForEach(store.semesters.reversed()) { semester in
-                let courses = store.courses(inSemester: semester.id)
-                if !courses.isEmpty {
-                    Section {
-                        ForEach(courses) { course in
-                            courseRow(course)
-                        }
-                    } header: {
-                        SectionLabel(semester.name).padding(.top, 6)
+                    if let term = store.currentTerm {
+                        groupLabel(term.name)
+                        ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
                     }
-                }
-            }
-            if !store.unfiledCourses.isEmpty {
-                Section {
-                    ForEach(store.unfiledCourses) { course in
-                        courseRow(course)
+
+                    ForEach(store.nonTermSemesters) { semester in
+                        groupLabel(semester.name)
+                        ForEach(store.courses(inSemester: semester.id)) { courseRow($0) }
                     }
-                } header: {
-                    SectionLabel("No Timeline").padding(.top, 6)
+                    if !store.unfiledCourses.isEmpty {
+                        groupLabel("No timeline")
+                        ForEach(store.unfiledCourses) { courseRow($0) }
+                    }
+
+                    pastTerms
                 }
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+                .animation(Motion.snappy, value: selectedCourseId)
             }
+            .scrollIndicators(.never)
+
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1).padding(.horizontal, 16)
+            ProfileMenuButton(showsName: true)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .listStyle(.sidebar)
-        // The sidebar keeps real vibrancy -- it should sample what's
-        // behind the window, as every Mac sidebar does -- but tinted
-        // toward GRASP's own ground so it reads as part of this app
-        // rather than a stock panel bolted to a black detail pane. The
-        // material also resolves from the SwiftUI environment, which
-        // keeps it in step with the detail pane's appearance instead of
-        // drifting light while the content stays dark.
-        .scrollContentBackground(.hidden)
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(GRASPColor.canvas.opacity(0.45))
-                .ignoresSafeArea()
-        }
-        // Row selection draws from the tint, so the selected course reads
-        // in GRASP's amber instead of the stock grey pill.
-        .tint(GRASPColor.accent)
-        .navigationTitle("GRASP")
+        .background(GRASPColor.surface)
+        .task { store.assignCourseColorsIfNeeded() }
+        .onChange(of: store.revision) { store.assignCourseColorsIfNeeded() }
         .sheet(item: $editingCourse) { course in
             CourseEditSheet(course: course)
         }
@@ -104,58 +69,140 @@ struct SidebarView: View {
         }
     }
 
-    @ViewBuilder
+    // MARK: - Rows
+
+    private func placeRow(_ glyph: SidebarGlyph, _ title: String, route: String) -> some View {
+        SidebarRow(isSelected: isSelected(route), namespace: selection) { hovering in
+            SidebarIcon(glyph: glyph, isHovering: hovering)
+            Text(title)
+        } action: {
+            selectedCourseId = route
+        }
+    }
+
+    private func isSelected(_ id: String) -> Bool {
+        (selectedCourseId ?? ContentView.homeRoute) == id
+    }
+
     private func courseRow(_ course: Course) -> some View {
-        CourseRow(course: course)
-            .tag(course.id)
-            .rowActions(inline: true) {
-                CourseContextMenu(
-                    course: course,
-                    onEdit: { editingCourse = course },
-                    onArchive: {
-                        // Matches `courseDeleteConfirmation`'s own fallback
-                        // below: archiving hides a course from both the
-                        // sidebar and the dashboard, so leaving it selected
-                        // would strand `ContentView` still showing an
-                        // archived course's deck list with no matching row
-                        // anywhere in the sidebar to show it as selected.
-                        let isArchiving = !course.isArchived
-                        try? store.setCourseArchived(course.id, archived: isArchiving)
-                        if isArchiving, selectedCourseId == course.id {
-                            selectedCourseId = ContentView.homeRoute
-                        }
-                    },
-                    onDelete: { deletingCourse = course }
-                )
+        SidebarRow(isSelected: isSelected(course.id), namespace: selection) { hovering in
+            CourseDot(color: store.courseColor(course), size: 8)
+                .scaleEffect(hovering ? 1.3 : 1)
+                .animation(Motion.bouncy, value: hovering)
+                .frame(width: 20)
+            Text(course.name)
+                .fixedSize(horizontal: false, vertical: true)
+        } action: {
+            selectedCourseId = course.id
+        }
+        .help(course.code.map { "\(course.name) (\($0))" } ?? course.name)
+        .rowActions(inline: true) {
+            CourseContextMenu(
+                course: course,
+                onEdit: { editingCourse = course },
+                onArchive: {
+                    // Archiving hides a course from the sidebar, so leaving
+                    // it selected would strand the detail pane on a course
+                    // with no row to show it as selected.
+                    let isArchiving = !course.isArchived
+                    try? store.setCourseArchived(course.id, archived: isArchiving)
+                    if isArchiving, selectedCourseId == course.id {
+                        selectedCourseId = ContentView.homeRoute
+                    }
+                },
+                onDelete: { deletingCourse = course }
+            )
+        }
+    }
+
+    private func groupLabel(_ text: String) -> some View {
+        SectionLabel(text)
+            .padding(.leading, 10)
+            .padding(.top, 22)
+            .padding(.bottom, 6)
+    }
+
+    /// Every older term behind one row. Opens in place; a selected course
+    /// inside it keeps it open.
+    @ViewBuilder
+    private var pastTerms: some View {
+        let terms = store.pastTerms
+        if !terms.isEmpty {
+            let count = terms.reduce(0) { $0 + store.courses(inSemester: $1.id).count }
+            let containsSelection = terms.contains { term in
+                store.courses(inSemester: term.id).contains { $0.id == selectedCourseId }
             }
+            let open = pastTermsOpen || containsSelection
+            Button {
+                withAnimation(Motion.snappy) { pastTermsOpen.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.graspUI(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Text("Past terms")
+                    Spacer(minLength: 6)
+                    Text("\(count) course\(count == 1 ? "" : "s")")
+                        .monospacedDigit()
+                }
+                .font(.graspUI(size: 13))
+                .foregroundStyle(GRASPColor.textTertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 18)
+            .accessibilityLabel(open ? "Hide past terms" : "Show past terms, \(count) courses")
+
+            if open {
+                ForEach(terms) { term in
+                    groupLabel(term.name)
+                    ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 
-/// The color dot sits in a fixed-width slot whether or not the course has
-/// a color, so every course name starts on the same x -- a ragged left
-/// edge is the fastest way to make a sidebar look unconsidered.
-///
-/// The course code is deliberately not shown here. Now that the Fall 2026
-/// notes actually carry codes, a trailing "COP 3275C" costs enough width
-/// to truncate the names beside it ("Systems Progr..."), and a sidebar
-/// exists to be scanned by name. The code still appears on the dashboard
-/// course tiles, which have room for it, and in the tooltip here.
-private struct CourseRow: View {
-    let course: Course
+/// One sidebar row: content on the left, the sliding yellow bar when
+/// selected, a raised fill on hover.
+private struct SidebarRow<Label: View>: View {
+    let isSelected: Bool
+    let namespace: Namespace.ID
+    @ViewBuilder let label: (_ hovering: Bool) -> Label
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(course.colorHex.map { Color(hex: $0) } ?? GRASPColor.hairlineStrong)
-                .frame(width: 7, height: 7)
-                .frame(width: 16)
-            Text(course.name)
-                .graspType(.rowTitle)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                label(hovering)
+            }
+            .font(.graspUI(size: 14, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovering && !isSelected ? GRASPColor.surfaceRaised : .clear)
+            }
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule()
+                        .fill(GRASPColor.brand)
+                        .frame(width: 3, height: 20)
+                        .offset(x: -6)
+                        .matchedGeometryEffect(id: "sidebar-selection", in: namespace)
+                }
+            }
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 2)
-        .help(course.code.map { "\(course.name) (\($0))" } ?? course.name)
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

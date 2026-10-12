@@ -39,6 +39,9 @@ struct ContentView: View {
     // the window to dedicate to the deck list, not a piece of navigation
     // state that should reset the moment the app relaunches.
     @AppStorage("deckListCollapsed") private var isDeckListCollapsed = false
+    @AppStorage("sidebarCollapsed") private var isSidebarCollapsed = false
+    /// The study guide open from the Study guides page, if any.
+    @State private var studyGuideTarget: StudyGuideHubTarget?
 
     // New Deck and Add Files live next to what they act on (DeckListView's
     // header, DeckDetailView's); `CourseEmptyStateView` carries its own
@@ -57,137 +60,24 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selectedCourseId: $selectedCourseId)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 255)
-        } detail: {
-            Group {
-                if selectedCourseId == Self.homeRoute || selectedCourseId == nil {
-                    HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
-                } else if selectedCourseId == Self.calendarRoute {
-                    CalendarView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
-                } else if selectedCourseId == Self.libraryRoute {
-                    LibraryView()
-                } else if selectedCourseId == Self.studyGuideRoute {
-                    StudyGuideHubView { target in
-                        switch target {
-                        case .exam(let courseId, let examEventId):
-                            ExamStudyView(courseId: courseId, examEventId: examEventId).id(examEventId)
-                        case .practice(let courseId, let guideId):
-                            ExamStudyView(courseId: courseId, examEventId: "", practiceGuideId: guideId).id(guideId)
-                        }
-                    }
-                } else if let courseId = activeCourseId, store.hasDecks(inCourse: courseId) {
-                    // Three tiers of ground, narrowest to widest: the
-                    // vibrant sidebar, then the deck list on a lifted
-                    // surface, then the card canvas on the app's darkest
-                    // ground. Depth increases as the panes get wider, so
-                    // the eye lands on the content pane rather than
-                    // treating all three as equal columns.
-                    HStack(spacing: 0) {
-                        if !isDeckListCollapsed {
-                            DeckListView(
-                                courseId: courseId, selectedDeckId: $selectedDeckId,
-                                onNewDeck: { showingNewDeck = true },
-                                onAddStudyGuide: { chooseAndImportGuide(for: courseId) }
-                            )
-                            .frame(width: 260)
-                            .background(GRASPColor.surface)
-                            .transition(.move(edge: .leading))
-                            Rectangle()
-                                .fill(GRASPColor.hairlineStrong)
-                                .frame(width: 1)
-                        }
-                        if let deckId = selectedDeckId,
-                           let examEventId = DeckListView.examEventId(fromRow: deckId) {
-                            ExamStudyView(courseId: courseId, examEventId: examEventId)
-                                .id(examEventId)
-                        } else if let deckId = selectedDeckId {
-                            DeckDetailView(
-                                scope: deckId == DeckListView.allCardsId
-                                    ? .course(courseId) : .deck(deckId),
-                                onAddFiles: { chooseAndImport(for: courseId) }
-                            )
-                        } else {
-                            ContentUnavailableView("Select a deck", systemImage: "rectangle.stack")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
-                    // The pane's full size whatever is in it: with only the
-                    // placeholder's own width, the row shrank to the middle
-                    // and left grey bars either side.
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                } else if let courseId = activeCourseId {
-                    // A course with no decks at all: one clean empty state
-                    // spanning the full width, not a narrow "No decks yet"
-                    // column sitting next to a second, redundant "Select a
-                    // deck" placeholder -- the bug this branch replaces.
-                    CourseEmptyStateView(
-                        onAddFiles: { chooseAndImport(for: courseId) },
-                        onNewDeck: { showingNewDeck = true }
-                    )
-                }
+        VStack(spacing: 0) {
+            TopBar(sidebarWidth: Self.sidebarWidth, showsSidebar: !isSidebarCollapsed,
+                   onHome: { selectedCourseId = Self.homeRoute }) {
+                topBarActions
             }
-            .background(GRASPColor.canvas)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let error = store.databaseOpenError {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(GRASPColor.rejected)
-                        Text(error)
-                            .graspType(.body)
-                            .foregroundStyle(GRASPColor.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(GRASPColor.rejectedSoft)
+            HStack(spacing: 0) {
+                if !isSidebarCollapsed {
+                    SidebarView(selectedCourseId: $selectedCourseId)
+                        .frame(width: Self.sidebarWidth)
+                        .transition(.move(edge: .leading))
+                    Rectangle().fill(GRASPColor.hairline).frame(width: 1)
                 }
+                detail
             }
         }
-        .toolbar {
-            // The deck-list collapse toggle: the ask placed this control
-            // inside the deck list's own toolbar, but a pane that's
-            // collapsed can't host the button that un-collapses it -- and
-            // the window's own main sidebar toggle already lives up here
-            // rather than inside the sidebar for exactly that reason, so
-            // this is the more faithful match to "the same behavior as the
-            // main sidebar toggle", not a deviation from it.
-            ToolbarItem(placement: .navigation) {
-                if activeCourseId != nil {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) { isDeckListCollapsed.toggle() }
-                    } label: {
-                        Label("Toggle Deck List", systemImage: "sidebar.squares.leading")
-                    }
-                    .help(isDeckListCollapsed ? "Show deck list" : "Hide deck list")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingSearch = true
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Add New Course…") { showingAddCourse = true }
-                    Button("Upload Document to Course…") { showingUploadPicker = true }
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ProfileMenuButton()
-            }
-        }
-        // Set at the window root rather than per-view: sidebar selection,
-        // segmented controls, focus rings and every system control in the
-        // window all draw from the tint, so one declaration here is what
-        // keeps them from reverting to the OS accent (which is usually
-        // blue, and reads as a stock app).
+        .background(GRASPColor.canvas)
+        .ignoresSafeArea(.container, edges: .top)
+        .toolbar(.hidden, for: .windowToolbar)
         .tint(GRASPColor.accent)
         .sheet(isPresented: $showingAddCourse) {
             AddCourseSheet()
@@ -234,6 +124,7 @@ struct ContentView: View {
         // stale deck cleared: without this, the detail pane can keep
         // showing a deck that belongs to the course you just left.
         .onChange(of: selectedCourseId) { _, _ in
+            studyGuideTarget = nil
             guard let courseId = activeCourseId else { return }
             if let deckId = selectedDeckId,
                deckId == DeckListView.allCardsId
@@ -259,6 +150,138 @@ struct ContentView: View {
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
     }
 
+    private static let sidebarWidth: CGFloat = 248
+
+    private var detail: some View {
+        Group {
+            if selectedCourseId == Self.homeRoute || selectedCourseId == nil {
+                HomeView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
+            } else if selectedCourseId == Self.calendarRoute {
+                CalendarView(selectedCourseId: $selectedCourseId, selectedDeckId: $selectedDeckId)
+            } else if selectedCourseId == Self.libraryRoute {
+                LibraryView()
+            } else if selectedCourseId == Self.studyGuideRoute {
+                if let target = studyGuideTarget {
+                    VStack(spacing: 0) {
+                        BackBar(title: "Study guides") { studyGuideTarget = nil }
+                        studyGuidePage(target)
+                    }
+                } else {
+                    StudyGuideHubView(standalone: false, onOpen: { studyGuideTarget = $0 }) { studyGuidePage($0) }
+                }
+            } else if let courseId = activeCourseId, store.hasDecks(inCourse: courseId) {
+                // Three tiers of ground, narrowest to widest: the
+                // vibrant sidebar, then the deck list on a lifted
+                // surface, then the card canvas on the app's darkest
+                // ground. Depth increases as the panes get wider, so
+                // the eye lands on the content pane rather than
+                // treating all three as equal columns.
+                HStack(spacing: 0) {
+                    if !isDeckListCollapsed {
+                        DeckListView(
+                            courseId: courseId, selectedDeckId: $selectedDeckId,
+                            onNewDeck: { showingNewDeck = true },
+                            onAddStudyGuide: { chooseAndImportGuide(for: courseId) }
+                        )
+                        .frame(width: 260)
+                        .background(GRASPColor.surface)
+                        .transition(.move(edge: .leading))
+                        Rectangle()
+                            .fill(GRASPColor.hairlineStrong)
+                            .frame(width: 1)
+                    }
+                    if let deckId = selectedDeckId,
+                       let examEventId = DeckListView.examEventId(fromRow: deckId) {
+                        ExamStudyView(courseId: courseId, examEventId: examEventId)
+                            .id(examEventId)
+                    } else if let deckId = selectedDeckId {
+                        DeckDetailView(
+                            scope: deckId == DeckListView.allCardsId
+                                ? .course(courseId) : .deck(deckId),
+                            onAddFiles: { chooseAndImport(for: courseId) }
+                        )
+                    } else {
+                        ContentUnavailableView("Select a deck", systemImage: "rectangle.stack")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                // The pane's full size whatever is in it: with only the
+                // placeholder's own width, the row shrank to the middle
+                // and left grey bars either side.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            } else if let courseId = activeCourseId {
+                // A course with no decks at all: one clean empty state
+                // spanning the full width, not a narrow "No decks yet"
+                // column sitting next to a second, redundant "Select a
+                // deck" placeholder -- the bug this branch replaces.
+                CourseEmptyStateView(
+                    onAddFiles: { chooseAndImport(for: courseId) },
+                    onNewDeck: { showingNewDeck = true }
+                )
+            }
+        }
+        .background(GRASPColor.canvas)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let error = store.databaseOpenError {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(GRASPColor.rejected)
+                    Text(error)
+                        .graspType(.body)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(GRASPColor.rejectedSoft)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func studyGuidePage(_ target: StudyGuideHubTarget) -> some View {
+        switch target {
+        case .exam(let courseId, let examEventId):
+            ExamStudyView(courseId: courseId, examEventId: examEventId).id(examEventId)
+        case .practice(let courseId, let guideId):
+            ExamStudyView(courseId: courseId, examEventId: "", practiceGuideId: guideId).id(guideId)
+        }
+    }
+
+    /// The window's global actions, in the top bar: the deck-list and
+    /// sidebar toggles, search, and Add.
+    @ViewBuilder
+    private var topBarActions: some View {
+        if activeCourseId != nil {
+            TopBarButton(systemImage: "sidebar.squares.leading",
+                         help: isDeckListCollapsed ? "Show deck list" : "Hide deck list") {
+                withAnimation(Motion.snappy) { isDeckListCollapsed.toggle() }
+            }
+        }
+        TopBarButton(systemImage: "sidebar.left",
+                     help: isSidebarCollapsed ? "Show sidebar" : "Hide sidebar") {
+            withAnimation(Motion.snappy) { isSidebarCollapsed.toggle() }
+        }
+        .keyboardShortcut("s", modifiers: [.command, .control])
+        TopBarButton(systemImage: "magnifyingglass", help: "Search") { showingSearch = true }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+        Menu {
+            Button("Add New Course…") { showingAddCourse = true }
+            Button("Upload Document to Course…") { showingUploadPicker = true }
+        } label: {
+            Image(systemName: "plus")
+                .font(.graspUI(size: 14, weight: .medium))
+                .foregroundStyle(GRASPColor.textSecondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Add a course or upload a document")
+    }
+
     /// `GRASP_OPEN_COURSE` (a course's name) and `GRASP_OPEN_DECK` (a
     /// deck's name, "All Cards", or "exam" for the course's next exam with a
     /// study guide) open that screen on launch -- for screenshots and QA
@@ -266,6 +289,11 @@ struct ContentView: View {
     /// unless set, so a normal launch never sees it.
     private func openLaunchScreen() {
         let env = ProcessInfo.processInfo.environment
+        // `GRASP_OPEN_ROUTE`: home, calendar, studyGuide or library.
+        if let route = env["GRASP_OPEN_ROUTE"] {
+            selectedCourseId = route
+            return
+        }
         guard let name = env["GRASP_OPEN_COURSE"],
               let course = store.coursesBySemester.values.joined().first(where: { $0.name == name })
         else { return }

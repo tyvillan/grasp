@@ -20,6 +20,9 @@ struct StudyGuideHubView<Destination: View>: View {
     /// False when pushed inside a stack that already exists (the iPhone's
     /// Courses tab), so there is no second stack nested in the first.
     var standalone = true
+    /// Set on the Mac, which has no navigation stack here: rows call this
+    /// instead of pushing.
+    var onOpen: ((StudyGuideHubTarget) -> Void)? = nil
     @ViewBuilder let destination: (StudyGuideHubTarget) -> Destination
 
     @State private var courses: [StudyGuideActions.HubCourse] = []
@@ -52,6 +55,7 @@ struct StudyGuideHubView<Destination: View>: View {
             }
             .background(GRASPColor.canvas)
             .navigationTitle("Study Guides")
+            #if os(iOS)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -63,6 +67,7 @@ struct StudyGuideHubView<Destination: View>: View {
                     .help("Write a practice guide from your decks' notes")
                 }
             }
+            #endif
             .navigationDestination(for: StudyGuideHubTarget.self) { destination($0) }
             .navigationDestination(item: $openTarget) { destination($0) }
         }
@@ -165,9 +170,23 @@ struct StudyGuideHubView<Destination: View>: View {
         )
     }
 
+    @ViewBuilder
     private func row(icon: String, title: String, subtitle: String, target: StudyGuideHubTarget,
                      dimmed: Bool) -> some View {
-        NavigationLink(value: target) {
+        if let onOpen {
+            Button { onOpen(target) } label: {
+                rowLabel(icon: icon, title: title, subtitle: subtitle, dimmed: dimmed)
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: target) {
+                rowLabel(icon: icon, title: title, subtitle: subtitle, dimmed: dimmed)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func rowLabel(icon: String, title: String, subtitle: String, dimmed: Bool) -> some View {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.graspUI(size: 14))
@@ -191,8 +210,6 @@ struct StudyGuideHubView<Destination: View>: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - After a run
@@ -219,7 +236,7 @@ struct StudyGuideHubView<Destination: View>: View {
             if let first = run.guideIds.first, let target = target(forGuide: first) {
                 Button("Open") {
                     store.dismissStudyGuideRun()
-                    openTarget = target
+                    if let onOpen { onOpen(target) } else { openTarget = target }
                 }
                 .buttonStyle(GRASPQuietButton())
             }

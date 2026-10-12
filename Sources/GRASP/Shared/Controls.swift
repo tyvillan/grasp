@@ -195,3 +195,35 @@ struct Avatar: View {
         return letters.isEmpty ? "?" : String(letters).uppercased()
     }
 }
+
+/// "‹ Study guides" above a page opened from a list, where there is no
+/// navigation stack to supply a back button.
+struct BackBar: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack {
+            Button(action: action) {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left")
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .offset(x: hovering ? -3 : 0)
+                    Text(title)
+                }
+                .font(.graspUI(size: 13, weight: .medium))
+                .foregroundStyle(hovering ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("[", modifiers: .command)
+            .onHover { hovering = $0 }
+            .animation(Motion.snappy, value: hovering)
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+        .background(alignment: .bottom) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+    }
+}

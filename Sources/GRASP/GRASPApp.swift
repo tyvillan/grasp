@@ -16,6 +16,10 @@ struct GRASPApp: App {
         return (try? ProfileStore.loadOrMigrate(supportDirectory: support))?.first
     }
 
+    init() {
+        _ = GRASPFonts.available
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -25,6 +29,7 @@ struct GRASPApp: App {
                         .defaultAppStorage(store.preferences)
                         .environment(\.switchProfile) { self.store = nil }
                         .frame(minWidth: 800, minHeight: 500)
+                        .font(.graspBody)
                 } else {
                     ProfilePickerView { profile in
                         store = AppStore(profile: profile)
@@ -46,7 +51,9 @@ struct GRASPApp: App {
                 }
             }
         }
-        .windowStyle(.automatic)
+        // The title bar is hidden: GRASP draws its own 60pt top bar (the
+        // wordmark, the acronym, the global actions) across the window.
+        .windowStyle(.hiddenTitleBar)
 
         Settings {
             if let store {
