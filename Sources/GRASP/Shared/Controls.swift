@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The one primary action on a screen: a yellow pill with ink text. Lifts
 /// 2pt and brightens on hover, presses to 0.97. Every other button is a
@@ -228,42 +231,117 @@ struct BackBar: View {
     }
 }
 
-/// A menu drawn as GRASP's outlined pill. A styled label inside `Menu` is
-/// flattened to tinted text on the Mac, so the pill is drawn underneath and
-/// an invisible menu sits on top of it to take the click.
-struct PillMenu<Items: View>: View {
+#if os(macOS)
+/// One entry in a `PillMenu`.
+enum PillMenuItem {
+    case action(_ title: String, systemImage: String? = nil, destructive: Bool = false,
+                disabled: Bool = false, help: String? = nil, perform: () -> Void)
+    case divider
+}
+
+/// A menu drawn as GRASP's outlined pill.
+///
+/// Not a SwiftUI `Menu`: on the Mac a borderless `Menu` is an
+/// `NSPopUpButton` that keeps only its label's text and image, so the pill's
+/// padding and border are dropped -- and a `Menu` whose label is empty
+/// collapses to a few points wide, which is how the first version of this
+/// (an invisible `Menu` laid over a drawn pill) ended up with no click
+/// target at all. Instead the whole pill is an ordinary button, and it opens
+/// a native `NSMenu` anchored under itself. That also lets a destructive
+/// item be drawn in coral, which a SwiftUI menu can't do.
+struct PillMenu: View {
     let title: String
     var systemImage: String? = nil
     var isBusy = false
-    @ViewBuilder let items: () -> Items
-    @State private var hovering = false
+    let items: () -> [PillMenuItem]
+    @State private var anchor = MenuAnchor()
 
     var body: some View {
-        HStack(spacing: 6) {
-            if isBusy {
-                ProgressView().controlSize(.small)
-            } else if let systemImage {
-                Image(systemName: systemImage).font(.graspUI(size: 11, weight: .medium))
+        Button {
+            anchor.present(items())
+        } label: {
+            HStack(spacing: 6) {
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                } else if let systemImage {
+                    Image(systemName: systemImage).font(.graspUI(size: 11, weight: .medium))
+                }
+                Text(title)
+                Image(systemName: "chevron.down").font(.graspUI(size: 9, weight: .semibold))
             }
-            Text(title)
-            Image(systemName: "chevron.down").font(.graspUI(size: 9, weight: .semibold))
         }
-        .font(.graspUI(size: 13.5, weight: .medium))
-        .foregroundStyle(GRASPColor.textPrimary)
-        .padding(.horizontal, 16)
-        .frame(height: 30)
-        .background(Capsule().fill(hovering ? GRASPColor.surfaceRaised : .clear))
-        .overlay(Capsule().strokeBorder(GRASPColor.textPrimary.opacity(0.4), lineWidth: 1))
-        .overlay {
-            Menu { items() } label: {
-                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Capsule())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .opacity(0.011)
-        }
-        .fixedSize()
-        .onHover { hovering = $0 }
-        .animation(Motion.sweep, value: hovering)
+        .buttonStyle(GRASPQuietButton())
+        .background(MenuAnchorView(anchor: anchor))
+        .accessibilityLabel("\(title) menu")
+        .accessibilityAddTraits(.isButton)
     }
 }
+
+/// Holds the AppKit view the menu opens under.
+@MainActor
+final class MenuAnchor {
+    fileprivate weak var view: NSView?
+
+    func present(_ items: [PillMenuItem]) {
+        guard let view else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        var handlers: [MenuHandler] = []
+        for item in items {
+            switch item {
+            case .divider:
+                menu.addItem(.separator())
+            case .action(let title, let systemImage, let destructive, let disabled, let help, let perform):
+                let handler = MenuHandler(perform)
+                handlers.append(handler)
+                let menuItem = NSMenuItem(title: title, action: #selector(MenuHandler.run), keyEquivalent: "")
+                menuItem.target = handler
+                menuItem.isEnabled = !disabled
+                menuItem.toolTip = help
+                if let systemImage {
+                    menuItem.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
+                }
+                if destructive {
+                    let coral = NSColor(GRASPColor.rejected)
+                    menuItem.attributedTitle = NSAttributedString(
+                        string: title, attributes: [.foregroundColor: disabled ? coral.withAlphaComponent(0.4) : coral,
+                                                    .font: NSFont.menuFont(ofSize: 0)])
+                    menuItem.image = menuItem.image?.withSymbolConfiguration(.init(paletteColors: [coral]))
+                }
+                menu.addItem(menuItem)
+            }
+        }
+        // Keeps the handlers alive while the menu is open; `popUp` returns
+        // only once it closes, after any chosen item has run.
+        withExtendedLifetime(handlers) {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 4), in: view)
+        }
+    }
+}
+
+private final class MenuHandler: NSObject {
+    let perform: () -> Void
+    init(_ perform: @escaping () -> Void) { self.perform = perform }
+    @objc func run() { perform() }
+}
+
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = FlippedView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
+    }
+
+    /// Flipped, so "below the pill" is +y like the rest of SwiftUI.
+    private final class FlippedView: NSView {
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+#endif

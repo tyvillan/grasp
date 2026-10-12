@@ -105,9 +105,9 @@ struct CodeQuestionView: View {
             .autocorrectionDisabledIfAvailable()
             .padding(.horizontal, 6)
             .frame(width: width, height: 22)
-            .background(RoundedRectangle(cornerRadius: 5).fill(right ? GRASPColor.successSoft : wrong ? GRASPColor.accentSoft : GRASPColor.inset))
+            .background(RoundedRectangle(cornerRadius: 5).fill(right ? GRASPColor.successSoft : wrong ? GRASPColor.rejectedSoft : GRASPColor.inset))
             .overlay(RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(right ? GRASPColor.success : wrong ? GRASPColor.accent : GRASPColor.hairlineStrong))
+                .strokeBorder(right ? GRASPColor.success : wrong ? GRASPColor.rejected : GRASPColor.hairlineStrong))
             .disabled(isAnswered)
             .padding(.horizontal, 2)
     }
@@ -127,7 +127,7 @@ struct CodeQuestionView: View {
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 1)
-            .background(isBug ? GRASPColor.successSoft : isWrongPick ? GRASPColor.accentSoft : Color.clear)
+            .background(isBug ? GRASPColor.successSoft : isWrongPick ? GRASPColor.rejectedSoft : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

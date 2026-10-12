@@ -43,6 +43,11 @@ struct DeckDetailView: View {
     /// what `CourseEmptyStateView` and "Upload Document to Course" share;
     /// this view only needs to trigger it, not own it.
     let onAddFiles: () -> Void
+    /// Imports a study guide for an exam in this course (`ContentView`
+    /// owns the file panel, as for `onAddFiles`).
+    var onAddStudyGuide: () -> Void = {}
+    /// Called after this deck is deleted, so the deck list can move off it.
+    var onDeckDeleted: () -> Void = {}
     /// Every deck `scope` spans -- one real deck, or (for `.course`) every
     /// deck in that course. Cached here rather than recomputed inline on
     /// every read, since `load()` already re-derives it on every
@@ -99,8 +104,8 @@ struct DeckDetailView: View {
     /// silently overwriting whatever deck the user has since switched to.
     @State private var scopeGeneration = 0
 
-    private enum MasteryFilter: String, CaseIterable, Identifiable {
-        case all = "All", needsReview = "Needs Review", understood = "Understood"
+    enum MasteryFilter: String, CaseIterable, Identifiable {
+        case all = "All", needsReview = "Needs review", understood = "Understood"
         var id: String { rawValue }
     }
 
@@ -134,6 +139,15 @@ struct DeckDetailView: View {
     /// query four times per render -- on every selection click.
     @State private var dueCount = 0
     @State private var problemCount = 0
+    /// Notes whose overview was written before the note last changed.
+    @State private var staleOverviewCount = 0
+    /// Set by More > Rewrite out-of-date overviews; the Overview tab picks
+    /// it up and asks before writing.
+    @State private var rewriteOverviewsRequest = false
+    @State private var deletingDeck: Deck?
+    @State private var deletingDeckCardCount = 0
+    /// While set, approving the previewed draft moves on to the next one.
+    @State private var reviewingDrafts = false
     @State private var unfinishedTest: Study.UnfinishedTest?
 
     /// The New Card sheet's default target: the current deck when scoped
@@ -176,6 +190,8 @@ struct DeckDetailView: View {
                 .foregroundStyle(GRASPColor.textSecondary)
         }
         .menuStyle(.borderlessButton)
+        // A borderless menu tints its icon with the window's yellow.
+        .tint(GRASPColor.textSecondary)
         .fixedSize()
         .help("Sort cards: \(cardSortOption.label)")
     }
@@ -220,15 +236,7 @@ struct DeckDetailView: View {
             if !cards.isEmpty {
                 HStack {
                     if activeCount > 0 {
-                        Picker("", selection: $masteryFilter) {
-                            ForEach(MasteryFilter.allCases) { filter in
-                                Text(filter.rawValue).tag(filter)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .controlSize(.small)
-                        .frame(maxWidth: 300, alignment: .leading)
+                        FilterPills(selection: $masteryFilter)
                     }
                     Spacer()
                     cardSortMenu
@@ -252,9 +260,9 @@ struct DeckDetailView: View {
                         card: card,
                         mastery: learnLevels[card.id] ?? .new,
                         onEdit: { editingCard = card },
-                        onApprove: { setStatus(card, .active) },
+                        onApprove: { approveFromPreview(card) },
                         onViewNote: { viewingMaterialId = card.materialId },
-                        onClose: { previewCardId = nil }
+                        onClose: { previewCardId = nil; reviewingDrafts = false }
                     )
                     .frame(minWidth: 240, idealWidth: 360, maxWidth: 360)
                 }
@@ -273,13 +281,11 @@ struct DeckDetailView: View {
                         + "the one in progress is left as it was."
                 )
             }
-            if draftCount > 0 { draftNotice }
-            if !duplicateGroups.isEmpty { duplicateNotice }
             switch contentTab {
             case .cards:
                 cardsTab
             case .overview:
-                DeckOverviewView(scope: scope) { cardId in
+                DeckOverviewView(scope: scope, rewriteStaleRequest: $rewriteOverviewsRequest) { cardId in
                     contentTab = .cards
                     selectedCardIds = [cardId]
                     previewCardId = cardId
@@ -518,35 +524,73 @@ struct DeckDetailView: View {
         moreMenu
     }
 
-    /// Files, Problems and Refine with AI: reachable, but out of the row so
-    /// the study modes read first.
+    /// Everything that acts on the deck as a whole, out of the row so the
+    /// study modes read first. Delete is last, separated, in coral.
     private var moreMenu: some View {
         let noun = filesNoun
-        let refineCount = refineCount(.everything)
         return PillMenu(title: "More", systemImage: "ellipsis") {
-            Button {
-                showingDeckFiles = true
-            } label: {
-                Label("Files", systemImage: "doc.on.doc")
-            }
-            Button {
-                showingCodeQuestions = true
-            } label: {
-                Label(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function")
-            }
-            if contentTab == .cards, isGeneratorAvailable {
-                Divider()
-                Button {
+            var items: [PillMenuItem] = []
+            if isGeneratorAvailable {
+                items.append(.action(isRefiningDeck ? "Refining…" : "Refine deck with AI", systemImage: "checkmark.seal",
+                                     disabled: isRefiningDeck || aiActivity != nil || refineCount(.everything) == 0,
+                                     help: "Checks every card against its own note and cleans up wording") {
                     refineConfirmation = .everything
-                } label: {
-                    Label(isRefiningDeck ? "Refining…" : "Refine with AI", systemImage: "checkmark.seal")
-                }
-                .disabled(isRefiningDeck || aiActivity != nil || refineCount == 0)
+                })
             }
+            items.append(.action("Approve all drafts", systemImage: "checkmark.circle", disabled: draftCount == 0) {
+                try? store.approveAllDrafts(inDecks: scopeDeckIds)
+                load()
+            })
+            if hasSourceNotes {
+                items.append(.action("Rewrite out-of-date overviews", systemImage: "clock.arrow.circlepath",
+                                     disabled: staleOverviewCount == 0 || !isGeneratorAvailable) {
+                    contentTab = .overview
+                    rewriteOverviewsRequest = true
+                })
+            }
+            if !duplicateGroups.isEmpty {
+                items.append(.action("Review duplicates…", systemImage: "square.on.square") {
+                    showingDuplicateReview = true
+                })
+            }
+            items.append(.divider)
+            items.append(.action("Show files in this \(noun.lowercased())", systemImage: "doc.on.doc") {
+                showingDeckFiles = true
+            })
+            items.append(.action(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function") {
+                showingCodeQuestions = true
+            })
+            if case .deck(let id) = scope {
+                items.append(.divider)
+                items.append(.action("Delete deck…", systemImage: "trash", destructive: true) {
+                    beginDeleteDeck(id)
+                })
+            }
+            return items
         }
-        .help("Files, practice problems and Refine with AI")
+        .help("Refine, approve, rewrite overviews, files, problems, delete")
         .sheet(isPresented: $showingDeckFiles) {
             DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
+        }
+        .sheet(item: $deletingDeck) { deck in
+            DeckDeleteSheet(deck: deck, cardCount: deletingDeckCardCount, siblings: siblingDecks) { targetId in
+                try? store.deleteDeck(deck.id, migrateCardsTo: targetId)
+                onDeckDeleted()
+            }
+        }
+    }
+
+    /// The same flow as the deck list's Delete: an empty deck goes at once,
+    /// one with cards asks where they should go.
+    private func beginDeleteDeck(_ id: String) {
+        guard let deck = (try? store.deck(id)) ?? nil else { return }
+        let count = (try? store.deckCardCount(id)) ?? 0
+        if count == 0 {
+            try? store.deleteDeck(id, migrateCardsTo: nil)
+            onDeckDeleted()
+        } else {
+            deletingDeckCardCount = count
+            deletingDeck = deck
         }
     }
 
@@ -565,12 +609,13 @@ struct DeckDetailView: View {
                         Text(tab.rawValue)
                             .font(.graspUI(size: 14, weight: .semibold))
                     }
-                    .foregroundStyle(selected ? GRASPColor.ink : GRASPColor.textSecondary)
+                    .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                     .padding(.horizontal, 18)
                     .frame(height: 32)
                     .background {
                         if selected {
-                            Capsule().fill(GRASPColor.brand)
+                            Capsule().fill(GRASPColor.surfaceRaised)
+                                .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
                                 .matchedGeometryEffect(id: "content-tab", in: tabSwitch)
                         }
                     }
@@ -602,7 +647,7 @@ struct DeckDetailView: View {
             }
             if dueCount > 0 {
                 Text("·").foregroundStyle(GRASPColor.textTertiary)
-                Text("\(dueCount) due").foregroundStyle(GRASPColor.accent)
+                Text("\(dueCount) due").foregroundStyle(GRASPColor.textPrimary)
             }
             let understood = learnLevels.values.filter { $0 == .mastered }.count
             if understood > 0 {
@@ -636,62 +681,29 @@ struct DeckDetailView: View {
         return "Course"
     }
 
-    /// One flat "Add" menu for everything that puts something into this
-    /// deck: a card by hand, cards by AI, or files. These were two menus
-    /// (New Card, Files) with the AI action nested inside the first.
+    /// The one place to add anything: a card by hand, more cards by AI,
+    /// files, or a study guide. (The deck list's own "Add Guide" folded in
+    /// here.)
     private var addMenuButton: some View {
         let noun = filesNoun
         return PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
-            if contentTab == .cards {
-                Button("New Card…") { isCreatingCard = true }
-                if isGeneratorAvailable {
-                    Button {
-                        showingGenerateSheet = true
-                    } label: {
-                        Label(isGeneratingCards ? "Adding Cards…" : "Generate Cards with AI", systemImage: "sparkles")
-                    }
-                    .disabled(isGeneratingCards || aiActivity != nil)
-                }
-                Divider()
+            var items: [PillMenuItem] = [
+                .action("New card…", systemImage: "square.and.pencil") { isCreatingCard = true },
+            ]
+            if isGeneratorAvailable {
+                items.append(.action(isGeneratingCards ? "Adding cards…" : "Add more cards with AI", systemImage: "sparkles",
+                                     disabled: isGeneratingCards || aiActivity != nil) {
+                    showingGenerateSheet = true
+                })
             }
-            Button("Add Files to \(noun)…") { onAddFiles() }
-                .disabled(store.isImporting)
+            items.append(.divider)
+            items.append(.action("Add files to this \(noun.lowercased())…", systemImage: "doc.badge.plus",
+                                 disabled: store.isImporting) { onAddFiles() })
+            items.append(.action("New study guide…", systemImage: "graduationcap",
+                                 help: "Add a study guide for an exam in this course") { onAddStudyGuide() })
+            return items
         }
-        .help("Add a card, generate cards with AI, or add files to this \(noun.lowercased())")
-    }
-
-    /// The single unified action that replaced the separate "Refine with
-    /// AI" and "Check for Off-Topic Cards" buttons -- one pipeline, not
-    /// two: prune/rewrite off-topic drafts first, then clean up wording
-    /// on whatever survives (see `AppStore.refineDeckWithAI`). Placed up
-    /// here with the other AI actions rather than down in the draft
-    /// notice strip, so it's always visible near the deck's own header --
-    /// not just when drafts happen to be showing.
-    private var refineDeckWithAIButton: some View { refineButton(.drafts) }
-
-    /// `.drafts` is the strip's button, enabled only while drafts exist;
-    /// `.everything` is the header's, which also re-checks approved cards.
-    private func refineButton(_ scope: RefineScope) -> some View {
-        let count = refineCount(scope)
-        return Button {
-            refineConfirmation = scope
-        } label: {
-            HStack(spacing: 5) {
-                if isRefiningDeck {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "checkmark.seal").font(.graspUI(size: 11))
-                }
-                Text(scope == .drafts ? "Refine Deck with AI" : "Refine with AI")
-            }
-        }
-        .buttonStyle(GRASPQuietButton())
-        .disabled(isRefiningDeck || aiActivity != nil || count == 0)
-        .help(count == 0
-              ? "No cards to refine right now"
-              : scope == .drafts
-                ? "Checks each draft against its own note -- rewrites or removes off-topic definitions, then cleans up wording on the rest"
-                : "Checks every card in this deck, drafts and approved, against its own note and cleans up wording")
+        .help("Add a card, more cards with AI, files or a study guide")
     }
 
     private func refineCount(_ scope: RefineScope) -> Int {
@@ -780,61 +792,58 @@ struct DeckDetailView: View {
         }
     }
 
-    /// Drafts are a gate, not an error -- an inset strip in the accent,
-    /// tucked directly under the header it qualifies, rather than a
-    /// full-width alert bar competing with the deck title.
-    private var draftNotice: some View {
-        HStack(spacing: 10) {
+    /// What needs attention, in one line at the top of the card list --
+    /// drafts waiting for review, overviews written before their note
+    /// changed, possible duplicates -- with one action. It scrolls away with
+    /// the cards rather than staying pinned; the other fixes (approve all,
+    /// rewrite overviews, review duplicates) are in More.
+    private var statusStrip: some View {
+        var parts: [String] = []
+        if draftCount > 0 { parts.append("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review") }
+        if staleOverviewCount > 0 {
+            parts.append("\(staleOverviewCount) overview\(staleOverviewCount == 1 ? "" : "s") out of date")
+        }
+        if !duplicateGroups.isEmpty {
+            parts.append("\(duplicateGroups.count) possible duplicate\(duplicateGroups.count == 1 ? "" : "s")")
+        }
+        return HStack(spacing: 10) {
             Image(systemName: "circle.dashed")
                 .font(.graspUI(size: 12))
-                .foregroundStyle(GRASPColor.accent)
-            Text("\(draftCount) card\(draftCount == 1 ? "" : "s") awaiting review")
+                .foregroundStyle(GRASPColor.textTertiary)
+            Text(parts.joined(separator: " · "))
                 .graspType(.body)
                 .foregroundStyle(GRASPColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            if isGeneratorAvailable {
-                refineDeckWithAIButton
+            if draftCount > 0 {
+                Button("Review drafts") { startReviewingDrafts() }
+                    .buttonStyle(GRASPQuietButton())
             }
-            Button {
-                try? store.approveAllDrafts(inDecks: scopeDeckIds)
-                load()
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle").font(.graspUI(size: 11))
-                    Text("Approve all")
-                }
-            }
-            .buttonStyle(GRASPQuietButton())
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(GRASPColor.accentSoft.opacity(0.55))
-        .background(alignment: .bottom) {
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
-        }
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
     }
 
-    /// Same treatment as `draftNotice`, but neutral-toned rather than
-    /// accented -- a duplicate backlog isn't a gate blocking study the way
-    /// unapproved drafts are, just a standing cleanup opportunity.
-    private var duplicateNotice: some View {
-        let cardCount = duplicateGroups.reduce(0) { $0 + $1.cards.count - 1 }
-        return HStack(spacing: 10) {
-            Image(systemName: "square.on.square")
-                .font(.graspUI(size: 12))
-                .foregroundStyle(GRASPColor.textSecondary)
-            Text("\(duplicateGroups.count) possible duplicate group\(duplicateGroups.count == 1 ? "" : "s") (\(cardCount) extra card\(cardCount == 1 ? "" : "s"))")
-                .graspType(.body)
-                .foregroundStyle(GRASPColor.textSecondary)
-            Spacer(minLength: 8)
-            Button("Review Duplicates…") { showingDuplicateReview = true }
-                .buttonStyle(.link)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(GRASPColor.inset)
-        .background(alignment: .bottom) {
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+    /// Opens the first draft in the preview; approving it there moves on to
+    /// the next, until none are left.
+    private func startReviewingDrafts() {
+        masteryFilter = .all
+        guard let first = visibleCards.first(where: { $0.status == .draft }) else { return }
+        reviewingDrafts = true
+        selectedCardIds = [first.id]
+        previewCardId = first.id
+    }
+
+    private func approveFromPreview(_ card: Card) {
+        setStatus(card, .active)
+        guard reviewingDrafts else { return }
+        if let next = visibleCards.first(where: { $0.status == .draft }) {
+            selectedCardIds = [next.id]
+            previewCardId = next.id
+        } else {
+            reviewingDrafts = false
         }
     }
 
@@ -858,6 +867,12 @@ struct DeckDetailView: View {
         let cards = visibleCards
         let selection = cards.filter { selectedCardIds.contains($0.id) }.map(\.id)
         return List(selection: $selectedCardIds) {
+            if draftCount > 0 || staleOverviewCount > 0 || !duplicateGroups.isEmpty {
+                statusStrip
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+            }
             ForEach(cards) { card in
                 CardRow(
                     card: card,
@@ -1074,6 +1089,8 @@ struct DeckDetailView: View {
             previewCardId = nil
         }
         duplicateGroups = (try? store.duplicateGroups(inDecks: scopeDeckIds)) ?? []
+        staleOverviewCount = hasSourceNotes
+            ? ((try? store.deckOverview(inDecks: scopeDeckIds))?.staleEntries.count ?? 0) : 0
     }
 
     private func setStatus(_ card: Card, _ status: CardStatus) {
@@ -1445,6 +1462,89 @@ private struct CardPreviewPane: View {
 /// second badge style for what is visually the same kind of fact.
 /// Not private: the overview reader uses the same chip for its card links
 /// and its "out of date" marker, and a second copy would drift.
+/// All / Needs review / Understood as small text pills. The selected one
+/// is raised, not yellow -- yellow on this screen belongs to Study.
+private struct FilterPills: View {
+    @Binding var selection: DeckDetailView.MasteryFilter
+    @Namespace private var pill
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(DeckDetailView.MasteryFilter.allCases) { filter in
+                let selected = selection == filter
+                Button {
+                    withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) { selection = filter }
+                } label: {
+                    Text(filter.rawValue)
+                        .font(.graspUI(size: 12.5, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 26)
+                        .background {
+                            if selected {
+                                Capsule().fill(GRASPColor.surfaceRaised)
+                                    .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
+                                    .matchedGeometryEffect(id: "filter", in: pill)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(GRASPColor.inset))
+    }
+}
+
+/// A card whose term is an attachment's filename ("FAUCafeCode.zip") shows
+/// the name as words ("FAU Cafe Code") with the file as a muted source
+/// label. Only archive and document extensions count: "__init__.py",
+/// "locustfile.py" or "cin.ignore" are real concepts that happen to have a
+/// dot in them. Display only -- the card itself is unchanged.
+enum CardTermDisplay {
+    private static let attachmentExtensions: Set<String> = [
+        "zip", "rar", "7z", "tar", "gz", "tgz", "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
+        "key", "pages", "numbers",
+    ]
+
+    static func split(_ front: String) -> (term: String, file: String?) {
+        let trimmed = front.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.contains(" "), let dot = trimmed.lastIndex(of: "."),
+              attachmentExtensions.contains(trimmed[trimmed.index(after: dot)...].lowercased())
+        else { return (front, nil) }
+        let stem = String(trimmed[..<dot])
+        let words = humanize(stem)
+        return words.isEmpty ? (front, nil) : (words, trimmed)
+    }
+
+    /// "FAUCafeCode" -> "FAU Cafe Code", "solid_principles-v2" -> "solid principles v2".
+    private static func humanize(_ stem: String) -> String {
+        var words: [String] = []
+        var current = ""
+        let chars = Array(stem)
+        for (i, c) in chars.enumerated() {
+            if c == "_" || c == "-" || c == "." {
+                if !current.isEmpty { words.append(current); current = "" }
+                continue
+            }
+            let next = i + 1 < chars.count ? chars[i + 1] : nil
+            let prev = current.last
+            // A new word at lower->Upper ("cafeCode") and at the last capital
+            // of an acronym before a lowercase letter ("FAUCafe").
+            if c.isUppercase, let prev,
+               prev.isLowercase || prev.isNumber || (prev.isUppercase && (next?.isLowercase ?? false)) {
+                words.append(current); current = ""
+            }
+            current.append(c)
+        }
+        if !current.isEmpty { words.append(current) }
+        return words.joined(separator: " ")
+    }
+}
+
 private struct CardRow: View {
     let card: Card
     let mastery: LearnEngine.Level
@@ -1482,20 +1582,34 @@ private struct CardRow: View {
                 .help(railHelp ?? "")
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(card.front)
-                    .graspType(.rowTitle)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                let term = CardTermDisplay.split(card.front)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(term.term)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let file = term.file {
+                        Label(file, systemImage: "paperclip")
+                            .font(.graspUI(size: 11.5))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .lineLimit(1)
+                            .help("Source file: \(file)")
+                    }
+                }
                 Text(card.back)
                     .graspType(.body)
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            previewButton
-            if card.status == .active { masteryBadge }
+            // Status marks stay; the actions (preview, approve, the menu)
+            // appear only while the pointer is on the row. Their space is
+            // reserved, so the row doesn't jump when they show.
+            if card.status == .active && mastery == .mastered { masteryBadge }
             contextRefinedBadge
             originBadge
+            previewButton
+            approveButton
             Menu {
                 if card.status == .draft {
                     Button("Approve", action: onApprove)
@@ -1525,7 +1639,12 @@ private struct CardRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .tint(GRASPColor.textSecondary)
             .frame(width: 28)
+            .opacity(isHovering ? 1 : 0)
+            .allowsHitTesting(isHovering)
+            .help("Card actions")
         }
         .padding(.vertical, 7)
         .contentShape(Rectangle())
@@ -1556,6 +1675,24 @@ private struct CardRow: View {
         .allowsHitTesting(isHovering)
     }
 
+    /// Approve, for a draft -- on hover, beside Preview.
+    @ViewBuilder private var approveButton: some View {
+        if card.status == .draft {
+            Button(action: onApprove) {
+                Image(systemName: "checkmark")
+                    .font(.graspUI(size: 11, weight: .semibold))
+                    .foregroundStyle(GRASPColor.success)
+                    .frame(width: 24, height: 24)
+                    .background(GRASPColor.surface, in: Circle())
+                    .overlay(Circle().strokeBorder(GRASPColor.success.opacity(0.4)))
+            }
+            .buttonStyle(.plain)
+            .help("Approve")
+            .opacity(isHovering ? 1 : 0)
+            .allowsHitTesting(isHovering)
+        }
+    }
+
     /// The sole approval-status signal on a row -- amber for pending
     /// (awaiting review), a muted rose for rejected (suspended), and the
     /// existing mastery-based tint for an approved/active card. Replaces a
@@ -1563,9 +1700,9 @@ private struct CardRow: View {
     /// bar and say the same thing.
     private var railTint: Color {
         switch card.status {
-        case .draft: return GRASPColor.accent
+        case .draft: return GRASPColor.hairlineStrong
         case .suspended: return GRASPColor.rejected
-        case .active: return mastery == .mastered ? GRASPColor.success : GRASPColor.accentMuted
+        case .active: return mastery == .mastered ? GRASPColor.success : GRASPColor.textTertiary
         }
     }
 
@@ -1583,8 +1720,8 @@ private struct CardRow: View {
                 Label("Understood", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(GRASPColor.success)
             } else {
-                Label("Needs Review", systemImage: "circle")
-                    .foregroundStyle(GRASPColor.accent)
+                Label("Needs review", systemImage: "circle")
+                    .foregroundStyle(GRASPColor.textTertiary)
             }
         }
         .labelStyle(.iconOnly)
@@ -1599,7 +1736,7 @@ private struct CardRow: View {
     @ViewBuilder private var originBadge: some View {
         if card.origin == .aiGenerated {
             Label("AI-generated", systemImage: "sparkles")
-                .labelStyle(.iconOnly).foregroundStyle(GRASPColor.accent)
+                .labelStyle(.iconOnly).foregroundStyle(GRASPColor.textTertiary)
                 .help("AI-generated -- not directly from your notes, worth double-checking")
         }
     }

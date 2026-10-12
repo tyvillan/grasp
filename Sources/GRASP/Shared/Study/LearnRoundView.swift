@@ -161,7 +161,7 @@ struct LearnRoundView: View {
                     .fill(GRASPColor.hairline)
                     .frame(width: 1, height: 32)
                     .padding(.horizontal, 26)
-                tally(roundIncorrect, "to revisit", GRASPColor.accent)
+                tally(roundIncorrect, "to revisit", GRASPColor.rejected)
             }
             .padding(.top, 26)
 
@@ -355,7 +355,7 @@ struct LearnRoundView: View {
             if isAnswered && choice == correct {
                 Image(systemName: "checkmark").foregroundStyle(GRASPColor.success)
             } else if isAnswered && choice == selectedChoice {
-                Image(systemName: "xmark").foregroundStyle(GRASPColor.accent)
+                Image(systemName: "xmark").foregroundStyle(GRASPColor.rejected)
             } else {
                 Text(letter)
                     .foregroundStyle(
@@ -383,13 +383,13 @@ struct LearnRoundView: View {
         !isAnswered && selectedChoice == choice
     }
 
-    /// Correctness uses the palette's own success teal and accent amber
-    /// rather than raw system green/red, so a graded question still looks
+    /// Correctness uses the palette's own success teal and coral rather
+    /// than raw system green/red (never yellow or a course color), so a graded question still looks
     /// like it belongs to this app.
     private func choiceBackground(_ choice: String, correct: String) -> Color {
         if isAnswered {
             if choice == correct { return GRASPColor.successSoft }
-            if choice == selectedChoice { return GRASPColor.accentSoft }
+            if choice == selectedChoice { return GRASPColor.rejectedSoft }
             return GRASPColor.surface
         }
         return choice == selectedChoice ? GRASPColor.accentSoft : GRASPColor.surface
@@ -398,7 +398,7 @@ struct LearnRoundView: View {
     private func choiceBorder(_ choice: String, correct: String) -> Color {
         if isAnswered {
             if choice == correct { return GRASPColor.success.opacity(0.55) }
-            if choice == selectedChoice { return GRASPColor.accent.opacity(0.55) }
+            if choice == selectedChoice { return GRASPColor.rejected.opacity(0.55) }
             return GRASPColor.hairline
         }
         return isPendingSelection(choice) ? GRASPColor.accent : GRASPColor.hairline
@@ -473,7 +473,7 @@ struct LearnRoundView: View {
         case .close:
             verdictLabel("Close -- check your spelling", "checkmark.circle", GRASPColor.accent)
         case .incorrect:
-            verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.accent)
+            verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.rejected)
         }
     }
 

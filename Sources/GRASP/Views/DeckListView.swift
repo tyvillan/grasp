@@ -50,7 +50,6 @@ struct DeckListView: View {
     let courseId: String
     @Binding var selectedDeckId: String?
     let onNewDeck: () -> Void
-    let onAddStudyGuide: () -> Void
     @AppStorage("deckSortOption") private var sortOption: DeckSortOption = .deckOrder
     @State private var decks: [Deck] = []
     @State private var kickers: [String: String] = [:]
@@ -177,19 +176,13 @@ struct DeckListView: View {
                     .foregroundStyle(GRASPColor.textSecondary)
             }
             .menuStyle(.borderlessButton)
+            .tint(GRASPColor.textSecondary)
             .fixedSize()
             .help("Sort decks: \(sortOption.label)")
-            Button(action: onAddStudyGuide) {
-                Label("Add Guide", systemImage: "graduationcap")
-                    .font(.graspUI(size: 11, weight: .medium))
-                    .foregroundStyle(GRASPColor.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .help("Add a study guide for an exam in this course")
             Button(action: onNewDeck) {
-                Image(systemName: "plus.circle.fill")
+                Image(systemName: "plus.circle")
                     .font(.graspUI(size: 15))
-                    .foregroundStyle(GRASPColor.accent)
+                    .foregroundStyle(GRASPColor.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Create a new deck in this course")
@@ -230,7 +223,7 @@ private struct AllCardsRow: View {
         HStack(spacing: 8) {
             Image(systemName: "square.stack.3d.up.fill")
                 .font(.graspUI(size: 11))
-                .foregroundStyle(GRASPColor.accent)
+                .foregroundStyle(GRASPColor.textSecondary)
             Text("All Cards")
                 .graspType(.rowTitle)
                 .fontWeight(.semibold)
@@ -250,7 +243,7 @@ private struct ExamRow: View {
         HStack(spacing: 8) {
             Image(systemName: "graduationcap.fill")
                 .font(.graspUI(size: 11))
-                .foregroundStyle(GRASPColor.accent)
+                .foregroundStyle(GRASPColor.textSecondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(exam.title)
                     .graspType(.rowTitle)
@@ -294,8 +287,8 @@ private struct DeckRow: View {
     }
 }
 
-/// One number per row, labelled: "39 due" (a yellow pill) while cards are
-/// waiting, else "41 cards". The two bare numbers side by side never said
+/// One number per row, labelled: "39 due" while cards are waiting, else
+/// "41 cards". Plain text -- yellow on the deck page belongs to Study. The two bare numbers side by side never said
 /// which was which; the total is still in the tooltip.
 private struct DeckCountLabel: View {
     let cardCount: Int
@@ -305,10 +298,8 @@ private struct DeckCountLabel: View {
         Group {
             if dueCount > 0 {
                 Text("\(dueCount) due")
-                    .font(.graspUI(size: 11, weight: .semibold))
-                    .foregroundStyle(GRASPColor.ink)
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(GRASPColor.brand, in: Capsule())
+                    .font(.graspUI(size: 12, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
             } else {
                 Text("\(cardCount) card\(cardCount == 1 ? "" : "s")")
                     .graspType(.meta)

@@ -180,8 +180,7 @@ struct ContentView: View {
                     if !isDeckListCollapsed {
                         DeckListView(
                             courseId: courseId, selectedDeckId: $selectedDeckId,
-                            onNewDeck: { showingNewDeck = true },
-                            onAddStudyGuide: { chooseAndImportGuide(for: courseId) }
+                            onNewDeck: { showingNewDeck = true }
                         )
                         .frame(width: 260)
                         .background(GRASPColor.surface)
@@ -198,7 +197,9 @@ struct ContentView: View {
                         DeckDetailView(
                             scope: deckId == DeckListView.allCardsId
                                 ? .course(courseId) : .deck(deckId),
-                            onAddFiles: { chooseAndImport(for: courseId) }
+                            onAddFiles: { chooseAndImport(for: courseId) },
+                            onAddStudyGuide: { chooseAndImportGuide(for: courseId) },
+                            onDeckDeleted: { selectedDeckId = DeckListView.allCardsId }
                         )
                     } else {
                         ContentUnavailableView("Select a deck", systemImage: "rectangle.stack")

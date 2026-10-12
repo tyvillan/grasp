@@ -269,7 +269,7 @@ struct TestSetupSheet: View {
                                 .font(.graspUI(size: 9)).monospacedDigit()
                                 .foregroundStyle(GRASPColor.textTertiary)
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(entry.fraction >= 0.8 ? GRASPColor.success : GRASPColor.accent)
+                                .fill(entry.fraction >= 0.8 ? GRASPColor.success : GRASPColor.textTertiary)
                                 .frame(width: 18, height: max(4, 44 * entry.fraction))
                         }
                         .help("\(entry.correct) of \(entry.total), \(entry.startedAt.formatted(date: .abbreviated, time: .omitted))")
@@ -578,7 +578,7 @@ struct TestRunView: View {
                     .lineLimit(3)
                     .textSelection(.enabled)
             }
-            .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.accent)
+            .foregroundStyle(lastCorrect ? GRASPColor.success : GRASPColor.rejected)
             Spacer(minLength: 12)
             // Text matching is a poor judge of a long or loaded answer --
             // offered only for written questions, and only while wrong.
@@ -648,7 +648,7 @@ struct TestRunView: View {
             if isAnswered && choice == correct {
                 Image(systemName: "checkmark").foregroundStyle(GRASPColor.success)
             } else if isAnswered && choice == selectedChoice {
-                Image(systemName: "xmark").foregroundStyle(GRASPColor.accent)
+                Image(systemName: "xmark").foregroundStyle(GRASPColor.rejected)
             } else {
                 Text(String(UnicodeScalar(65 + min(position, 25))!))
                     .foregroundStyle(GRASPColor.textTertiary)
@@ -673,20 +673,20 @@ struct TestRunView: View {
     private func tint(for label: String, question: LearnEngine.RoundQuestion) -> Color {
         guard isAnswered else { return GRASPColor.textSecondary }
         if label == question.correctAnswer { return GRASPColor.success }
-        return label == selectedChoice ? GRASPColor.accent : GRASPColor.textTertiary
+        return label == selectedChoice ? GRASPColor.rejected : GRASPColor.textTertiary
     }
 
     private func background(_ choice: String, correct: String) -> Color {
         guard isAnswered else { return GRASPColor.surface }
         if choice == correct { return GRASPColor.successSoft }
-        if choice == selectedChoice { return GRASPColor.accentSoft }
+        if choice == selectedChoice { return GRASPColor.rejectedSoft }
         return GRASPColor.surface
     }
 
     private func border(_ choice: String, correct: String) -> Color {
         guard isAnswered else { return GRASPColor.hairline }
         if choice == correct { return GRASPColor.success.opacity(0.55) }
-        if choice == selectedChoice { return GRASPColor.accent.opacity(0.55) }
+        if choice == selectedChoice { return GRASPColor.rejected.opacity(0.55) }
         return GRASPColor.hairline
     }
 
@@ -774,7 +774,7 @@ struct TestResultsView: View {
 
                 ProgressBar(
                     value: correct, total: total,
-                    tint: correct == total ? GRASPColor.success : GRASPColor.accent
+                    tint: correct == total ? GRASPColor.success : GRASPColor.brand
                 )
                 .frame(maxWidth: 260)
                 .padding(.top, 14)
@@ -800,7 +800,7 @@ struct TestResultsView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: item.isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.graspUI(size: 11))
-                            .foregroundStyle(item.isCorrect ? GRASPColor.success : GRASPColor.accent)
+                            .foregroundStyle(item.isCorrect ? GRASPColor.success : GRASPColor.rejected)
                         Text(item.question.prompt)
                             .graspType(.rowTitle)
                             .foregroundStyle(GRASPColor.textPrimary)

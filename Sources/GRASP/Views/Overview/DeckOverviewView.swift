@@ -6,6 +6,9 @@ import GRASPCore
 struct DeckOverviewView: View {
     @Environment(AppStore.self) private var store
     let scope: AppStore.DeckScope
+    /// Set from the deck's More menu ("Rewrite out-of-date overviews"):
+    /// asks to rewrite every stale note, then clears itself.
+    @Binding var rewriteStaleRequest: Bool
     /// Hands a card back to `DeckDetailView`, which switches to Cards and
     /// selects it.
     let onOpenCard: (String) -> Void
@@ -60,9 +63,10 @@ struct DeckOverviewView: View {
                 )
             } else if let failure {
                 failureNotice(failure)
-            } else if let overview, !overview.staleEntries.isEmpty {
-                staleNotice(overview)
             }
+            // Staleness isn't a pinned banner any more: the card list's
+            // status strip counts it, More rewrites it, and each changed
+            // note's header carries an "Out of date" chip.
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,6 +76,13 @@ struct DeckOverviewView: View {
             isGeneratorAvailable = await isAnyGeneratorAvailable()
         }
         .onChange(of: store.revision) { _, _ in load() }
+        .onChange(of: rewriteStaleRequest, initial: true) { _, requested in
+            guard requested else { return }
+            rewriteStaleRequest = false
+            if overview == nil { load() }
+            let stale = overview?.staleEntries.map(\.materialId) ?? []
+            if !stale.isEmpty, !isWriting { prepare(stale) }
+        }
         .sheet(isPresented: $showingConfirmation) {
             WriteOverviewsSheet(
                 noteCount: pendingTargets.count,
@@ -286,36 +297,6 @@ struct DeckOverviewView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(GRASPColor.rejectedSoft.opacity(0.55))
-        .background(alignment: .bottom) {
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
-        }
-    }
-
-    /// Above a note whose source changed: says so where the reader is, with
-    /// a rewrite for just this note.
-    private func staleNotice(_ overview: DeckOverview) -> some View {
-        let stale = overview.staleEntries
-        return HStack(spacing: 10) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.graspUI(size: 12))
-                .foregroundStyle(GRASPColor.accent)
-            Text(stale.count == 1
-                 ? "\(stale[0].title) changed since its overview was written"
-                 : "\(stale.count) notes changed since their overviews were written")
-                .graspType(.body)
-                .foregroundStyle(GRASPColor.textSecondary)
-            Spacer(minLength: 8)
-            if isGeneratorAvailable {
-                Button(stale.count == 1 ? "Rewrite It" : "Rewrite Them") {
-                    prepare(stale.map(\.materialId))
-                }
-                .buttonStyle(GRASPQuietButton())
-                .disabled(isWriting)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(GRASPColor.accentSoft.opacity(0.55))
         .background(alignment: .bottom) {
             Rectangle().fill(GRASPColor.hairline).frame(height: 1)
         }

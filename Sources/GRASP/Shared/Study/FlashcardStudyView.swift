@@ -217,7 +217,7 @@ struct FlashcardStudyView: View {
         Group {
             if isFlipped {
                 HStack(spacing: 10) {
-                    markButton("Needs Review", "1", GRASPColor.accent, understood: false)
+                    markButton("Needs Review", "1", GRASPColor.rejected, understood: false)
                     markButton("I Know This", "2", GRASPColor.success, understood: true)
                 }
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
@@ -257,7 +257,9 @@ struct FlashcardStudyView: View {
                 if KeyHints.shown {
                     Text(key)
                         .graspType(.meta)
-                        .foregroundStyle(color.opacity(0.7))
+                        // Full-strength text: the dimmed key hint fell under
+                        // 4.5:1 on its tinted background.
+                        .foregroundStyle(GRASPColor.textSecondary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
