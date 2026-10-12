@@ -111,6 +111,8 @@ struct PreviewChip: View {
             Text(text)
         }
         .graspType(.meta)
+        .lineLimit(1)
+        .fixedSize()
         .foregroundStyle(tint)
         .padding(.horizontal, 7).padding(.vertical, 2)
         .background(tintSoft, in: Capsule())

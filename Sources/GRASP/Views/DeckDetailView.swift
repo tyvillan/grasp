@@ -896,6 +896,17 @@ struct DeckDetailView: View {
                     },
                     onRefine: { refineCard(card) }
                 )
+                // GRASP draws the selection itself -- a soft yellow wash --
+                // because the table's own highlight is the system accent
+                // (blue) and ignores `.tint`. Selection behaviour (shift- and
+                // cmd-click, the context menu's selection) is still the
+                // table's; only the drawing changes.
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selectedCardIds.contains(card.id) ? GRASPColor.accentSoft : .clear)
+                        .padding(.horizontal, 4)
+                )
+                .background(TableHighlightRemover())
             }
         }
         .listStyle(.inset)
@@ -1397,7 +1408,7 @@ private struct CardPreviewPane: View {
 
     @ViewBuilder private var statusChip: some View {
         switch card.status {
-        case .draft: PreviewChip(text: "Pending", tint: GRASPColor.accent, tintSoft: GRASPColor.accentSoft)
+        case .draft: PreviewChip(text: "Draft", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
         case .suspended: PreviewChip(text: "Rejected", tint: GRASPColor.rejected, tintSoft: GRASPColor.rejectedSoft)
         case .active: EmptyView()
         }
@@ -1408,7 +1419,7 @@ private struct CardPreviewPane: View {
             if mastery == .mastered {
                 PreviewChip(text: "Understood", tint: GRASPColor.success, tintSoft: GRASPColor.successSoft)
             } else {
-                PreviewChip(text: "Needs review", tint: GRASPColor.accent, tintSoft: GRASPColor.accentSoft)
+                PreviewChip(text: "Needs review", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
             }
         }
     }
@@ -1419,7 +1430,7 @@ private struct CardPreviewPane: View {
     @ViewBuilder private var originChip: some View {
         if card.origin == .aiGenerated {
             PreviewChip(
-                text: "AI-generated", tint: GRASPColor.accent, tintSoft: GRASPColor.accentSoft, icon: "sparkles"
+                text: "AI-generated", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset, icon: "sparkles"
             )
         }
     }
@@ -1462,6 +1473,27 @@ private struct CardPreviewPane: View {
 /// second badge style for what is visually the same kind of fact.
 /// Not private: the overview reader uses the same chip for its card links
 /// and its "out of date" marker, and a second copy would drift.
+/// Turns off the system selection highlight of the table a SwiftUI `List`
+/// is drawn with, so the list can draw its own (`listRowBackground`).
+/// Placed inside a row: it finds the enclosing `NSTableView` once it's in a
+/// window. Idempotent, and changes nothing but how selection is drawn.
+private struct TableHighlightRemover: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Finder() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Finder: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            var view = superview
+            while let current = view, !(current is NSTableView) { view = current.superview }
+            if let table = view as? NSTableView, table.selectionHighlightStyle != .none {
+                table.selectionHighlightStyle = .none
+            }
+        }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
 /// All / Needs review / Understood as small text pills. The selected one
 /// is raised, not yellow -- yellow on this screen belongs to Study.
 private struct FilterPills: View {
