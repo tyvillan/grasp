@@ -417,6 +417,21 @@ final class AppStore {
         return count
     }
 
+    /// Drafts from a course's own notes into one deck -- for a deck with no
+    /// cards yet, which `generateAdditionalCards` has nothing to read from.
+    /// Throws for anything that went wrong; `.generated(created: 0, ...)`
+    /// only ever means the model found nothing to add.
+    func generateCards(
+        fromCourse courseId: String, intoDeck deckId: String,
+        maxPerNote: Int = CardAI.defaultMaxGeneratedPerNote, topic: String? = nil
+    ) async throws -> CardAI.CourseGenerationOutcome {
+        defer { reload() }
+        return try await CardAI.generateCards(
+            fromCourse: courseId, intoDeck: deckId, maxPerNote: maxPerNote, topic: topic,
+            using: await CardGenerators.select(), database: database
+        )
+    }
+
     func reload() {
         do {
             try database.queue.read { db in

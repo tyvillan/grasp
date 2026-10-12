@@ -88,6 +88,14 @@ struct DeckDetailView: View {
     @State private var liveSourceTitle: String?
     /// Note titles for AI-made cards' "from <note>" line.
     @State private var sourceTitles: [String: String] = [:]
+    /// False until the first `load()` -- an empty deck's state must not
+    /// flash while the cards are still being read.
+    @State private var hasLoaded = false
+    /// Notes in this course, for the empty deck's "Add files" state.
+    @State private var courseFileCount = 0
+    /// Why the last empty-deck generation didn't produce cards.
+    @State private var generationNotice: GenerationNotice?
+    private struct GenerationNotice { let message: String; let isError: Bool }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingGenerateSheet = false
     @State private var showingCodeQuestions = false
@@ -313,7 +321,11 @@ struct DeckDetailView: View {
             }
             switch contentTab {
             case .cards:
-                cardsTab
+                if hasLoaded && cards.isEmpty && !isGeneratingCards {
+                    emptyDeckState
+                } else {
+                    cardsTab
+                }
             case .overview:
                 DeckOverviewView(scope: scope, rewriteRequest: $overviewRequest) { cardId in
                     contentTab = .cards
@@ -933,6 +945,150 @@ struct DeckDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
     }
 
+    // MARK: - Empty deck
+
+    /// The deck to write into: the open one, or a course's first deck.
+    private var generationTargetDeckId: String? {
+        if case .deck(let id) = scope { return id }
+        return scopeDeckIds.first
+    }
+
+    /// A deck with no cards at all: no list header, filters or strip -- one
+    /// large action and a quiet way out.
+    private var emptyDeckState: some View {
+        let hasFiles = courseFileCount > 0
+        let canGenerate = hasFiles && isGeneratorAvailable && generationTargetDeckId != nil
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(spacing: 14) {
+                if hasFiles {
+                    Button {
+                        generateFromCourse()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: AIGlyph.symbol)
+                                .font(.graspUI(size: 17, weight: .semibold))
+                                .foregroundStyle(GRASPColor.accent)
+                            Text("Generate questions from your notes")
+                                .font(.graspUI(size: 16, weight: .semibold))
+                        }
+                        .padding(.horizontal, 26)
+                        .padding(.vertical, 6)
+                        .frame(minHeight: 48)
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                    .disabled(!canGenerate)
+                    Text(isGeneratorAvailable
+                         ? "Uses the files in this course"
+                         : "Set up an AI model in Settings → AI to write cards")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                } else {
+                    Button {
+                        onAddFiles()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc.badge.plus")
+                                .font(.graspUI(size: 16, weight: .semibold))
+                            Text("Add files")
+                                .font(.graspUI(size: 16, weight: .semibold))
+                        }
+                        .padding(.horizontal, 30)
+                        .padding(.vertical, 6)
+                        .frame(minHeight: 48)
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                    HStack(spacing: 6) {
+                        Image(systemName: AIGlyph.symbol).font(.graspUI(size: 10, weight: .semibold))
+                        Text("Generate questions")
+                    }
+                    .font(.graspUI(size: 13.5, weight: .medium))
+                    .foregroundStyle(GRASPColor.textTertiary.opacity(0.7))
+                    Text("Add this course's notes first -- questions are written from them.")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+                if let generationNotice {
+                    HStack(spacing: 10) {
+                        Image(systemName: generationNotice.isError ? "exclamationmark.circle" : "info.circle")
+                            .font(.graspUI(size: 12))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                        Text(generationNotice.message)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if hasFiles {
+                            Button("Retry") { generateFromCourse() }
+                                .buttonStyle(GRASPQuietButton())
+                                .disabled(!canGenerate)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+                    .frame(maxWidth: 480)
+                    .padding(.top, 6)
+                }
+                Button("Add a card manually") { isCreatingCard = true }
+                    .buttonStyle(.plain)
+                    .font(.graspUI(size: 13, weight: .medium))
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 0)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+
+    /// Writes the deck's first cards from the course's notes. Same strip as
+    /// "Generate questions"; failures come back as a notice with Retry.
+    private func generateFromCourse() {
+        guard let courseId, let deckId = generationTargetDeckId else { return }
+        let generation = scopeGeneration
+        generationNotice = nil
+        let run = AIActivity(headline: "Writing cards for \(deckName) with AI", purpose: "add")
+        store.runAIJob(cardJobKey, activity: run) { [store] run in
+            let notice: GenerationNotice?
+            do {
+                let outcome = try await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                    try await store.generateCards(fromCourse: courseId, intoDeck: deckId)
+                }
+                switch outcome {
+                case .noMaterials:
+                    courseFileCount = 0
+                    notice = nil
+                case .generated(let created, _, _):
+                    notice = created == 0 && !run.stopRequested
+                        ? GenerationNotice(message: "The AI didn't find anything to ask about in these notes.", isError: false)
+                        : nil
+                }
+            } catch let error as CardAI.CourseGenerationError {
+                switch error {
+                case .generatorUnavailable:
+                    notice = GenerationNotice(message: "No AI model is reachable. Check Settings → AI, then retry.", isError: true)
+                case .noReadableNotes:
+                    notice = GenerationNotice(message: "GRASP couldn't read any text in this course's files.", isError: true)
+                case .deckMissing:
+                    notice = GenerationNotice(message: "This deck no longer exists.", isError: true)
+                case .writeFailed(let created, let reason):
+                    notice = GenerationNotice(
+                        message: (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
+                            + "Something went wrong saving: \(reason)",
+                        isError: true)
+                }
+            } catch {
+                notice = GenerationNotice(message: error.localizedDescription, isError: true)
+            }
+            guard generation == scopeGeneration else { return }
+            generationNotice = notice
+            load()
+        }
+    }
+
     /// While cards are being written: a pulsing sparkle, where from, how
     /// many so far, and Stop. Replaces the drafts strip until the run ends,
     /// when the drafts strip returns with the final count.
@@ -997,6 +1153,7 @@ struct DeckDetailView: View {
             hiddenNewIds.formUnion(ordered.map(\.id))
             recentAIIds = ordered.map(\.id) + recentAIIds
             cards = fresh
+            loadSourceTitles()
             let step = min(0.06, 1.5 / Double(ordered.count))
             for card in ordered.reversed() {
                 if reduceMotion {
@@ -1309,6 +1466,7 @@ struct DeckDetailView: View {
         }
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
+        hasLoaded = true
         loadSourceTitles()
         // A Drafts filter with no drafts left would show an empty list.
         if masteryFilter == .drafts, !cards.contains(where: { $0.status == .draft }) { masteryFilter = .all }
@@ -1333,6 +1491,9 @@ struct DeckDetailView: View {
         selectedCardIds.formIntersection(visible)
         if let id = previewCardId, !visible.contains(id) {
             previewCardId = nil
+        }
+        if cards.isEmpty, let courseId {
+            courseFileCount = (try? store.materialCount(inCourse: courseId)) ?? 0
         }
         duplicateGroups = (try? store.duplicateGroups(inDecks: scopeDeckIds)) ?? []
         let overview = hasSourceNotes ? try? store.deckOverview(inDecks: scopeDeckIds) : nil
