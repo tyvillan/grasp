@@ -1053,18 +1053,18 @@ final class AppStore {
         try database.queue.write { db in try Study.startRetry(questions: questions, deckIds: deckIds, db: db) }
     }
 
-    /// Today's checklist for an exam. The decks are the study guide's, else
-    /// the exam's own deck, else the whole course.
-    func examPlan(for event: CalendarEvent, now: Date = Date()) -> [ExamPlan.Step] {
-        let days = max(0, Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: now),
-                                                           to: Calendar.current.startOfDay(for: event.startsAt)).day ?? 0)
-        guard days <= ExamPlan.horizonDays else { return [] }
+    /// The decks an exam covers: the study guide's, else the exam's own
+    /// deck, else the whole course.
+    func planDeckIds(for event: CalendarEvent) -> [String] {
         var ids = examDeckIds(examEventId: event.id)
         if ids.isEmpty, let deckId = event.deckId { ids = [deckId] }
         if ids.isEmpty, let courseId = event.courseId { ids = self.deckIds(in: .course(courseId)) }
-        let deckIds = ids
-        guard !deckIds.isEmpty else { return [] }
-        let standing: ExamPlan.Standing = (try? database.queue.read { db in
+        return ids
+    }
+
+    /// Where the student stands on an exam's decks today.
+    func examStanding(deckIds: [String], now: Date = Date()) -> ExamPlan.Standing {
+        (try? database.queue.read { db in
             let active = try Study.learnCandidates(forDecks: deckIds, db: db).count
             let due = try Study.dueCards(inDecks: deckIds, now: now, db: db).count
             let weak = try Study.weakCardIds(forDecks: deckIds, db: db).count
@@ -1074,7 +1074,21 @@ final class AppStore {
             return ExamPlan.Standing(dueCards: due, activeCards: active, weakCards: weak,
                                      savedProblems: problems, daysSinceTest: since)
         }) ?? ExamPlan.Standing(dueCards: 0, activeCards: 0, weakCards: 0, savedProblems: 0, daysSinceTest: nil)
-        return ExamPlan.steps(daysAway: days, standing: standing)
+    }
+
+    /// Whole days from today to the event (0 on the day).
+    func daysUntil(_ event: CalendarEvent, now: Date = Date()) -> Int {
+        max(0, Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: now),
+                                               to: Calendar.current.startOfDay(for: event.startsAt)).day ?? 0)
+    }
+
+    /// Today's checklist for an exam.
+    func examPlan(for event: CalendarEvent, now: Date = Date()) -> [ExamPlan.Step] {
+        let days = daysUntil(event, now: now)
+        guard days <= ExamPlan.horizonDays else { return [] }
+        let deckIds = planDeckIds(for: event)
+        guard !deckIds.isEmpty else { return [] }
+        return ExamPlan.steps(daysAway: days, standing: examStanding(deckIds: deckIds, now: now))
     }
 
     func testHistory(forDecks deckIds: [String]) -> [Study.TestHistoryEntry] {

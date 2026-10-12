@@ -39,6 +39,11 @@ extension AppStore {
     /// its position in its term, so a past term reads consistently too.
     func courseColor(_ course: Course) -> Color {
         if let hex = course.colorHex { return CoursePalette.color(hex: hex) }
+        // Outside a term (Side Lectures, no timeline) there's no set of
+        // siblings to tell apart, and a borrowed hue would clash with the
+        // current term's: a neutral dot.
+        guard let semester = semesters.first(where: { $0.id == course.semesterId }), Self.isTerm(semester)
+        else { return GRASPColor.textTertiary }
         let siblings = courses(inSemester: course.semesterId)
         let index = siblings.firstIndex { $0.id == course.id } ?? 0
         return CoursePalette.slots[index % CoursePalette.slots.count].color

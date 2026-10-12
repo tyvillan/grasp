@@ -21,7 +21,9 @@ struct GRASPApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // A stable id, so the saved window size survives changes to the view
+        // tree (the autosave name is otherwise derived from its type).
+        WindowGroup(id: "main") {
             Group {
                 if let store {
                     ContentView()
@@ -54,6 +56,7 @@ struct GRASPApp: App {
         // The title bar is hidden: GRASP draws its own 60pt top bar (the
         // wordmark, the acronym, the global actions) across the window.
         .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 820)
 
         Settings {
             if let store {
