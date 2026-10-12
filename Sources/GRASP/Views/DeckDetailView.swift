@@ -141,9 +141,11 @@ struct DeckDetailView: View {
     @State private var problemCount = 0
     /// Notes whose overview was written before the note last changed.
     @State private var staleOverviewCount = 0
-    /// Set by More > Rewrite out-of-date overviews; the Overview tab picks
-    /// it up and asks before writing.
-    @State private var rewriteOverviewsRequest = false
+    /// Notes in scope with an overview or one that could be written.
+    @State private var overviewNoteCount = 0
+    /// Set by the Overview toolbar ("Rewrite with AI", "Rewrite out-of-date
+    /// overviews"); the Overview tab picks it up and asks before writing.
+    @State private var overviewRequest: OverviewRewriteRequest?
     @State private var deletingDeck: Deck?
     @State private var deletingDeckCardCount = 0
     /// While set, approving the previewed draft moves on to the next one.
@@ -285,7 +287,7 @@ struct DeckDetailView: View {
             case .cards:
                 cardsTab
             case .overview:
-                DeckOverviewView(scope: scope, rewriteStaleRequest: $rewriteOverviewsRequest) { cardId in
+                DeckOverviewView(scope: scope, rewriteRequest: $overviewRequest) { cardId in
                     contentTab = .cards
                     selectedCardIds = [cardId]
                     previewCardId = cardId
@@ -300,6 +302,8 @@ struct DeckDetailView: View {
         // lectures' overviews shouldn't have to re-pick the tab each time.
         // But a deck with no source notes hides the picker, and a hidden
         // picker can't be used to get back out of a tab with nothing in it.
+        // The toolbar's menus belong to the view they were opened in.
+        .onChange(of: contentTab) { MenuAnchor.closeOpenMenu() }
         .onChange(of: hasSourceNotes) { _, hasNotes in
             if !hasNotes { contentTab = .cards }
         }
@@ -476,18 +480,27 @@ struct DeckDetailView: View {
                 }
             }
 
-            // One row when it fits; otherwise the card actions wrap under
-            // the study modes rather than clipping off the edge.
+            // Study modes on the left; on the right, what this view can do
+            // -- the AI button, Add (Cards) or Edit (Overview), and ⋯. One
+            // row when it fits, otherwise two rather than clipping.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     studyModeButtons
-                    cardActionButtons
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 16)
+                    viewActions
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) { studyModeButtons; Spacer(minLength: 0) }
-                    HStack(spacing: 8) { cardActionButtons; Spacer(minLength: 0) }
+                    HStack(spacing: 8) { viewActions; Spacer(minLength: 0) }
                 }
+            }
+            .background {
+                // ⇧⌘N for New card, also while the Add menu is closed.
+                Button("New card") { isCreatingCard = true }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 18)
@@ -518,48 +531,67 @@ struct DeckDetailView: View {
             .help("A graded quiz on this deck's cards")
     }
 
+    /// The right side of the toolbar, which follows the Cards / Overview
+    /// switch: the AI button, then Add or Edit, then ⋯.
     @ViewBuilder
-    private var cardActionButtons: some View {
-        addMenuButton
-        moreMenu
+    private var viewActions: some View {
+        aiButton
+        if contentTab == .cards { addMenuButton } else { editMenuButton }
+        overflowMenu
     }
 
-    /// Everything that acts on the deck as a whole, out of the row so the
-    /// study modes read first. Delete is last, separated, in coral.
-    private var moreMenu: some View {
+    /// AI is GRASP's headline feature, so it gets its own button: an
+    /// outlined pill (never filled -- Study is the one yellow button) with
+    /// the yellow sparkle. Cards: write practice questions. Overview:
+    /// rewrite the overviews.
+    private var aiButton: some View {
+        let onCards = contentTab == .cards
+        return Button {
+            if onCards { showingCodeQuestions = true } else { requestOverviewRewrite(.all) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: AIGlyph.symbol)
+                    .font(.graspUI(size: 11, weight: .semibold))
+                    .foregroundStyle(GRASPColor.accent)
+                Text(onCards ? "Generate questions" : "Rewrite with AI")
+            }
+        }
+        .buttonStyle(GRASPQuietButton())
+        .disabled(!onCards && (!isGeneratorAvailable || overviewNoteCount == 0))
+        .help(onCards
+              ? "Write practice questions from this deck's notes -- code to complete, calculations, matrices -- that tests mix in"
+              : isGeneratorAvailable ? "Rewrite every overview in this \(filesNoun.lowercased()) with AI"
+                                     : "Set up an AI model in Settings to write overviews")
+    }
+
+    private func requestOverviewRewrite(_ request: OverviewRewriteRequest) {
+        contentTab = .overview
+        overviewRequest = request
+    }
+
+    /// Housekeeping, the same in both views. Delete is last, separated, in
+    /// coral.
+    private var overflowMenu: some View {
         let noun = filesNoun
-        return PillMenu(title: "More", systemImage: "ellipsis") {
-            var items: [PillMenuItem] = []
-            if isGeneratorAvailable {
-                items.append(.action(isRefiningDeck ? "Refining…" : "Refine deck with AI", systemImage: "checkmark.seal",
-                                     disabled: isRefiningDeck || aiActivity != nil || refineCount(.everything) == 0,
-                                     help: "Checks every card against its own note and cleans up wording") {
-                    refineConfirmation = .everything
-                })
-            }
-            items.append(.action("Approve all drafts", systemImage: "checkmark.circle", disabled: draftCount == 0) {
-                try? store.approveAllDrafts(inDecks: scopeDeckIds)
-                load()
-            })
-            if hasSourceNotes {
-                items.append(.action("Rewrite out-of-date overviews", systemImage: "clock.arrow.circlepath",
-                                     disabled: staleOverviewCount == 0 || !isGeneratorAvailable) {
-                    contentTab = .overview
-                    rewriteOverviewsRequest = true
-                })
-            }
+        return PillMenu(title: "More", systemImage: "ellipsis", showsTitle: false) {
+            var items: [PillMenuItem] = [
+                .action(draftCount > 0 ? "Approve all drafts (\(draftCount))" : "Approve all drafts",
+                        systemImage: "checkmark.circle", disabled: draftCount == 0) {
+                    try? store.approveAllDrafts(inDecks: scopeDeckIds)
+                    load()
+                },
+                .action("Show files in this \(noun.lowercased())…", systemImage: "doc.on.doc") {
+                    showingDeckFiles = true
+                },
+                .action(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function") {
+                    showingCodeQuestions = true
+                },
+            ]
             if !duplicateGroups.isEmpty {
                 items.append(.action("Review duplicates…", systemImage: "square.on.square") {
                     showingDuplicateReview = true
                 })
             }
-            items.append(.divider)
-            items.append(.action("Show files in this \(noun.lowercased())", systemImage: "doc.on.doc") {
-                showingDeckFiles = true
-            })
-            items.append(.action(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function") {
-                showingCodeQuestions = true
-            })
             if case .deck(let id) = scope {
                 items.append(.divider)
                 items.append(.action("Delete deck…", systemImage: "trash", destructive: true) {
@@ -568,7 +600,6 @@ struct DeckDetailView: View {
             }
             return items
         }
-        .help("Refine, approve, rewrite overviews, files, problems, delete")
         .sheet(isPresented: $showingDeckFiles) {
             DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
         }
@@ -578,6 +609,70 @@ struct DeckDetailView: View {
                 onDeckDeleted()
             }
         }
+    }
+
+    /// The items both menus end with: files and study guides can be added
+    /// from either view, since Overview doesn't show the cards.
+    private var addSourceItems: [PillMenuItem] {
+        [
+            .action("Add files to this \(filesNoun.lowercased())…", systemImage: "doc.badge.plus",
+                    disabled: store.isImporting) { onAddFiles() },
+            .action("New study guide…", systemImage: "graduationcap",
+                    help: "Add a study guide for an exam in this course") { onAddStudyGuide() },
+        ]
+    }
+
+    /// Cards view: everything that puts cards or questions into the deck.
+    private var addMenuButton: some View {
+        PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
+            let aiBusy = aiActivity != nil
+            var items: [PillMenuItem] = [
+                .action("Generate questions with AI", ai: true,
+                        help: "Practice questions from this deck's notes, checked before they're kept") {
+                    showingCodeQuestions = true
+                },
+                .action(isGeneratingCards ? "Adding cards…" : "Add more cards with AI", ai: true,
+                        disabled: !isGeneratorAvailable || isGeneratingCards || aiBusy,
+                        help: isGeneratorAvailable ? "New draft flashcards from this deck's notes"
+                                                   : "Set up an AI model in Settings first") {
+                    showingGenerateSheet = true
+                },
+                .action(isRefiningDeck ? "Refining…" : "Refine deck with AI", ai: true,
+                        disabled: !isGeneratorAvailable || isRefiningDeck || aiBusy || refineCount(.everything) == 0,
+                        help: "Checks every card against its own note and cleans up wording") {
+                    refineConfirmation = .everything
+                },
+                .action("New card…", systemImage: "square.and.pencil",
+                        shortcut: (key: "n", modifiers: [.command, .shift])) { isCreatingCard = true },
+                .divider,
+            ]
+            items += addSourceItems
+            return items
+        }
+        .help("Generate questions, add cards, files or a study guide")
+    }
+
+    /// Overview view: rewriting the overviews, and adding sources.
+    private var editMenuButton: some View {
+        PillMenu(title: "Edit", systemImage: "pencil", isBusy: store.isImporting) {
+            var items: [PillMenuItem] = [
+                .action("Rewrite with AI", ai: true,
+                        disabled: !isGeneratorAvailable || overviewNoteCount == 0,
+                        help: "Rewrite every overview in this \(filesNoun.lowercased())") {
+                    requestOverviewRewrite(.all)
+                },
+                .action(staleOverviewCount > 0 ? "Rewrite out-of-date overviews (\(staleOverviewCount))"
+                                               : "Rewrite out-of-date overviews", ai: true,
+                        disabled: !isGeneratorAvailable || staleOverviewCount == 0,
+                        help: "Only the notes that changed since their overview was written") {
+                    requestOverviewRewrite(.stale)
+                },
+                .divider,
+            ]
+            items += addSourceItems
+            return items
+        }
+        .help("Rewrite overviews, add files or a study guide")
     }
 
     /// The same flow as the deck list's Delete: an empty deck goes at once,
@@ -681,31 +776,6 @@ struct DeckDetailView: View {
         return "Course"
     }
 
-    /// The one place to add anything: a card by hand, more cards by AI,
-    /// files, or a study guide. (The deck list's own "Add Guide" folded in
-    /// here.)
-    private var addMenuButton: some View {
-        let noun = filesNoun
-        return PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
-            var items: [PillMenuItem] = [
-                .action("New card…", systemImage: "square.and.pencil") { isCreatingCard = true },
-            ]
-            if isGeneratorAvailable {
-                items.append(.action(isGeneratingCards ? "Adding cards…" : "Add more cards with AI", systemImage: "sparkles",
-                                     disabled: isGeneratingCards || aiActivity != nil) {
-                    showingGenerateSheet = true
-                })
-            }
-            items.append(.divider)
-            items.append(.action("Add files to this \(noun.lowercased())…", systemImage: "doc.badge.plus",
-                                 disabled: store.isImporting) { onAddFiles() })
-            items.append(.action("New study guide…", systemImage: "graduationcap",
-                                 help: "Add a study guide for an exam in this course") { onAddStudyGuide() })
-            return items
-        }
-        .help("Add a card, more cards with AI, files or a study guide")
-    }
-
     private func refineCount(_ scope: RefineScope) -> Int {
         scope == .drafts ? draftCount : draftCount + activeCount
     }
@@ -792,17 +862,13 @@ struct DeckDetailView: View {
         }
     }
 
-    /// What needs attention, in one line at the top of the card list --
-    /// drafts waiting for review, overviews written before their note
-    /// changed, possible duplicates -- with one action. It scrolls away with
-    /// the cards rather than staying pinned; the other fixes (approve all,
-    /// rewrite overviews, review duplicates) are in More.
+    /// What needs attention in the cards, in one line at the top of the
+    /// list -- drafts waiting for review, possible duplicates -- with one
+    /// action. It scrolls away with the cards rather than staying pinned.
+    /// (The Overview has its own strip, for overviews out of date.)
     private var statusStrip: some View {
         var parts: [String] = []
         if draftCount > 0 { parts.append("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review") }
-        if staleOverviewCount > 0 {
-            parts.append("\(staleOverviewCount) overview\(staleOverviewCount == 1 ? "" : "s") out of date")
-        }
         if !duplicateGroups.isEmpty {
             parts.append("\(duplicateGroups.count) possible duplicate\(duplicateGroups.count == 1 ? "" : "s")")
         }
@@ -867,7 +933,7 @@ struct DeckDetailView: View {
         let cards = visibleCards
         let selection = cards.filter { selectedCardIds.contains($0.id) }.map(\.id)
         return List(selection: $selectedCardIds) {
-            if draftCount > 0 || staleOverviewCount > 0 || !duplicateGroups.isEmpty {
+            if draftCount > 0 || !duplicateGroups.isEmpty {
                 statusStrip
                     .selectionDisabled()
                     .listRowSeparator(.hidden)
@@ -1100,8 +1166,9 @@ struct DeckDetailView: View {
             previewCardId = nil
         }
         duplicateGroups = (try? store.duplicateGroups(inDecks: scopeDeckIds)) ?? []
-        staleOverviewCount = hasSourceNotes
-            ? ((try? store.deckOverview(inDecks: scopeDeckIds))?.staleEntries.count ?? 0) : 0
+        let overview = hasSourceNotes ? try? store.deckOverview(inDecks: scopeDeckIds) : nil
+        staleOverviewCount = overview?.staleEntries.count ?? 0
+        overviewNoteCount = (overview?.entries.count ?? 0) + (overview?.writable.count ?? 0)
     }
 
     private func setStatus(_ card: Card, _ status: CardStatus) {

@@ -1,14 +1,22 @@
 import SwiftUI
 import GRASPCore
 
+/// What the deck toolbar asked the Overview to rewrite.
+enum OverviewRewriteRequest: Equatable {
+    /// Notes changed since their overview was written.
+    case stale
+    /// Every note in scope, written or not.
+    case all
+}
+
 /// The Overview half of the deck view: every note behind this deck,
 /// summarised, in reading order.
 struct DeckOverviewView: View {
     @Environment(AppStore.self) private var store
     let scope: AppStore.DeckScope
-    /// Set from the deck's More menu ("Rewrite out-of-date overviews"):
-    /// asks to rewrite every stale note, then clears itself.
-    @Binding var rewriteStaleRequest: Bool
+    /// Set from the deck toolbar ("Rewrite with AI", "Rewrite out-of-date
+    /// overviews"): asks before writing, then clears itself.
+    @Binding var rewriteRequest: OverviewRewriteRequest?
     /// Hands a card back to `DeckDetailView`, which switches to Cards and
     /// selects it.
     let onOpenCard: (String) -> Void
@@ -76,12 +84,17 @@ struct DeckOverviewView: View {
             isGeneratorAvailable = await isAnyGeneratorAvailable()
         }
         .onChange(of: store.revision) { _, _ in load() }
-        .onChange(of: rewriteStaleRequest, initial: true) { _, requested in
-            guard requested else { return }
-            rewriteStaleRequest = false
+        .onChange(of: rewriteRequest, initial: true) { _, request in
+            guard let request else { return }
+            rewriteRequest = nil
             if overview == nil { load() }
-            let stale = overview?.staleEntries.map(\.materialId) ?? []
-            if !stale.isEmpty, !isWriting { prepare(stale) }
+            guard let overview, !isWriting else { return }
+            let ids: [String]
+            switch request {
+            case .stale: ids = overview.staleEntries.map(\.materialId)
+            case .all: ids = overview.entries.map(\.materialId) + overview.writable.map(\.materialId)
+            }
+            if !ids.isEmpty { prepare(ids) }
         }
         .sheet(isPresented: $showingConfirmation) {
             WriteOverviewsSheet(
@@ -156,6 +169,12 @@ struct DeckOverviewView: View {
     /// unrelated sections.
     private func lessonColumn(_ overview: DeckOverview) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            creditLine(overview)
+                .padding(.bottom, 12)
+            if !overview.staleEntries.isEmpty {
+                staleStrip(overview)
+                    .padding(.bottom, 28)
+            }
             ForEach(Array(overview.entries.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 {
                     Rectangle()
@@ -300,6 +319,55 @@ struct DeckOverviewView: View {
         .background(alignment: .bottom) {
             Rectangle().fill(GRASPColor.hairline).frame(height: 1)
         }
+    }
+
+    /// "Written by AI from 4 notes", plus how many are out of date.
+    private func creditLine(_ overview: DeckOverview) -> some View {
+        let notes = overview.entries.count
+        let stale = overview.staleEntries.count
+        return HStack(spacing: 6) {
+            Image(systemName: AIGlyph.symbol)
+                .font(.graspUI(size: 10, weight: .semibold))
+                .foregroundStyle(GRASPColor.accent)
+            Text("Written by AI from \(notes) note\(notes == 1 ? "" : "s")"
+                 + (stale > 0 ? " · \(stale) out of date" : ""))
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        }
+    }
+
+    /// The Overview's status strip -- at the top of the lessons, scrolling
+    /// with them, not pinned -- with its one action.
+    private func staleStrip(_ overview: DeckOverview) -> some View {
+        let stale = overview.staleEntries
+        return HStack(spacing: 10) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.graspUI(size: 12))
+                .foregroundStyle(GRASPColor.textTertiary)
+            Text(stale.count == 1
+                 ? "1 overview out of date: \(stale[0].title) changed since it was written"
+                 : "\(stale.count) overviews out of date")
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                prepare(stale.map(\.materialId))
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol)
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                    Text("Rewrite all")
+                }
+            }
+            .buttonStyle(GRASPQuietButton())
+            .disabled(isWriting || !isGeneratorAvailable)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
     }
 
     // MARK: - Loading and writing

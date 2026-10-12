@@ -236,9 +236,20 @@ struct BackBar: View {
 #if os(macOS)
 /// One entry in a `PillMenu`.
 enum PillMenuItem {
-    case action(_ title: String, systemImage: String? = nil, destructive: Bool = false,
-                disabled: Bool = false, help: String? = nil, perform: () -> Void)
+    /// `ai` marks an action the AI performs: it gets the yellow sparkle,
+    /// the one glyph GRASP uses for AI everywhere. `shortcut` is shown beside
+    /// the item (and works while the menu is open); the view registers the
+    /// same shortcut for when it isn't.
+    case action(_ title: String, systemImage: String? = nil, ai: Bool = false, destructive: Bool = false,
+                disabled: Bool = false, help: String? = nil,
+                shortcut: (key: String, modifiers: NSEvent.ModifierFlags)? = nil, perform: () -> Void)
     case divider
+}
+
+/// The glyph for anything the AI does -- buttons, menu items, "Rewrite
+/// all". Never used for a non-AI action.
+enum AIGlyph {
+    static let symbol = "sparkles"
 }
 
 /// A menu drawn as GRASP's outlined pill.
@@ -255,6 +266,9 @@ struct PillMenu: View {
     let title: String
     var systemImage: String? = nil
     var isBusy = false
+    /// False for the icon-only "⋯" pill; the title is still its
+    /// accessibility label.
+    var showsTitle = true
     let items: () -> [PillMenuItem]
     @State private var anchor = MenuAnchor()
 
@@ -266,14 +280,17 @@ struct PillMenu: View {
                 if isBusy {
                     ProgressView().controlSize(.small)
                 } else if let systemImage {
-                    Image(systemName: systemImage).font(.graspUI(size: 11, weight: .medium))
+                    Image(systemName: systemImage).font(.graspUI(size: 11, weight: showsTitle ? .medium : .bold))
                 }
-                Text(title)
-                Image(systemName: "chevron.down").font(.graspUI(size: 9, weight: .semibold))
+                if showsTitle {
+                    Text(title)
+                    Image(systemName: "chevron.down").font(.graspUI(size: 9, weight: .semibold))
+                }
             }
         }
         .buttonStyle(GRASPQuietButton())
         .background(MenuAnchorView(anchor: anchor))
+        .help(showsTitle ? "" : title)
         .accessibilityLabel("\(title) menu")
         .accessibilityAddTraits(.isButton)
     }
@@ -283,6 +300,11 @@ struct PillMenu: View {
 @MainActor
 final class MenuAnchor {
     fileprivate weak var view: NSView?
+    /// The menu on screen, if any, so a view change can close it.
+    private static weak var openMenu: NSMenu?
+
+    /// Closes whichever pill menu is open.
+    static func closeOpenMenu() { openMenu?.cancelTracking() }
 
     func present(_ items: [PillMenuItem]) {
         guard let view else { return }
@@ -293,14 +315,21 @@ final class MenuAnchor {
             switch item {
             case .divider:
                 menu.addItem(.separator())
-            case .action(let title, let systemImage, let destructive, let disabled, let help, let perform):
+            case .action(let title, let systemImage, let ai, let destructive, let disabled, let help, let shortcut, let perform):
                 let handler = MenuHandler(perform)
                 handlers.append(handler)
                 let menuItem = NSMenuItem(title: title, action: #selector(MenuHandler.run), keyEquivalent: "")
                 menuItem.target = handler
                 menuItem.isEnabled = !disabled
                 menuItem.toolTip = help
-                if let systemImage {
+                if let shortcut {
+                    menuItem.keyEquivalent = shortcut.key.lowercased()
+                    menuItem.keyEquivalentModifierMask = shortcut.modifiers
+                }
+                if ai {
+                    menuItem.image = NSImage(systemSymbolName: AIGlyph.symbol, accessibilityDescription: "AI")?
+                        .withSymbolConfiguration(.init(paletteColors: [NSColor(GRASPColor.accent)]))
+                } else if let systemImage {
                     menuItem.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
                 }
                 if destructive {
@@ -315,6 +344,7 @@ final class MenuAnchor {
         }
         // Keeps the handlers alive while the menu is open; `popUp` returns
         // only once it closes, after any chosen item has run.
+        MenuAnchor.openMenu = menu
         withExtendedLifetime(handlers) {
             menu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 4), in: view)
         }
