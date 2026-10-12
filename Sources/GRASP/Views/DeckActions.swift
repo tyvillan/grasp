@@ -92,9 +92,9 @@ struct DeckRenameSheet: View {
 /// prompt at all. `onConfirm` receives the chosen target deck id, or nil
 /// for "delete the cards too".
 struct DeckDeleteSheet: View {
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let deck: Deck
-    let cardCount: Int
     let siblings: [Deck]
     let onConfirm: (String?) -> Void
 
@@ -102,14 +102,18 @@ struct DeckDeleteSheet: View {
     @State private var choice: Choice
     @State private var targetId: String?
 
-    init(deck: Deck, cardCount: Int, siblings: [Deck], onConfirm: @escaping (String?) -> Void) {
+    init(deck: Deck, siblings: [Deck], onConfirm: @escaping (String?) -> Void) {
         self.deck = deck
-        self.cardCount = cardCount
         self.siblings = siblings
         self.onConfirm = onConfirm
         _choice = State(initialValue: siblings.isEmpty ? .deleteAll : .move)
         _targetId = State(initialValue: siblings.first?.id)
     }
+
+    /// Read from the database when the sheet draws, not handed in by the
+    /// caller: a count captured before the sheet opened showed "0 cards"
+    /// for a deck that had just been filled.
+    private var cardCount: Int { (try? store.deckCardCount(deck.id)) ?? 0 }
 
     private var cardWord: String { cardCount == 1 ? "card" : "cards" }
 

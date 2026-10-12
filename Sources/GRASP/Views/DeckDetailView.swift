@@ -170,7 +170,6 @@ struct DeckDetailView: View {
     @State private var deletingDeck: Deck?
     @State private var renamingDeck: Deck?
     @State private var datingDeck: Deck?
-    @State private var deletingDeckCardCount = 0
     /// While set, approving the previewed draft moves on to the next one.
     @State private var reviewingDrafts = false
     @State private var unfinishedTest: Study.UnfinishedTest?
@@ -661,7 +660,7 @@ struct DeckDetailView: View {
             DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
         }
         .sheet(item: $deletingDeck) { deck in
-            DeckDeleteSheet(deck: deck, cardCount: deletingDeckCardCount, siblings: siblingDecks) { targetId in
+            DeckDeleteSheet(deck: deck, siblings: siblingDecks) { targetId in
                 try? store.deleteDeck(deck.id, migrateCardsTo: targetId)
                 onDeckDeleted()
             }
@@ -735,7 +734,6 @@ struct DeckDetailView: View {
             try? store.deleteDeck(id, migrateCardsTo: nil)
             onDeckDeleted()
         } else {
-            deletingDeckCardCount = count
             deletingDeck = deck
         }
     }

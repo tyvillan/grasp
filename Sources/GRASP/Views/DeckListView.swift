@@ -57,7 +57,6 @@ struct DeckListView: View {
     @State private var renamingDeck: Deck?
     @State private var settingLectureDateFor: Deck?
     @State private var deletingDeck: Deck?
-    @State private var deletingDeckCardCount = 0
     @State private var dropTargetDeckId: String?
     @Namespace private var selection
 
@@ -142,7 +141,7 @@ struct DeckListView: View {
         }
         .sheet(item: $deletingDeck) { deck in
             DeckDeleteSheet(
-                deck: deck, cardCount: deletingDeckCardCount,
+                deck: deck,
                 siblings: decks.filter { $0.id != deck.id }
             ) { targetId in
                 try? store.deleteDeck(deck.id, migrateCardsTo: targetId)
@@ -205,7 +204,6 @@ struct DeckListView: View {
             if selectedDeckId == deck.id { selectedDeckId = Self.allCardsId }
             load()
         } else {
-            deletingDeckCardCount = count
             deletingDeck = deck
         }
     }
