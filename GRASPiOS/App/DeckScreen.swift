@@ -20,6 +20,25 @@ struct DeckScreen: View {
     @State private var query = ""
     @State private var creatingCard = false
     @State private var aiMessage: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var learnLevels: [String: LearnEngine.Level] = [:]
+    @State private var filter: CardFilter = .all
+    @State private var editMode: EditMode = .inactive
+    @State private var selection: Set<String> = []
+    /// Cards a generation run has written so far, newest first.
+    @State private var recentAIIds: [String] = []
+    @State private var seenIds: Set<String> = []
+    @State private var liveSourceTitle: String?
+    @State private var sourceTitles: [String: String] = [:]
+    @State private var hasLoaded = false
+    @State private var courseFileCount = 0
+    @State private var notice: String?
+    @State private var generationFinished = 0
+
+    private enum CardFilter: String, CaseIterable, Identifiable {
+        case all = "All", drafts = "Drafts", due = "Due", understood = "Understood"
+        var id: String { rawValue }
+    }
 
     private var courseId: String? { store.courseId(of: route.scope) }
 
@@ -37,19 +56,47 @@ struct DeckScreen: View {
     private var activeCount: Int { cards.filter { $0.status == .active }.count }
     private var draftCount: Int { cards.filter { $0.status == .draft }.count }
 
+    private func matches(_ card: Card, _ filter: CardFilter) -> Bool {
+        switch filter {
+        case .all: return true
+        case .drafts: return card.status == .draft
+        case .due: return card.status == .active && card.due <= Date()
+        case .understood: return card.status == .active && learnLevels[card.id] == .mastered
+        }
+    }
+
+    private func count(_ filter: CardFilter) -> Int { cards.filter { matches($0, filter) }.count }
+
     private var shownCards: [Card] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return cards }
-        return cards.filter { $0.front.localizedCaseInsensitiveContains(q) || $0.back.localizedCaseInsensitiveContains(q) }
+        var base = cards.filter { matches($0, filter) }
+        if !q.isEmpty {
+            base = base.filter { $0.front.localizedCaseInsensitiveContains(q) || $0.back.localizedCaseInsensitiveContains(q) }
+        }
+        // A generation run's cards lead the list while it's fresh.
+        guard !recentAIIds.isEmpty else { return base }
+        let recent = Set(recentAIIds)
+        let byId = Dictionary(base.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return recentAIIds.compactMap { byId[$0] } + base.filter { !recent.contains($0.id) }
+    }
+
+    private var isGeneratingCards: Bool { runningJob?.activity.purpose == "add" }
+    private var selectedDrafts: [String] {
+        shownCards.filter { selection.contains($0.id) && $0.status == .draft }.map(\.id)
     }
 
     var body: some View {
-        List {
-            if let job = runningJob {
+        List(selection: $selection) {
+            if let job = runningJob, !isGeneratingCards {
                 Section {
                     AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(job.key) }, isInline: true)
                 }
                 .graspSection()
+            }
+            if hasLoaded && cards.isEmpty && !isGeneratingCards {
+                Section { emptyDeck }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             Section {
                 studyButtons
@@ -67,6 +114,10 @@ struct DeckScreen: View {
             case .overview: OverviewSection(deckIds: deckIds)
             }
         }
+        .environment(\.editMode, $editMode)
+        .overlay(alignment: .bottom) { floatingApproveBar }
+        .sensoryFeedback(.success, trigger: generationFinished)
+        .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -97,6 +148,14 @@ struct DeckScreen: View {
             CardCreator(deckChoices: deckChoices, deckId: deckChoices.first?.id)
         }
         .toolbar {
+            if tab == .cards, !cards.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(editMode == .active ? "Done" : "Select") {
+                        withAnimation { editMode = editMode == .active ? .inactive : .active }
+                        selection.removeAll()
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
         }
         .sheet(isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
@@ -115,7 +174,7 @@ struct DeckScreen: View {
             Section("AI") {
                 Button { refineDeck() } label: { Label("Refine Drafts with AI", systemImage: "checkmark.seal") }
                     .disabled(draftCount == 0)
-                Button { addCards() } label: { Label("Add Cards with AI", systemImage: "sparkles") }
+                Button { addCards() } label: { Label("Generate Questions", systemImage: "sparkles") }
                 Button { writeOverviews() } label: { Label("Write Overviews", systemImage: "text.book.closed") }
             }
             .disabled(!store.isGeneratorAvailable || runningJob != nil)
@@ -199,12 +258,44 @@ struct DeckScreen: View {
 
     @ViewBuilder
     private var cardSections: some View {
-        if draftCount > 0, query.isEmpty {
+        if isGeneratingCards {
+            Section { generatingStrip }.graspSection()
+        }
+        if !cards.isEmpty {
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(CardFilter.allCases) { option in
+                            let on = filter == option
+                            Button {
+                                withAnimation(Motion.snappy) { filter = option }
+                            } label: {
+                                Text("\(option.rawValue) \(count(option))")
+                                    .font(.graspUI(size: 13, weight: on ? .semibold : .medium))
+                                    .monospacedDigit()
+                                    .foregroundStyle(on ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 30)
+                                    .background(on ? GRASPColor.surfaceRaised : GRASPColor.inset, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(on ? GRASPColor.hairlineStrong : .clear))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+        if draftCount > 0, query.isEmpty, !isGeneratingCards {
             Section {
                 HStack {
                     Label("\(draftCount) awaiting review", systemImage: "circle.dashed")
                         .foregroundStyle(GRASPColor.accent)
                     Spacer()
+                    Button("Review drafts") { withAnimation(Motion.snappy) { filter = .drafts } }
+                        .font(.graspSubheadline.weight(.semibold))
                     Button("Approve All") {
                         try? store.approveAllDrafts(inDecks: deckIds)
                         load()
@@ -216,8 +307,12 @@ struct DeckScreen: View {
         }
         Section("\(shownCards.count) cards") {
             ForEach(shownCards) { card in
-                Button { editing = card } label: { CardRowView(card: card) }
+                Button { editing = card } label: {
+                    CardRowView(card: card, mastery: learnLevels[card.id] ?? .new,
+                                sourceTitle: card.materialId.flatMap { sourceTitles[$0] })
+                }
                     .buttonStyle(.plain)
+                    .tag(card.id)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             try? store.deleteCard(card.id)
@@ -275,8 +370,159 @@ struct DeckScreen: View {
     private func load() {
         let ids = deckIds
         cards = (try? store.cards(inDecks: ids)) ?? []
+        learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
+        hasLoaded = true
+        loadSourceTitles()
+        if filter == .drafts, !cards.contains(where: { $0.status == .draft }) { filter = .all }
+        if cards.isEmpty, let courseId { courseFileCount = (try? store.materialCount(inCourse: courseId)) ?? 0 }
+    }
+
+    private func loadSourceTitles() {
+        for id in Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil }) where sourceTitles[id] == nil {
+            if let material = (try? store.material(id)) ?? nil { sourceTitles[id] = material.title }
+        }
+    }
+
+    /// While a card-writing job runs, read the deck about twice a second:
+    /// each note's cards are written as the note finishes, so they arrive
+    /// in the list one batch at a time. A success haptic when it ends.
+    private func watchGeneration() async {
+        guard isGeneratingCards else {
+            if !seenIds.isEmpty { generationFinished += 1; seenIds = [] }
+            return
+        }
+        seenIds = Set(cards.map(\.id))
+        recentAIIds = []
+        liveSourceTitle = nil
+        while !Task.isCancelled, isGeneratingCards {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let fresh = try? store.cards(inDecks: deckIds) else { continue }
+            let arrivals = fresh.filter { !seenIds.contains($0.id) }.sorted { $0.createdAt > $1.createdAt }
+            guard !arrivals.isEmpty else { continue }
+            seenIds.formUnion(arrivals.map(\.id))
+            if let source = arrivals.first(where: { $0.materialId != nil })?.materialId,
+               let material = (try? store.material(source)) ?? nil {
+                liveSourceTitle = material.title
+            }
+            recentAIIds = arrivals.map(\.id) + recentAIIds
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+                cards = fresh
+                loadSourceTitles()
+            }
+        }
+    }
+
+    // MARK: - Generating and empty states
+
+    private var generatingStrip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: AIGlyph.symbol)
+                .font(.graspUI(size: 13, weight: .semibold))
+                .foregroundStyle(GRASPColor.accent)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+            Text(liveSourceTitle.map { "Generating from \($0)…" } ?? "Generating from your notes…")
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text("\(recentAIIds.count) card\(recentAIIds.count == 1 ? "" : "s")")
+                .graspType(.meta)
+                .monospacedDigit()
+                .foregroundStyle(GRASPColor.textSecondary)
+            if let job = runningJob {
+                Button("Stop") { store.stopAIJob(job.key) }
+                    .font(.graspUI(size: 13, weight: .semibold))
+            }
+        }
+    }
+
+    private var emptyDeck: some View {
+        let hasFiles = courseFileCount > 0
+        return VStack(spacing: 12) {
+            if hasFiles {
+                Button { generateFromCourse() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: AIGlyph.symbol).foregroundStyle(GRASPColor.accent)
+                        Text("Generate questions from your notes").font(.graspUI(size: 15, weight: .semibold))
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 48)
+                }
+                .buttonStyle(GRASPQuietButton())
+                .disabled(!store.isGeneratorAvailable)
+                Text(store.isGeneratorAvailable ? "Uses the files in this course" : "Set up an AI model in Settings → AI")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+            } else {
+                Label("Add this course's files on your Mac first", systemImage: "doc.badge.plus")
+                    .font(.graspUI(size: 15, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                Text("Questions are written from a course's notes. Generate questions is waiting for them.")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
+            if let notice {
+                HStack(spacing: 8) {
+                    Text(notice).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                    if hasFiles { Button("Retry") { generateFromCourse() } }
+                }
+            }
+            Button("Add a card manually") { creatingCard = true }
+                .font(.graspUI(size: 14, weight: .medium))
+                .foregroundStyle(GRASPColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+    }
+
+    private func generateFromCourse() {
+        guard let courseId, let deckId = deckIds.first else { return }
+        notice = nil
+        let run = AIActivity(headline: "Writing cards for \(route.name) with AI", purpose: "add")
+        store.runAIJob(store.cardJobKey(courseId: courseId), activity: run) { [store] run in
+            do {
+                let outcome = try await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                    try await store.generateCards(fromCourse: courseId, intoDeck: deckId)
+                }
+                switch outcome {
+                case .noMaterials: courseFileCount = 0
+                case .generated(let created, _, _):
+                    if created == 0 && !run.stopRequested { notice = "Nothing came out of these notes." }
+                }
+            } catch let error as CardAI.CourseGenerationError {
+                switch error {
+                case .generatorUnavailable: notice = "No AI model is reachable. Check Settings → AI."
+                case .noReadableNotes: notice = "No readable text in this course's files."
+                case .deckMissing: notice = "This deck no longer exists."
+                case .writeFailed(let created, let reason):
+                    notice = (created > 0 ? "Stopped after \(created). " : "") + "Couldn't save: \(reason)"
+                }
+            } catch {
+                notice = error.localizedDescription
+            }
+            load()
+        }
+    }
+
+    @ViewBuilder private var floatingApproveBar: some View {
+        let drafts = selectedDrafts
+        if editMode == .active, !drafts.isEmpty {
+            Button {
+                try? store.bulkSetStatus(drafts, status: .active)
+                selection.removeAll()
+                load()
+            } label: {
+                Text("Approve \(drafts.count) selected")
+                    .font(.graspUI(size: 15, weight: .semibold))
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(GRASPQuietButton())
+            .background(GRASPColor.surfaceRaised, in: Capsule())
+            .padding(.bottom, 14)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 }
 
@@ -309,28 +555,58 @@ private struct StudyModeButton: View {
 
 private struct CardRowView: View {
     let card: Card
+    let mastery: LearnEngine.Level
+    let sourceTitle: String?
+
+    /// Mastery as cream at three strengths; nothing known is the hairline.
+    private var railTint: Color {
+        switch card.status {
+        case .draft: return GRASPColor.hairlineStrong
+        case .suspended: return GRASPColor.rejected
+        case .active:
+            switch mastery {
+            case .new: return GRASPColor.hairlineStrong
+            case .recognition: return GRASPColor.textPrimary.opacity(0.3)
+            case .recall: return GRASPColor.textPrimary.opacity(0.6)
+            case .mastered: return GRASPColor.textPrimary
+            }
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(card.front)
-                    .graspType(.rowTitle)
-                    .foregroundStyle(GRASPColor.textPrimary)
-                    .lineLimit(2)
-                Spacer(minLength: 6)
-                switch card.status {
-                case .draft:
-                    PreviewChip(text: "Draft", tint: GRASPColor.accent, tintSoft: GRASPColor.accentSoft)
-                case .suspended:
-                    PreviewChip(text: "Suspended", tint: GRASPColor.rejected, tintSoft: GRASPColor.rejectedSoft)
-                default:
-                    EmptyView()
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(railTint)
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if card.origin == .aiGenerated && card.status == .draft {
+                        Image(systemName: AIGlyph.symbol)
+                            .font(.graspUI(size: 11, weight: .semibold))
+                            .foregroundStyle(GRASPColor.accent)
+                    }
+                    Text(card.front)
+                        .graspType(.rowTitle)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .lineLimit(2)
+                    Spacer(minLength: 6)
+                    Text(CardRowStatus.text(for: card))
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                }
+                Text(card.back)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(3)
+                if card.origin == .aiGenerated, let sourceTitle {
+                    Text("from \(sourceTitle)")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
                 }
             }
-            Text(card.back)
-                .graspType(.meta)
-                .foregroundStyle(GRASPColor.textSecondary)
-                .lineLimit(3)
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
