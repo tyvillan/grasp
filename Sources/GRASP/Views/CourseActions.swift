@@ -115,15 +115,15 @@ struct CourseEditSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Edit Course").font(.headline)
+            Text("Edit Course").font(.graspHeadline)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Name").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+                Text("Name").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                 TextField("Course name", text: $course.name)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Course code").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+                Text("Course code").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                 TextField("e.g. COP 3014", text: Binding(
                     get: { course.code ?? "" },
                     set: { course.code = $0.isEmpty ? nil : $0 }
@@ -131,7 +131,7 @@ struct CourseEditSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Color").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+                Text("Color").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                 HStack(spacing: 8) {
                     ForEach(Self.palette, id: \.hex) { swatch in
                         Button {
@@ -158,7 +158,7 @@ struct CourseEditSheet: View {
                 TimelineField(text: $timelineText, allowsNoTimeline: true)
                 if course.folderPath != nil {
                     Text("Changing this here sticks -- re-importing the vault never overwrites a course's timeline once it's set.")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.textSecondary)
                 }
             }
@@ -167,21 +167,21 @@ struct CourseEditSheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 if let folderPath = course.folderPath {
-                    Text("Source folder").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+                    Text("Source folder").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                     Text(folderPath)
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.head)
                         .textSelection(.enabled)
                 } else {
                     Text("Added by hand -- no vault folder, so importing won't add notes to it.")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.textSecondary)
                 }
                 if let noteCount {
                     Text("\(noteCount) imported file\(noteCount == 1 ? "" : "s")")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.textSecondary)
                 }
             }
@@ -216,18 +216,5 @@ struct CourseEditSheet: View {
         .task {
             noteCount = try? store.materialCount(inCourse: course.id)
         }
-    }
-}
-
-extension Color {
-    /// Six-digit RRGGBB, as stored in `course.colorHex`.
-    init(hex: String) {
-        var value: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&value)
-        self.init(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
-        )
     }
 }

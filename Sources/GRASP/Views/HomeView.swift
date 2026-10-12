@@ -160,14 +160,14 @@ struct HomeView: View {
     private var wordmark: some View {
         HStack(spacing: 10) {
             Text("G.R.A.S.P")
-                .font(.system(size: 11, weight: .bold))
+                .font(.graspUI(size: 11, weight: .bold))
                 .tracking(1.6)
                 .foregroundStyle(GRASPColor.accent)
             Rectangle()
                 .fill(GRASPColor.hairlineStrong)
                 .frame(width: 14, height: 1)
             expansion
-                .font(.system(size: 11, weight: .regular))
+                .font(.graspUI(size: 11, weight: .regular))
                 .tracking(0.3)
         }
     }
@@ -344,7 +344,7 @@ struct HomeView: View {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(deck.deckName)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.graspUI(size: 24, weight: .semibold))
                         .tracking(-0.5)
                         .foregroundStyle(GRASPColor.textPrimary)
                     Text(deck.courseName)
@@ -485,7 +485,7 @@ private struct ExamAlertRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Image(systemName: item.event.kind.icon)
-                    .font(.system(size: 13))
+                    .font(.graspUI(size: 13))
                     .foregroundStyle(urgencyTint)
                     .frame(width: 20)
 

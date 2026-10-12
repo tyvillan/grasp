@@ -44,6 +44,9 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_PATH/GRASP" "$APP_DIR/Contents/MacOS/GRASP"
 cp Info.plist "$APP_DIR/Contents/Info.plist"
+# GRASP's two typefaces (SIL OFL), registered at launch by GRASPFonts.
+mkdir -p "$APP_DIR/Contents/Resources/Fonts"
+cp Sources/GRASP/Shared/Fonts/*.ttf Sources/GRASP/Shared/Fonts/OFL-*.txt "$APP_DIR/Contents/Resources/Fonts/"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi

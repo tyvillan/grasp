@@ -330,7 +330,7 @@ struct FlowDiagramView: View {
         ForEach(nodes.indices, id: \.self) { index in
             if index > 0 {
                 Image(systemName: vertical ? "arrow.down" : "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.graspUI(size: 11, weight: .semibold))
                     .foregroundStyle(GRASPColor.textTertiary)
                     .padding(.leading, vertical ? 14 : 0)
             }
@@ -369,13 +369,13 @@ struct StepMapView: View {
                 HStack(spacing: 4) {
                     if index > 0 {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.graspUI(size: 9, weight: .bold))
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
                     Button { onSelect(index) } label: {
                         HStack(spacing: 5) {
                             Text("\(index + 1)")
-                                .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                .font(.graspUI(size: 10, weight: .bold).monospacedDigit())
                                 .foregroundStyle(index <= current ? GRASPColor.surface : tint)
                                 .frame(width: 16, height: 16)
                                 .background(index <= current ? tint : tint.opacity(0.15), in: Circle())
@@ -434,7 +434,7 @@ struct CodeSnippetView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.graspUI(size: 10, weight: .semibold))
                 Text((snippet.language ?? "code").uppercased())
                     .graspType(.eyebrow)
                 Spacer(minLength: 0)
@@ -443,7 +443,7 @@ struct CodeSnippetView: View {
                 Button {
                     Clipboard.copy(snippet.code)
                 } label: {
-                    Image(systemName: "doc.on.doc").font(.system(size: 11))
+                    Image(systemName: "doc.on.doc").font(.graspUI(size: 11))
                 }
                 .buttonStyle(.plain)
                 .help("Copy code")

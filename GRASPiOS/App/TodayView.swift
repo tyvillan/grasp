@@ -46,7 +46,7 @@ struct TodayView: View {
         let first = store.profile.name.split(separator: " ").first.map(String.init) ?? store.profile.name
         return VStack(alignment: .leading, spacing: 4) {
             Text("\(part), \(first)")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.graspUI(size: 22, weight: .semibold))
                 .foregroundStyle(GRASPColor.textPrimary)
             Text(totalDue == 0 ? "Nothing due right now -- a good moment to learn something new."
                                : "\(totalDue) card\(totalDue == 1 ? "" : "s") due across your courses.")
@@ -89,7 +89,7 @@ struct TodayView: View {
             Panel {
                 HStack(spacing: 14) {
                     Image(systemName: "play.fill")
-                        .font(.system(size: 16))
+                        .font(.graspUI(size: 16))
                         .foregroundStyle(GRASPColor.dynamic(light: 0xFFFFFF, dark: 0x16130C))
                         .frame(width: 42, height: 42)
                         .background(GRASPColor.accent, in: Circle())
@@ -152,7 +152,7 @@ struct TodayView: View {
                             .foregroundStyle(GRASPColor.accent)
                         if hasGuide {
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.graspUI(size: 12, weight: .semibold))
                                 .foregroundStyle(GRASPColor.textTertiary)
                         }
                     }
@@ -224,8 +224,8 @@ private struct StatTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: icon).font(.system(size: 14)).foregroundStyle(tint)
-            Text(value).font(.system(size: 24, weight: .semibold).monospacedDigit())
+            Image(systemName: icon).font(.graspUI(size: 14)).foregroundStyle(tint)
+            Text(value).font(.graspUI(size: 24, weight: .semibold).monospacedDigit())
                 .foregroundStyle(GRASPColor.textPrimary)
             Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
         }

@@ -101,7 +101,7 @@ struct FlashcardStudyView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.graspUI(size: 11, weight: .semibold))
                         .foregroundStyle(GRASPColor.textSecondary)
                         .frame(width: 22, height: 22)
                         .background(GRASPColor.surface, in: Circle())
@@ -137,7 +137,7 @@ struct FlashcardStudyView: View {
     private var completionView: some View {
         VStack(spacing: 0) {
             Text("Session complete")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.graspUI(size: 22, weight: .semibold))
                 .tracking(-0.4)
                 .foregroundStyle(GRASPColor.textPrimary)
 
@@ -330,7 +330,7 @@ private struct CardQuickEditSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Card").font(.headline)
+            Text("Edit Card").font(.graspHeadline)
             TextEditor(text: $card.front).frame(height: 60).border(.separator)
             TextEditor(text: $card.back).frame(height: 100).border(.separator)
             HStack {

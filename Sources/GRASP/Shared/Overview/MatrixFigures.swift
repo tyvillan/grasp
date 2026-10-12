@@ -281,7 +281,7 @@ struct RowReductionView: View {
                    compact: true)
             .opacity(0.8)
         Image(systemName: vertical ? "arrow.down" : "arrow.right")
-            .font(.system(size: 14, weight: .semibold))
+            .font(.graspUI(size: 14, weight: .semibold))
             .foregroundStyle(GRASPColor.accent)
         MatrixGrid(matrix: after, marks: marks(clearedCells(before, after, step), as: .cleared),
                    changedRow: step.kind == .swap ? nil : step.target - 1)
@@ -390,7 +390,7 @@ struct RowReductionView: View {
             .disabled(stop == lastStop)
         }
         .buttonStyle(.plain)
-        .font(.system(size: 12, weight: .semibold))
+        .font(.graspUI(size: 12, weight: .semibold))
         .foregroundStyle(GRASPColor.accent)
     }
 }
@@ -480,7 +480,7 @@ struct WorkedExampleView: View {
                     .foregroundStyle(GRASPColor.textTertiary)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.graspUI(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
                 .padding(.top, 2)
             }
@@ -490,7 +490,7 @@ struct WorkedExampleView: View {
     private func stepRow(index: Int, step: OverviewExampleStep) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("\(index + 1)")
-                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .font(.graspUI(size: 12, weight: .bold).monospacedDigit())
                 .foregroundStyle(tint)
                 .frame(width: 20, height: 20)
                 .background(tint.opacity(0.14), in: Circle())
@@ -596,7 +596,7 @@ struct TermContrastView: View {
     private func textRow(isExample: Bool, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: isExample ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(isExample ? GRASPColor.success : GRASPColor.rejected)
             (Text(isExample ? "Is: " : "Isn't: ").fontWeight(.semibold)
                 + Text(overviewInline(text)))

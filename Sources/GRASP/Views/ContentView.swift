@@ -382,9 +382,9 @@ private struct AddCourseSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Add a Course")
-                .font(.headline)
+                .font(.graspHeadline)
             Text("For a class with no vault folder yet -- import its notes later once you write them.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
             TextField("Course name (e.g. Intro to Software Design)", text: $name)
             TextField("Course code (optional, e.g. COP 3014)", text: $code)
@@ -421,9 +421,9 @@ private struct UploadToCourseSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Upload Document to Course")
-                .font(.headline)
+                .font(.graspHeadline)
             Text("Choose a course, then pick the files or folder to add to it.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
 
             List(selection: $selection) {

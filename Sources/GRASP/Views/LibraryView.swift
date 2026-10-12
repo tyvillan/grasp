@@ -34,12 +34,12 @@ struct LibraryView: View {
                     }
                     .disabled(store.isImporting)
                     Text(importSummaryText)
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Vault Path")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 8) {
                         TextField("", text: $store.vaultPath)
@@ -50,7 +50,7 @@ struct LibraryView: View {
                     }
                 }
                 Text("GRASP only reads from this folder -- it never writes to your Obsidian vault.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -67,11 +67,11 @@ struct LibraryView: View {
                 HStack {
                     Button("Scan All Courses for Duplicates…") { scanForDuplicatesAcrossAllCourses() }
                     if duplicateScanFoundNone {
-                        Text("No duplicates found").font(.caption).foregroundStyle(.secondary)
+                        Text("No duplicates found").font(.graspCaption).foregroundStyle(.secondary)
                     }
                 }
                 Text("Looks for near-identical cards across every course, not just within one. Nothing is removed automatically: you review each group and pick which card survives, or delete the whole group.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                 if let sweepActivity {
                     AIProgressStrip(
@@ -84,14 +84,14 @@ struct LibraryView: View {
                     Button("Check All Cards for Off-Topic Content…") { sweepAllCardsForContext() }
                 }
                 Text("Goes card by card against its own source note: a definition that reads like assignment instructions or a vague fragment is rewritten from the note's text, or removed if the note doesn't support one. Every change is listed afterwards and can be undone from the card's \"AI Refined\" badge.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                 if let warning = AIQuotaEstimate.warning(
                     needed: AIQuotaEstimate.contextCheckRequests(cards: store.deckCounts.values.reduce(0) { $0 + $1.cardCount }),
                     mode: store.aiMode
                 ), store.hasCloudKey {
                     Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -190,7 +190,7 @@ struct SettingsManagementRow: View {
                 Text("\(count)")
                     .foregroundStyle(.secondary)
                 Image(systemName: "chevron.right")
-                    .font(.caption2)
+                    .font(.graspCaption2)
                     .foregroundStyle(.secondary)
             }
         }
@@ -209,7 +209,7 @@ struct ArchivedCoursesSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Archived Courses").font(.headline)
+                Text("Archived Courses").font(.graspHeadline)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -235,7 +235,7 @@ struct ArchivedCoursesSheet: View {
                     }
                 }
                 Text("Hidden from the sidebar and dashboard, but their notes and cards are untouched.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                     .padding(20)
             }
@@ -255,7 +255,7 @@ struct ExcludedFoldersSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Excluded Folders").font(.headline)
+                Text("Excluded Folders").font(.graspHeadline)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -276,7 +276,7 @@ struct ExcludedFoldersSheet: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(URL(fileURLWithPath: path).lastPathComponent)
                             Text(path)
-                                .font(.caption2)
+                                .font(.graspCaption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.head)
@@ -287,7 +287,7 @@ struct ExcludedFoldersSheet: View {
                     }
                 }
                 Text("Skipped entirely on your next vault import. Adding files back to one of these folders re-includes it automatically.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                     .padding(20)
             }

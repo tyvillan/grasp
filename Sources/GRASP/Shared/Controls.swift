@@ -1,67 +1,67 @@
 import SwiftUI
 
-/// Buttons drawn to Mac metrics rather than left to `.borderedProminent`,
-/// which tints its fill from the window's accent and ends up a different
-/// amber from the rest of the app. These keep GRASP's own accent exactly,
-/// carry a real pressed state, and sit at the 28pt height a Mac control
-/// of this weight actually uses.
+/// The one primary action on a screen: a yellow pill with ink text. Lifts
+/// 2pt and brightens on hover, presses to 0.97. Every other button is a
+/// `GRASPQuietButton` (an outlined pill) -- one filled yellow button per
+/// screen is what keeps it loud.
 struct GRASPProminentButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    /// Defaults to the app's own accent, same as always -- pass `.success`
-    /// (or any other tint) for a same-shape button that needs to read as a
-    /// different verdict, e.g. a green "correct" action sitting beside a
-    /// normal accent-colored one.
-    var tint: Color = GRASPColor.accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Defaults to the brand yellow -- pass `.success` (or any other tint)
+    /// for a same-shape button that needs to read as a different verdict.
+    var tint: Color = GRASPColor.brand
+    @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
+        let lifted = isHovering && isEnabled && !configuration.isPressed && !reduceMotion
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .tracking(-0.1)
-            .foregroundStyle(isEnabled ? Color.black.opacity(0.88) : GRASPColor.textTertiary)
-            .padding(.horizontal, 14)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isEnabled ? tint : GRASPColor.surface)
-            )
-            .overlay(
-                // A one-pixel light edge along the top only: the way a
-                // physical control catches light, and what separates a
-                // filled button from a flat colored rectangle.
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(
-                        isEnabled ? Color.white.opacity(0.22) : GRASPColor.hairline,
-                        lineWidth: 1
-                    )
-                    .blendMode(isEnabled ? .plusLighter : .normal)
-            )
-            .opacity(configuration.isPressed ? 0.78 : 1)
-            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+            .font(.graspUI(size: 13.5, weight: .semibold))
+            .foregroundStyle(isEnabled ? GRASPColor.ink : GRASPColor.textTertiary)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 30)
+            .background(Capsule().fill(isEnabled ? tint : GRASPColor.surface))
+            .overlay(Capsule().strokeBorder(isEnabled ? .clear : GRASPColor.hairline, lineWidth: 1))
+            .brightness(lifted ? 0.05 : 0)
+            .offset(y: lifted ? -2 : 0)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .contentShape(Capsule())
+            .onHover { isHovering = $0 }
+            .animation(Motion.snappy, value: isHovering)
+            .animation(Motion.press, value: configuration.isPressed)
     }
 }
 
+/// The default button: an outlined pill, cream text, a 40% cream edge. On
+/// hover a raised fill sweeps in from the left.
 struct GRASPQuietButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .tracking(-0.1)
+            .font(.graspUI(size: 13.5, weight: .medium))
             .foregroundStyle(isEnabled ? GRASPColor.textPrimary : GRASPColor.textTertiary)
-            .padding(.horizontal, 14)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isHovering && isEnabled ? GRASPColor.surfaceRaised : GRASPColor.surface)
-            )
+            .padding(.horizontal, 16)
+            .frame(minHeight: 30)
+            .background(alignment: .leading) {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(GRASPColor.surfaceRaised)
+                        .frame(width: isHovering && isEnabled ? geo.size.width : (reduceMotion ? geo.size.width : 0))
+                        .opacity(isHovering && isEnabled ? 1 : 0)
+                }
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
+                Capsule().strokeBorder(
+                    GRASPColor.textPrimary.opacity(isEnabled ? 0.4 : 0.15), lineWidth: 1)
             )
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.75 : 1)
             .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+            .animation(Motion.sweep, value: isHovering)
+            .animation(Motion.press, value: configuration.isPressed)
     }
 }
 
@@ -74,7 +74,7 @@ struct GRASPVerdictButton: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
+            .font(.graspUI(size: 13, weight: .semibold))
             .tracking(-0.1)
             .foregroundStyle(tint)
             .frame(maxWidth: .infinity)
@@ -103,7 +103,7 @@ struct PreviewChip: View {
     var body: some View {
         HStack(spacing: 3) {
             if let icon {
-                Image(systemName: icon).font(.system(size: 8))
+                Image(systemName: icon).font(.graspUI(size: 8))
             }
             Text(text)
         }
@@ -114,17 +114,62 @@ struct PreviewChip: View {
     }
 }
 
-/// Small uppercase label that opens a section. Tracked positive, because
-/// capitals at 11pt jam together at default spacing.
+/// The label that opens a section -- GRASP's one recurring typographic
+/// signature: a 6pt yellow square (the brand dot), then the name in small
+/// tracked capitals.
 struct SectionLabel: View {
     let text: String
     init(_ text: String) { self.text = text }
 
     var body: some View {
-        Text(text)
-            .graspType(.eyebrow)
-            .textCase(.uppercase)
-            .foregroundStyle(GRASPColor.textTertiary)
+        HStack(spacing: 8) {
+            BrandDot(size: 6)
+            Text(text)
+                .graspType(.eyebrow)
+                .textCase(.uppercase)
+                .foregroundStyle(GRASPColor.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The small yellow square from the wordmark.
+struct BrandDot: View {
+    var size: CGFloat = 6
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
+            .fill(GRASPColor.brand)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A course's color dot (sidebar and calendar only -- never Home).
+struct CourseDot: View {
+    let color: Color?
+    var size: CGFloat = 8
+
+    var body: some View {
+        Circle()
+            .fill(color ?? GRASPColor.hairlineStrong)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// A GRASP card: the panel fill, a 14pt radius and a hairline edge. No
+    /// shadow -- depth comes from the surface steps.
+    func graspCard(padding: CGFloat = GRASPSpace.xl, fill: Color = GRASPColor.surface) -> some View {
+        self
+            .padding(padding)
+            .background(fill, in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+            )
     }
 }
 
@@ -137,10 +182,10 @@ struct Avatar: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(GRASPColor.accentSoft)
+            Circle().fill(GRASPColor.brand)
             Text(initials)
-                .font(.system(size: fontSize, weight: .bold, design: .rounded))
-                .foregroundStyle(GRASPColor.accent)
+                .font(.graspUI(size: fontSize, weight: .bold))
+                .foregroundStyle(GRASPColor.ink)
         }
         .frame(width: size, height: size)
     }

@@ -79,7 +79,7 @@ struct LearnRoundView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.graspUI(size: 11, weight: .semibold))
                         .foregroundStyle(GRASPColor.textSecondary)
                         .frame(width: 22, height: 22)
                         .background(GRASPColor.surface, in: Circle())
@@ -150,7 +150,7 @@ struct LearnRoundView: View {
         VStack(spacing: 0) {
             SectionLabel("Checkpoint")
             Text(checkpointHeadline)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.graspUI(size: 22, weight: .semibold))
                 .tracking(-0.4)
                 .foregroundStyle(GRASPColor.textPrimary)
                 .padding(.top, 8)
@@ -363,7 +363,7 @@ struct LearnRoundView: View {
                     )
             }
         }
-        .font(.system(size: 11, weight: .semibold))
+        .font(.graspUI(size: 11, weight: .semibold))
         .frame(width: 17, height: 17)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -434,7 +434,7 @@ struct LearnRoundView: View {
         VStack(spacing: 10) {
             TextField("Type the answer", text: $writtenAnswer)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.graspUI(size: 15))
                 .padding(.horizontal, 13)
                 .frame(height: 38)
                 .background(
@@ -479,7 +479,7 @@ struct LearnRoundView: View {
 
     private func verdictLabel(_ text: String, _ symbol: String, _ tint: Color) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 12))
+            Image(systemName: symbol).font(.graspUI(size: 12))
             Text(text).graspType(.body)
         }
         .foregroundStyle(tint)

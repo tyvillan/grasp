@@ -25,8 +25,8 @@ struct ProfileMenuButton: View {
                 HStack(spacing: 10) {
                     Avatar(name: store.profile.name, size: 40, fontSize: 16)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(store.profile.name).font(.headline)
-                        Text("Local profile").font(.caption).foregroundStyle(GRASPColor.textSecondary)
+                        Text(store.profile.name).font(.graspHeadline)
+                        Text("Local profile").font(.graspCaption).foregroundStyle(GRASPColor.textSecondary)
                     }
                 }
                 Divider()

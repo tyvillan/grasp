@@ -33,10 +33,10 @@ struct PracticeProblemsSheet: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "function")
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(GRASPColor.accent)
                 Text("Practice Problems: \(scopeName)")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text("Worked problems written from your notes: code to complete, calculations, matrices. Not flashcards, and "
@@ -111,11 +111,11 @@ struct PracticeProblemsSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(record.summary)
-                    .font(.caption.weight(.semibold))
+                    .font(.graspCaption.weight(.semibold))
                     .foregroundStyle(GRASPColor.accent)
                 if store.isCodeQuestionStale(record) {
                     Text("Note changed since")
-                        .font(.caption2)
+                        .font(.graspCaption2)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(GRASPColor.accentSoft, in: Capsule())
                 }
@@ -136,10 +136,10 @@ struct PracticeProblemsSheet: View {
                 if let problem = record.problem {
                     GuideText(text: problem.prompt, style: .body, color: GRASPColor.textPrimary)
                 } else {
-                    Text(record.promptText).font(.callout).lineLimit(3)
+                    Text(record.promptText).font(.graspCallout).lineLimit(3)
                 }
             } else if let question = record.question {
-                Text(question.prompt).font(.callout)
+                Text(question.prompt).font(.graspCallout)
                 Text(question.code)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
@@ -153,14 +153,14 @@ struct PracticeProblemsSheet: View {
                 if let choices = problem.choices {
                     ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
                         Text("\(["A", "B", "C", "D"][min(index, 3)])) \(choice)")
-                            .font(.callout)
+                            .font(.graspCallout)
                             .foregroundStyle(index == problem.correct ? GRASPColor.success : .primary)
                     }
                 } else {
                     answerLine(problem.answerText)
                 }
                 if let explanation = problem.explanation {
-                    Text(explanation).font(.callout).foregroundStyle(.secondary)
+                    Text(explanation).font(.graspCallout).foregroundStyle(.secondary)
                 }
                 footer(record)
             }
@@ -177,7 +177,7 @@ struct PracticeProblemsSheet: View {
     private func footer(_ record: TestQuestion) -> some View {
         Text(record.verifiedBy.prefix(1).uppercased() + record.verifiedBy.dropFirst()
              + (record.model.map { " · written by \($0)" } ?? ""))
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.graspCaption2).foregroundStyle(.tertiary)
     }
 
     private func banner(_ run: AppStore.CodeQuestionRunResult) -> some View {
@@ -188,7 +188,7 @@ struct PracticeProblemsSheet: View {
             Text(run.failure ?? "Saved \(run.saved) problem\(run.saved == 1 ? "" : "s")"
                  + (run.rejected > 0 ? " (\(run.rejected) didn't check out and were dropped" + (run.topReason.map { ", mostly because \($0)" } ?? "") + ")" : "")
                  + (run.wasStopped ? ", then stopped." : "."))
-                .font(.callout)
+                .font(.graspCallout)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button("Dismiss") { store.lastCodeQuestionRun = nil }.buttonStyle(.borderless)
@@ -223,18 +223,18 @@ struct PracticeProblemsSheet: View {
                       ? "Writing practice needs a Mac with Xcode's command line tools to check the answers."
                       : "No AI model is set up. Settings → AI has the setup.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(GRASPColor.rejected)
+                    .font(.graspCaption).foregroundStyle(GRASPColor.rejected)
             } else {
                 Text("Written by \(store.generatorStatus). About \(requests) request\(requests == 1 ? "" : "s"); "
                      + "with a cloud model several notes are written at once.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.graspCaption).foregroundStyle(.secondary)
                 if store.aiMode.usesCloud, store.hasCloudKey {
                     Label("The notes' text is sent to Google Gemini. Its free tier may use what you send to improve Google's products.",
                           systemImage: "cloud")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.graspCaption).foregroundStyle(.secondary)
                     if let warning = AIQuotaEstimate.warning(needed: requests, mode: store.aiMode) {
                         Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.graspCaption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -263,14 +263,14 @@ struct PracticeProblemsSheet: View {
     private func kindRow<Kind: Hashable>(_ title: String, _ kinds: [Kind], selection: Binding<Set<Kind>>,
                                          label: KeyPath<Kind, String>) -> some View {
         HStack(spacing: 14) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
+            Text(title).font(.graspCaption.weight(.semibold)).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
             ForEach(kinds, id: \.self) { kind in
                 Toggle(kind[keyPath: label], isOn: Binding(
                     get: { selection.wrappedValue.contains(kind) },
                     set: { if $0 { selection.wrappedValue.insert(kind) } else { selection.wrappedValue.remove(kind) } }
                 ))
                 .toggleStyle(.checkbox)
-                .font(.callout)
+                .font(.graspCallout)
             }
         }
     }

@@ -79,7 +79,7 @@ struct DeckFilesSheet: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Files in \(scopeName)")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.graspUI(size: 18, weight: .semibold))
                         .tracking(-0.3)
                         .foregroundStyle(GRASPColor.textPrimary)
                     Text(summary)
@@ -109,7 +109,7 @@ struct DeckFilesSheet: View {
         let exists = file.existsOnDisk
         return HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon(for: file.material.kind))
-                .font(.system(size: 15))
+                .font(.graspUI(size: 15))
                 .foregroundStyle(GRASPColor.accent)
                 .frame(width: 20)
                 .padding(.top, 1)
@@ -155,7 +155,7 @@ struct DeckFilesSheet: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 14))
+                    .font(.graspUI(size: 14))
                     .foregroundStyle(GRASPColor.textSecondary)
             }
             .menuStyle(.borderlessButton)

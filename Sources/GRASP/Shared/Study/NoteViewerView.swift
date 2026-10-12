@@ -26,10 +26,10 @@ struct NoteViewerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if let kicker = heading?.kicker {
                         Text(kicker)
-                            .font(.caption.weight(.semibold))
+                            .font(.graspCaption.weight(.semibold))
                             .foregroundStyle(GRASPColor.accent)
                     }
-                    Text(heading?.title ?? material?.title ?? "Note").font(.headline)
+                    Text(heading?.title ?? material?.title ?? "Note").font(.graspHeadline)
                 }
                 Spacer()
                 Toggle("Raw", isOn: $showRaw).toggleStyle(.button)
@@ -42,7 +42,7 @@ struct NoteViewerView: View {
             }
             if let path = material?.relativePath {
                 Text(path)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.graspCaption).foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .lineLimit(1)
                     .truncationMode(.head)

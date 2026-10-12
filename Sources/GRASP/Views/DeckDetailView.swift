@@ -171,7 +171,7 @@ struct DeckDetailView: View {
             .pickerStyle(.inline)
         } label: {
             Image(systemName: "arrow.up.arrow.down.circle")
-                .font(.system(size: 14))
+                .font(.graspUI(size: 14))
                 .foregroundStyle(GRASPColor.textSecondary)
         }
         .menuStyle(.borderlessButton)
@@ -451,7 +451,7 @@ struct DeckDetailView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(deckName)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.graspUI(size: 20, weight: .semibold))
                         .tracking(-0.4)
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(2)
@@ -532,9 +532,9 @@ struct DeckDetailView: View {
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
-                            .font(.system(size: 13))
+                            .font(.graspUI(size: 13))
                         Text(tab.rawValue)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.graspUI(size: 14, weight: .semibold))
                     }
                     .foregroundStyle(selected ? Color.black.opacity(0.88) : GRASPColor.textSecondary)
                     .padding(.horizontal, 18)
@@ -579,7 +579,7 @@ struct DeckDetailView: View {
         _ title: String, _ symbol: String, prominent: Bool, action: @escaping () -> Void
     ) -> some View {
         let label = HStack(spacing: 5) {
-            Image(systemName: symbol).font(.system(size: 11))
+            Image(systemName: symbol).font(.graspUI(size: 11))
             Text(title)
         }
         if prominent {
@@ -621,12 +621,12 @@ struct DeckDetailView: View {
                 if store.isImporting {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "plus").font(.system(size: 11))
+                    Image(systemName: "plus").font(.graspUI(size: 11))
                 }
                 Text("Add")
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.graspUI(size: 8, weight: .semibold))
             }
-            .font(.system(size: 13, weight: .semibold))
+            .font(.graspUI(size: 13, weight: .semibold))
             .tracking(-0.1)
             .foregroundStyle(Color.black.opacity(0.88))
             .padding(.horizontal, 14)
@@ -685,7 +685,7 @@ struct DeckDetailView: View {
                 if isRefiningDeck {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "checkmark.seal").font(.system(size: 11))
+                    Image(systemName: "checkmark.seal").font(.graspUI(size: 11))
                 }
                 Text(scope == .drafts ? "Refine Deck with AI" : "Refine with AI")
             }
@@ -791,7 +791,7 @@ struct DeckDetailView: View {
     private var draftNotice: some View {
         HStack(spacing: 10) {
             Image(systemName: "circle.dashed")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.accent)
             Text("\(draftCount) card\(draftCount == 1 ? "" : "s") awaiting review")
                 .graspType(.body)
@@ -805,7 +805,7 @@ struct DeckDetailView: View {
                 load()
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle").font(.system(size: 11))
+                    Image(systemName: "checkmark.circle").font(.graspUI(size: 11))
                     Text("Approve all")
                 }
             }
@@ -826,7 +826,7 @@ struct DeckDetailView: View {
         let cardCount = duplicateGroups.reduce(0) { $0 + $1.cards.count - 1 }
         return HStack(spacing: 10) {
             Image(systemName: "square.on.square")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.textSecondary)
             Text("\(duplicateGroups.count) possible duplicate group\(duplicateGroups.count == 1 ? "" : "s") (\(cardCount) extra card\(cardCount == 1 ? "" : "s"))")
                 .graspType(.body)
@@ -1110,12 +1110,12 @@ private struct RefineDeckConfirmationSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "checkmark.seal")
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(GRASPColor.accent)
                 Text(includesApproved
                      ? "Refine \(cardCount) Card\(cardCount == 1 ? "" : "s") with AI?"
                      : "Refine \(cardCount) Draft Card\(cardCount == 1 ? "" : "s") with AI?")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text(includesApproved
@@ -1178,7 +1178,7 @@ private struct RefineDeckConfirmationSheet: View {
     private func effectRow(icon: String, tint: Color, text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.graspUI(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 16)
                 .padding(.top, 1)
@@ -1206,9 +1206,9 @@ private struct GenerateCardsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add More Cards with AI").font(.headline)
+            Text("Add More Cards with AI").font(.graspHeadline)
             Text("The AI looks for concepts your notes mention but that don't have a card yet.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
 
             Picker("Amount", selection: $amountMode) {
@@ -1226,7 +1226,7 @@ private struct GenerateCardsSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Focus on (optional)").font(.caption).foregroundStyle(.secondary)
+                Text("Focus on (optional)").font(.graspCaption).foregroundStyle(.secondary)
                 TextField("e.g. mitosis phases", text: $topic)
                     .textFieldStyle(.roundedBorder)
             }
@@ -1302,7 +1302,7 @@ private struct CardPreviewPane: View {
             Spacer(minLength: 8)
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.graspUI(size: 10, weight: .semibold))
                     .foregroundStyle(GRASPColor.textSecondary)
                     .frame(width: 20, height: 20)
                     .background(GRASPColor.surface, in: Circle())
@@ -1321,7 +1321,7 @@ private struct CardPreviewPane: View {
     private var cardCanvas: some View {
         VStack(spacing: 0) {
             Text(card.front)
-                .font(.system(size: 19, weight: .medium))
+                .font(.graspUI(size: 19, weight: .medium))
                 .foregroundStyle(GRASPColor.textPrimary)
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
@@ -1333,7 +1333,7 @@ private struct CardPreviewPane: View {
                     .padding(.vertical, 16)
 
                 Text(card.back)
-                    .font(.system(size: 15))
+                    .font(.graspUI(size: 15))
                     .foregroundStyle(GRASPColor.textSecondary)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
@@ -1360,7 +1360,7 @@ private struct CardPreviewPane: View {
     private var flipHint: some View {
         HStack(spacing: 5) {
             Image(systemName: "hand.tap")
-                .font(.system(size: 9))
+                .font(.graspUI(size: 9))
             Text("Tap to reveal")
         }
         .graspType(.meta)
@@ -1436,7 +1436,7 @@ private struct CardPreviewPane: View {
     private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.textSecondary)
                 .frame(width: 26, height: 26)
                 .background(GRASPColor.surface, in: Circle())
@@ -1551,7 +1551,7 @@ private struct CardRow: View {
     private var previewButton: some View {
         Button(action: onPreview) {
             Image(systemName: "eye")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.textSecondary)
                 .frame(width: 24, height: 24)
                 .background(GRASPColor.surface, in: Circle())
@@ -1636,7 +1636,7 @@ private struct CardRow: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("AI Refined", systemImage: "checkmark.shield")
                 .foregroundStyle(GRASPColor.success)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.graspUI(size: 12, weight: .semibold))
 
             Text("The original extraction looked like assignment text or an off-topic fragment. The AI rewrote it using this card's own source note.")
                 .graspType(.meta)
@@ -1732,10 +1732,10 @@ struct DuplicateReviewSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Review Duplicates").font(.headline)
+                Text("Review Duplicates").font(.graspHeadline)
                 Text("\(groups.count) group\(groups.count == 1 ? "" : "s") found. Pick the card to keep in each group, "
                      + "or tap the selected card again to keep none and delete them all.")
-                    .font(.callout)
+                    .font(.graspCallout)
                     .foregroundStyle(.secondary)
             }
             .padding(20)
@@ -1755,7 +1755,7 @@ struct DuplicateReviewSheet: View {
 
             HStack {
                 Text(summary)
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(deletedCount > 0 ? GRASPColor.rejected : .secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -1799,14 +1799,14 @@ struct DuplicateReviewSheet: View {
         let current = choice(for: group)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(group.cards.count) near-identical cards").font(.subheadline.weight(.medium))
+                Text("\(group.cards.count) near-identical cards").font(.graspSubheadline.weight(.medium))
                 if group.hasCompetingHistory {
-                    Text("· multiple have review history").font(.caption).foregroundStyle(.orange)
+                    Text("· multiple have review history").font(.graspCaption).foregroundStyle(.orange)
                 }
                 Spacer()
                 if current == .deleteAll {
                     Label("All \(group.cards.count) will be deleted", systemImage: "trash")
-                        .font(.caption.weight(.semibold))
+                        .font(.graspCaption.weight(.semibold))
                         .foregroundStyle(GRASPColor.rejected)
                 }
             }
@@ -1825,7 +1825,7 @@ struct DuplicateReviewSheet: View {
                     Spacer()
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(.graspCaption)
             }
         }
         .padding(12)
@@ -1847,10 +1847,10 @@ struct DuplicateReviewSheet: View {
                     .foregroundStyle(isKept ? GRASPColor.accent : .secondary)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(card.front).font(.callout.weight(.medium)).strikethrough(isDeleted)
-                    Text(card.back).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    Text(card.front).font(.graspCallout.weight(.medium)).strikethrough(isDeleted)
+                    Text(card.back).font(.graspCaption).foregroundStyle(.secondary).lineLimit(3)
                     Text(memberMeta(card))
-                        .font(.caption2)
+                        .font(.graspCaption2)
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
                 Spacer(minLength: 0)
@@ -1893,7 +1893,7 @@ private struct CardCreateSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Card").font(.headline)
+            Text("New Card").font(.graspHeadline)
 
             HStack(spacing: 8) {
                 Picker("Course", selection: $selectedCourseId) {
@@ -1913,9 +1913,9 @@ private struct CardCreateSheet: View {
                 .disabled(decksInCourse.isEmpty)
             }
 
-            Text("Front").font(.caption).foregroundStyle(.secondary)
+            Text("Front").font(.graspCaption).foregroundStyle(.secondary)
             TextEditor(text: $front).frame(height: 60).border(.separator)
-            Text("Back").font(.caption).foregroundStyle(.secondary)
+            Text("Back").font(.graspCaption).foregroundStyle(.secondary)
             TextEditor(text: $back).frame(height: 100).border(.separator)
 
             HStack {
@@ -1960,10 +1960,10 @@ private struct CardEditSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Edit Card").font(.headline)
-            Text("Front").font(.caption).foregroundStyle(.secondary)
+            Text("Edit Card").font(.graspHeadline)
+            Text("Front").font(.graspCaption).foregroundStyle(.secondary)
             TextEditor(text: $card.front).frame(height: 60).border(.separator)
-            Text("Back").font(.caption).foregroundStyle(.secondary)
+            Text("Back").font(.graspCaption).foregroundStyle(.secondary)
             TextEditor(text: $card.back).frame(height: 100).border(.separator)
             HStack {
                 Spacer()

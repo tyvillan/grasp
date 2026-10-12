@@ -266,7 +266,7 @@ struct DeckOverviewView: View {
     private func failureNotice(_ failure: Failure) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.rejected)
             Text(failure.message)
                 .graspType(.body)
@@ -313,7 +313,7 @@ struct DeckOverviewView: View {
         let stale = overview.staleEntries
         return HStack(spacing: 10) {
             Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.accent)
             Text(stale.count == 1
                  ? "\(stale[0].title) changed since its overview was written"
@@ -481,10 +481,10 @@ struct WriteOverviewsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 10) {
                 Image(systemName: "text.book.closed")
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(GRASPColor.accent)
                 Text(noteCount == 1 ? "Write an overview?" : "Write overviews for \(noteCount) notes?")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
             }
@@ -538,7 +538,7 @@ struct WriteOverviewsSheet: View {
     private func effect(_ icon: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.accent)
                 .frame(width: 16)
             Text(text)
@@ -594,7 +594,7 @@ private struct LessonContents: View {
             onJump(anchor)
         } label: {
             Text(text)
-                .font(.system(size: 12, weight: isTitle ? .semibold : .regular))
+                .font(.graspUI(size: 12, weight: isTitle ? .semibold : .regular))
                 .foregroundStyle(isTitle ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)

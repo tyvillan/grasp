@@ -1,36 +1,48 @@
 import SwiftUI
+import CoreText
 #if os(macOS)
 import AppKit
 #else
 import UIKit
 #endif
 
-/// GRASP's palette: warm amber (the "highlighter" running through a real
-/// set of lecture notes) as the accent against a black ground, with a
-/// muted teal reserved for mastery/success states so it never competes
-/// with the amber. Each token is a dynamic platform color so it tracks the
-/// system appearance automatically, including live switches -- no
-/// environment threading needed at call sites.
+/// GRASP's palette: black and yellow are the brand, everything else is
+/// secondary. A near-black stage with warm cream text (never pure white on
+/// pure black), one loud yellow used sparingly -- the primary button, the
+/// selection, focus, the streak, progress and the single most important
+/// number on a screen -- and hairlines instead of shadows.
 ///
-/// The surfaces form a deliberate elevation ladder rather than a single
-/// "card color": `inset` (recessed wells -- progress tracks, fields),
-/// `canvas` (the ground), `surface` (a panel resting on it), and
-/// `surfaceRaised` (reserved for the one element per screen that should
-/// sit forward). Depth comes from those steps, so a 1px stroke is spent
-/// only where a real edge exists -- not stamped on every rectangle, which
-/// is what flattens a layout into a wall of identical boxes.
+/// Light mode is the same brand turned over: a warm cream page with ink
+/// text. Yellow stays the fill of the primary button and the selection in
+/// both, but yellow *text* on cream is unreadable, so `accent` (the text
+/// and icon tone) darkens to gold there while `brand` (the fill) does not.
+///
+/// The surfaces form an elevation ladder rather than a single "card color":
+/// `inset` (recessed wells -- progress tracks, fields), `canvas` (the
+/// ground), `surface` (a panel resting on it), and `surfaceRaised` (hover
+/// and selected). Depth comes from those steps, not shadows. Each token is
+/// a dynamic platform color, so it tracks the appearance live.
 enum GRASPColor {
-    static let canvas = dynamic(light: 0xF7F6F2, dark: 0x000000)
-    static let inset = dynamic(light: 0xEDEBE4, dark: 0x08080B)
-    static let surface = dynamic(light: 0xFFFFFF, dark: 0x101014)
-    static let surfaceRaised = dynamic(light: 0xFFFFFF, dark: 0x191920)
+    static let canvas = dynamic(light: 0xF7F4E3, dark: 0x0E100F)
+    static let inset = dynamic(light: 0xEEEAD4, dark: 0x0A0B0A)
+    /// The brief's `panel`: cards, sidebar, nested surfaces.
+    static let surface = dynamic(light: 0xFFFDF3, dark: 0x171917)
+    /// The brief's `panelRaised`: hover and selected surfaces.
+    static let surfaceRaised = dynamic(light: 0xFFFFFF, dark: 0x1F221F)
 
-    static let hairline = dynamic(light: 0xE6E3DA, dark: 0x1F1F27)
-    static let hairlineStrong = dynamic(light: 0xD3CFC3, dark: 0x2E2E3A)
+    static let hairline = dynamic(light: 0xE2DDC4, dark: 0x2C2E2A)
+    static let hairlineStrong = dynamic(light: 0xCFC9AC, dark: 0x3B3E38)
 
-    static let accent = dynamic(light: 0x9C6208, dark: 0xF2B84B)
-    static let accentSoft = dynamic(light: 0xF6E7C9, dark: 0x332B18)
-    static let accentMuted = dynamic(light: 0xC79A4A, dark: 0x8A6B2A)
+    /// Yellow as a fill: the primary button, the selection bar, progress,
+    /// the brand dot. The same in both modes; whatever sits on it is `ink`.
+    static let brand = Color(hex: "FFD43B")
+    /// Text and icons placed on `brand`.
+    static let ink = Color(hex: "0E100F")
+    /// Yellow as text or an icon on the page. Gold in light mode, where
+    /// the brand yellow on cream would fail contrast.
+    static let accent = dynamic(light: 0x7A5900, dark: 0xFFD43B)
+    static let accentSoft = dynamic(light: 0xFFF0B0, dark: 0x2E2912)
+    static let accentMuted = dynamic(light: 0xB08A1A, dark: 0xA08A35)
     static let success = dynamic(light: 0x14705E, dark: 0x5FC9B5)
     static let successSoft = dynamic(light: 0xDBEDE8, dark: 0x112824)
     /// A muted terracotta-red, reserved for a card's "Rejected" (suspended)
@@ -39,9 +51,12 @@ enum GRASPColor {
     static let rejected = dynamic(light: 0xB2453F, dark: 0xE08A83)
     static let rejectedSoft = dynamic(light: 0xF5DEDA, dark: 0x2E1714)
 
-    static let textPrimary = dynamic(light: 0x1A1B24, dark: 0xEFEEF6)
-    static let textSecondary = dynamic(light: 0x5F5E6D, dark: 0x9695A6)
-    static let textTertiary = dynamic(light: 0x8C8A97, dark: 0x646374)
+    /// The brief's `cream` (dark) and ink (light).
+    static let textPrimary = dynamic(light: 0x14160F, dark: 0xFFFCE1)
+    static let textSecondary = dynamic(light: 0x4A4A3E, dark: 0xB9B7A5)
+    /// The brief's `muted`. Never lighter than this for text: it is the
+    /// floor that still clears 4.5:1 on the canvas.
+    static let textTertiary = dynamic(light: 0x6A695B, dark: 0x8C8C7E)
 
     /// Retained under its original name so existing call sites keep
     /// meaning "the default edge" rather than having to pick a weight.
@@ -69,6 +84,50 @@ enum GRASPColor {
     }
 }
 
+/// Course colors: secondary to the brand, one hue per course in the current
+/// term, never yellow. Shown on the sidebar dot and on Calendar events --
+/// never on Home. Each has a darker light-mode twin so a course-colored
+/// label stays readable on cream.
+enum CoursePalette {
+    struct Slot: Identifiable, Equatable {
+        let name: String
+        /// What's stored in `Course.colorHex`: the dark-mode value.
+        let hex: String
+        let light: UInt32
+        var id: String { hex }
+        var color: Color { GRASPColor.dynamic(light: light, dark: UInt32(hex, radix: 16) ?? 0) }
+    }
+
+    static let slots: [Slot] = [
+        Slot(name: "Blue", hex: "4CC9F0", light: 0x0A7EA8),
+        Slot(name: "Mint", hex: "4FE0B6", light: 0x0E8F6C),
+        Slot(name: "Lilac", hex: "9D95FF", light: 0x5B50D6),
+        Slot(name: "Pink", hex: "FF8FD0", light: 0xC2338A),
+        Slot(name: "Coral", hex: "FF7A59", light: 0xC9431F),
+        Slot(name: "Lime", hex: "B6F36A", light: 0x4F7F10),
+    ]
+
+    /// A stored hex as a color: a palette slot gets its light-mode twin,
+    /// anything older (the previous swatches) is drawn as stored.
+    static func color(hex: String) -> Color {
+        let upper = hex.uppercased()
+        return slots.first { $0.hex == upper }?.color ?? Color(hex: hex)
+    }
+}
+
+extension Color {
+    /// Six-digit RRGGBB, as stored in `course.colorHex`.
+    nonisolated init(hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
 #if os(macOS)
 private typealias PlatformColor = NSColor
 #else
@@ -86,21 +145,87 @@ private extension PlatformColor {
     }
 }
 
+// MARK: - Fonts
+
+/// The two bundled families (both SIL OFL, licenses beside the files in
+/// `Shared/Fonts`): Bricolage Grotesque for display type, Instrument Sans for
+/// everything people read and click. Registered once, in-process, the first
+/// time any GRASP font is asked for. If registration fails -- a dev build run
+/// straight from `swift run`, where the files aren't in the bundle -- every
+/// helper falls back to the system font rather than to nothing.
+enum GRASPFonts {
+    nonisolated static let displaySemiBold = "BricolageGrotesque-24ptSemiBold"
+    nonisolated static let displayExtraBold = "BricolageGrotesque-72ptExtraBold"
+    nonisolated static let bodyRegular = "InstrumentSans-Regular"
+    nonisolated static let bodyMedium = "InstrumentSans-Medium"
+    nonisolated static let bodySemiBold = "InstrumentSans-SemiBold"
+    nonisolated static let bodyBold = "InstrumentSans-Bold"
+
+    /// Whether the bundled fonts are usable. Lazily computed, thread-safe.
+    nonisolated static let available: Bool = register()
+
+    nonisolated private static func register() -> Bool {
+        let bundle = Bundle.main
+        let urls = (bundle.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts") ?? [])
+            + (bundle.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? [])
+        for url in urls {
+            // Already registered (a second window, a relaunch in-process)
+            // is fine; the check below is what decides.
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+        let probe = CTFontCreateWithName(bodyRegular as CFString, 12, nil)
+        return (CTFontCopyPostScriptName(probe) as String) == bodyRegular
+    }
+}
+
+extension Font {
+    /// Display type: Bricolage Grotesque. `heavy` is the 800 cut used for
+    /// heroes and titles; otherwise the 600.
+    static func graspDisplay(_ size: CGFloat, heavy: Bool = true) -> Font {
+        guard GRASPFonts.available else { return .system(size: size, weight: heavy ? .heavy : .semibold) }
+        return .custom(heavy ? GRASPFonts.displayExtraBold : GRASPFonts.displaySemiBold, fixedSize: size)
+    }
+
+    /// UI and reading type: Instrument Sans at the nearest bundled weight.
+    static func graspUI(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        guard GRASPFonts.available else { return .system(size: size, weight: weight) }
+        let name: String
+        switch weight {
+        case .ultraLight, .thin, .light, .regular: name = GRASPFonts.bodyRegular
+        case .medium: name = GRASPFonts.bodyMedium
+        case .semibold: name = GRASPFonts.bodySemiBold
+        default: name = GRASPFonts.bodyBold
+        }
+        return .custom(name, fixedSize: size)
+    }
+
+    // The system text styles, mapped onto the GRASP families so a view that
+    // asked for "a caption" gets GRASP's caption rather than SF Pro's.
+    static var graspLargeTitle: Font { graspDisplay(30) }
+    static var graspTitle: Font { graspDisplay(22) }
+    static var graspTitle2: Font { graspDisplay(18) }
+    static var graspTitle3: Font { graspDisplay(16, heavy: false) }
+    static var graspHeadline: Font { graspUI(size: 14, weight: .semibold) }
+    static var graspSubheadline: Font { graspUI(size: 13) }
+    static var graspBody: Font { graspUI(size: 14) }
+    static var graspCallout: Font { graspUI(size: 13.5) }
+    static var graspFootnote: Font { graspUI(size: 12) }
+    static var graspCaption: Font { graspUI(size: 12) }
+    static var graspCaption2: Font { graspUI(size: 11) }
+}
+
 // MARK: - Typography
 
-/// The app's type scale. Sizes are deliberately far apart -- 32 / 17 / 13
-/// / 11 rather than four steps clustered around each other -- so hierarchy
-/// reads from contrast instead of from weight alone.
+/// The app's type scale. Display type (Bricolage) carries the screen and
+/// section titles and the big numbers; Instrument Sans carries everything
+/// people read and click. Body sits at 14-15, captions at 12-13: this is a
+/// dense working app, not a marketing page.
 ///
-/// Tracking is the part that stops this looking default-rendered. macOS
-/// swaps SF Pro Text for SF Pro Display around 20pt, and Apple's own
-/// display-size type is tracked *negative*: at 32pt the default spacing
-/// looks loose and unset. Small uppercase labels need the opposite,
-/// positive tracking, or the capitals jam together. Each case below
-/// carries the tracking its size actually wants.
+/// Tracking: display sizes go negative (about -0.02em), the small uppercase
+/// eyebrow goes positive (+0.08em) so its capitals don't jam together.
 enum GRASPType {
-    /// Dashboard greeting -- the one piece of type per screen that is
-    /// allowed to be large.
+    /// A screen title -- the one piece of type per screen that is allowed
+    /// to be large.
     case display
     /// A card or section headline.
     case title
@@ -120,26 +245,18 @@ enum GRASPType {
     /// rather than a headline's.
     case studyPrompt
     case studyAnswer
-    /// Long-form reading prose -- the lesson body. `.body` is a UI label at
-    /// 13pt: correct in a row, punishing over a page of paragraphs. 16 with
-    /// generous leading is where reading on screen stops feeling like work,
-    /// and at the lesson's 680pt measure it lands near 75 characters a line.
+    /// Long-form reading prose -- the lesson body. 16 with generous leading
+    /// is where reading on screen stops feeling like work.
     case prose
-    /// The lesson's opening question, set a step up from the body and in a
-    /// quieter colour -- a standfirst that pulls the reader in, not a
-    /// second title competing with the first.
+    /// The lesson's opening question, a step up from the body and in a
+    /// quieter colour -- a standfirst, not a second title.
     case lede
-    /// The lesson's title. The one large piece of type on the page, and
-    /// deliberately a claim rather than a topic, so it gets display sizing
-    /// and the negative tracking display sizes want.
+    /// The lesson's title: display type, a claim rather than a topic.
     case lessonTitle
-    /// A section heading inside the lesson. Headings here are full-sentence
-    /// claims, so they're set at a size that holds a sentence without
-    /// shouting -- well below the title, well above the body.
+    /// A section heading inside the lesson.
     case proseH2
     /// Code, and inline runs of it. One rung below `.prose` on purpose -- a
-    /// monospaced face has a wider advance at the same point size, so
-    /// matching 16 would make code read as larger than the prose around it.
+    /// monospaced face has a wider advance at the same point size.
     case mono
     /// A formula on its own line. Monospaced like `.mono`, but at reading
     /// size: this is content, not an annotation of it.
@@ -147,20 +264,20 @@ enum GRASPType {
 
     var font: Font {
         switch self {
-        case .display: return .system(size: 32, weight: .bold)
-        case .title: return .system(size: 17, weight: .semibold)
-        case .rowTitle: return .system(size: 13, weight: .medium)
-        case .eyebrow: return .system(size: 11, weight: .semibold)
-        case .body: return .system(size: 13, weight: .regular)
-        case .meta: return .system(size: 11, weight: .regular)
-        case .numeral: return .system(size: 28, weight: .semibold).monospacedDigit()
-        case .numeralSmall: return .system(size: 15, weight: .semibold).monospacedDigit()
-        case .studyPrompt: return .system(size: 26, weight: .regular)
-        case .studyAnswer: return .system(size: 17, weight: .regular)
-        case .prose: return .system(size: 16, weight: .regular)
-        case .lede: return .system(size: 19, weight: .regular)
-        case .lessonTitle: return .system(size: 30, weight: .bold)
-        case .proseH2: return .system(size: 21, weight: .semibold)
+        case .display: return .graspDisplay(36)
+        case .title: return .graspDisplay(18, heavy: false)
+        case .rowTitle: return .graspUI(size: 14, weight: .medium)
+        case .eyebrow: return .graspUI(size: 12, weight: .semibold)
+        case .body: return .graspUI(size: 14)
+        case .meta: return .graspUI(size: 12.5)
+        case .numeral: return .graspDisplay(30).monospacedDigit()
+        case .numeralSmall: return .graspDisplay(17, heavy: false).monospacedDigit()
+        case .studyPrompt: return .graspUI(size: 26)
+        case .studyAnswer: return .graspUI(size: 17)
+        case .prose: return .graspUI(size: 16)
+        case .lede: return .graspUI(size: 19)
+        case .lessonTitle: return .graspDisplay(32)
+        case .proseH2: return .graspDisplay(22, heavy: false)
         case .mono: return .system(size: 14, weight: .regular, design: .monospaced)
         case .formula: return .system(size: 16, weight: .regular, design: .monospaced)
         }
@@ -168,24 +285,20 @@ enum GRASPType {
 
     var tracking: CGFloat {
         switch self {
-        case .display: return -0.7
-        case .title: return -0.25
-        case .rowTitle: return -0.05
-        case .eyebrow: return 0.7
+        case .display: return -0.72
+        case .title: return -0.2
+        case .rowTitle: return 0
+        case .eyebrow: return 0.96
         case .body: return 0
-        case .meta: return 0.1
-        case .numeral: return -0.8
+        case .meta: return 0.05
+        case .numeral: return -0.6
         case .numeralSmall: return -0.2
         case .studyPrompt: return -0.4
         case .studyAnswer: return -0.1
-        // 16pt sits inside SF Pro Text's optically-correct range, so there
-        // is nothing to correct -- same reasoning as `.body`.
         case .prose: return 0
         case .lede: return -0.2
-        // Display sizes track negative, per this scale's own rule; 30 sits
-        // just under `.display`'s 32 and borrows most of its tracking.
-        case .lessonTitle: return -0.6
-        case .proseH2: return -0.35
+        case .lessonTitle: return -0.64
+        case .proseH2: return -0.4
         // A monospaced face's advances are already fixed; tracking one only
         // breaks the grid that makes it readable.
         case .mono, .formula: return 0
@@ -198,8 +311,6 @@ enum GRASPType {
         switch self {
         case .studyPrompt: return 6
         case .studyAnswer, .body: return 2
-        // A reading column wants more air than either -- the eye has to
-        // find the start of the next line unaided.
         case .prose: return 7
         case .lede: return 6
         case .lessonTitle: return 2
@@ -225,11 +336,11 @@ extension Font {
     /// Kept for call sites that need a bare `Font` (menus, `Text`
     /// concatenation) where the view modifier isn't reachable.
     static func graspHeading(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .semibold)
+        .graspDisplay(size, heavy: size >= 20)
     }
 
     static func graspNumber(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .semibold).monospacedDigit()
+        .graspDisplay(size, heavy: size >= 20).monospacedDigit()
     }
 
     /// Companion to the two above, for the `AttributedString` run
@@ -237,6 +348,84 @@ extension Font {
     /// attribute can't reach the `graspType` view modifier.
     static func graspMono(_ size: CGFloat) -> Font {
         .system(size: size, weight: .regular, design: .monospaced)
+    }
+}
+
+// MARK: - Spacing and shape
+
+/// A 4pt grid. The common gaps are 8, 12, 16, 24 and 32; sections sit
+/// 32-40 apart.
+enum GRASPSpace {
+    static let xs: CGFloat = 4
+    static let s: CGFloat = 8
+    static let m: CGFloat = 12
+    static let l: CGFloat = 16
+    static let xl: CGFloat = 24
+    static let xxl: CGFloat = 32
+    static let section: CGFloat = 40
+}
+
+enum GRASPRadius {
+    /// Cards and panels.
+    static let card: CGFloat = 14
+    /// Inner wells and rows inside a card.
+    static let inner: CGFloat = 10
+}
+
+// MARK: - Motion
+
+/// Every duration and curve in one place, so the feel can be tuned without
+/// hunting through views. Fast on purpose: motion must never delay input or
+/// slow down reviewing cards. Views that move things check Reduce Motion
+/// and use `Motion.fade` instead.
+enum Motion {
+    /// The default UI spring: a hover, a press, a selection moving.
+    static let snappy = Animation.spring(response: 0.35, dampingFraction: 0.8)
+    /// Panels and cards arriving.
+    static let settle = Animation.spring(response: 0.5, dampingFraction: 0.82)
+    /// A playful overshoot for small things: an icon tilting, a check.
+    static let bouncy = Animation.spring(response: 0.38, dampingFraction: 0.62)
+    /// What everything becomes under Reduce Motion.
+    static let fade = Animation.easeInOut(duration: 0.18)
+    /// The pressed state of a button.
+    static let press = Animation.easeOut(duration: 0.1)
+    /// The fill sweeping across an outlined pill on hover.
+    static let sweep = Animation.easeOut(duration: 0.22)
+    /// A progress bar or ring filling.
+    static let fill = Animation.spring(response: 0.45, dampingFraction: 0.85)
+    /// Gap between items in a staggered reveal.
+    static let stagger: Double = 0.05
+    /// The card flip.
+    static let flip = Animation.easeInOut(duration: 0.22)
+
+    /// `animation`, or a plain fade when Reduce Motion is on.
+    static func choose(_ animation: Animation, reduceMotion: Bool) -> Animation {
+        reduceMotion ? fade : animation
+    }
+}
+
+extension View {
+    /// A reveal on first appearance: slides up a few points and fades in,
+    /// `index` steps after the first. Just a fade under Reduce Motion.
+    func revealOnAppear(index: Int = 0, distance: CGFloat = 10) -> some View {
+        modifier(RevealOnAppear(index: index, distance: distance))
+    }
+}
+
+private struct RevealOnAppear: ViewModifier {
+    let index: Int
+    let distance: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : distance)
+            .onAppear {
+                withAnimation(Motion.choose(Motion.settle, reduceMotion: reduceMotion)
+                    .delay(Double(index) * Motion.stagger)) { shown = true }
+            }
     }
 }
 

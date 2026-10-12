@@ -111,7 +111,7 @@ struct ExamScreen: View {
                                             name: page.exam.title))
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "graduationcap.fill").font(.system(size: 18))
+                    Image(systemName: "graduationcap.fill").font(.graspUI(size: 18))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Study for this exam").graspType(.rowTitle)
                         Text(decks.filter { page.deckIds.contains($0.id) }.map(\.name).joined(separator: ", "))
@@ -120,7 +120,7 @@ struct ExamScreen: View {
                             .opacity(0.85)
                     }
                     Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "chevron.right").font(.graspUI(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .padding(14)

@@ -97,7 +97,7 @@ struct EmailSignInSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Sign in with email")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.graspUI(size: 18, weight: .semibold))
                 .foregroundStyle(GRASPColor.textPrimary)
             TextField("Email", text: $email)
                 .textFieldStyle(.roundedBorder)
@@ -198,7 +198,7 @@ struct AccountLinkSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Signed in as \(account.email ?? "your account")")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text(explanation)
                     .graspType(.body)

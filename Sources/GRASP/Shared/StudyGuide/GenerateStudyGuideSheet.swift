@@ -36,10 +36,10 @@ struct GenerateStudyGuideSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("New Study Guide").font(.headline)
+                Text("New Study Guide").font(.graspHeadline)
                 Text("Pick the courses and decks to practice. GRASP writes practice problems with worked answers, "
                      + "sample test questions and key terms from each deck's notes.")
-                    .font(.callout)
+                    .font(.graspCallout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -83,7 +83,7 @@ struct GenerateStudyGuideSheet: View {
                     .foregroundStyle(isOn ? GRASPColor.accent : GRASPColor.textTertiary)
                 Text(title).foregroundStyle(GRASPColor.textPrimary)
                 if let subtitle {
-                    Text(subtitle).font(.caption.weight(.semibold)).foregroundStyle(GRASPColor.accent)
+                    Text(subtitle).font(.graspCaption.weight(.semibold)).foregroundStyle(GRASPColor.accent)
                 }
                 Spacer(minLength: 0)
             }
@@ -96,7 +96,7 @@ struct GenerateStudyGuideSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Courses")
             if courses.isEmpty {
-                Text("No courses have decks yet.").font(.callout).foregroundStyle(.secondary)
+                Text("No courses have decks yet.").font(.graspCallout).foregroundStyle(.secondary)
             }
             ForEach(courses) { course in
                 checkRow(course.name, isOn: selectedCourses.contains(course.id)) { toggle(course) }
@@ -115,7 +115,7 @@ struct GenerateStudyGuideSheet: View {
                     if allOn { decks.forEach { selectedDecks.remove($0.id) } } else { decks.forEach { selectedDecks.insert($0.id) } }
                 }
                 .buttonStyle(.plain)
-                .font(.caption)
+                .font(.graspCaption)
                 .foregroundStyle(GRASPColor.accent)
             }
             ForEach(decks) { deck in
@@ -148,27 +148,27 @@ struct GenerateStudyGuideSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             if !store.isGeneratorAvailable {
                 Label("No AI model is set up. Settings → AI has the setup.", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(GRASPColor.rejected)
             } else {
                 Text("Written by \(store.generatorStatus).")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                 if store.aiMode.usesCloud, store.hasCloudKey {
                     Label("Your notes for these decks are sent to Google Gemini. Its free tier may use what you send "
                           + "to improve Google's products.", systemImage: "cloud")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(.secondary)
                     if let warning = AIQuotaEstimate.warning(needed: requestEstimate, mode: store.aiMode) {
                         Label(warning, systemImage: "gauge.with.dots.needle.67percent")
-                            .font(.caption)
+                            .font(.graspCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             HStack {
                 Text(selectedDecks.isEmpty ? "Nothing selected" : summary)
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }

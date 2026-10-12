@@ -37,7 +37,7 @@ private struct GeneralSettingsTab: View {
                         .monospacedDigit()
                 }
                 Text("Sets the progress bar on Home and what counts as a full day. Your study streak counts any day with at least one review, whatever the goal -- so a light day still keeps it alive.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -53,7 +53,7 @@ private struct GeneralSettingsTab: View {
                         .monospacedDigit()
                 }
                 Text("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -142,14 +142,14 @@ private struct AISettingsTab: View {
             .pickerStyle(.segmented)
             HStack(alignment: .firstTextBaseline) {
                 Text(store.generatorStatus)
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
-                    .font(.caption)
+                    .font(.graspCaption)
             }
             Text(modeExplanation)
-                .font(.caption)
+                .font(.graspCaption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -189,13 +189,13 @@ private struct AISettingsTab: View {
                     .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
                     if let note = modelSwitchNote {
                         Label(note, systemImage: "arrow.triangle.branch")
-                            .font(.caption)
+                            .font(.graspCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 if let detail = cloudErrorDetail {
                     Label(detail, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.rejected)
                         .textSelection(.enabled)
                 }
@@ -203,7 +203,7 @@ private struct AISettingsTab: View {
             } else {
                 if let problem = store.cloudKeyProblem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(GRASPColor.rejected)
                 }
                 HStack(spacing: 8) {
@@ -217,13 +217,13 @@ private struct AISettingsTab: View {
                     .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 Link("Get a free key at Google AI Studio", destination: CloudProvider.keyPageURL)
-                    .font(.caption)
+                    .font(.graspCaption)
                 Text("Stored in your Keychain, never in your library or synced to GRASP's server.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
             Label(Self.freeTierNotice, systemImage: "exclamationmark.triangle")
-                .font(.caption)
+                .font(.graspCaption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -304,11 +304,11 @@ private struct AISettingsTab: View {
                 Text("An estimate: Google sets each project's own limit, and resets it at midnight Pacific.")
                 Link("See yours", destination: CloudProvider.usagePageURL)
             }
-            .font(.caption)
+            .font(.graspCaption)
             .foregroundStyle(.secondary)
             if let last = CloudUsage.shared.lastFallback, store.aiMode == .automatic {
                 Text("Last switch to local: \(last)")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -333,7 +333,7 @@ private struct AISettingsTab: View {
         return Section("AI Features") {
             Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
             Text("Custom Tests mix in a few fresh, written questions grounded in your notes. They're generated each time and never saved as cards or scheduled.")
-                .font(.caption)
+                .font(.graspCaption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -366,14 +366,14 @@ private struct AISettingsTab: View {
             let models = store.ollamaStatus.models
             if models.isEmpty {
                 Text("Connected, but no models are pulled yet -- run \"ollama pull qwen3.5:9b\" in Terminal.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             } else {
                 OllamaModelPicker(installed: models)
             }
         } else {
             Text("GRASP couldn't reach a local Ollama server on this Mac. Install it, or start it if it's already installed, to enable on-device AI refinement.")
-                .font(.caption)
+                .font(.graspCaption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -406,7 +406,7 @@ private struct StatusBadge: View {
                 .frame(width: 6, height: 6)
             Text(text)
         }
-        .font(.caption.weight(.semibold))
+        .font(.graspCaption.weight(.semibold))
         .foregroundStyle(isPositive ? GRASPColor.success : GRASPColor.rejected)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
@@ -425,9 +425,9 @@ private struct OllamaSetupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Set Up Local AI").font(.headline)
+            Text("Set Up Local AI").font(.graspHeadline)
             Text("Ollama runs a small language model on this Mac, so AI features work offline and your notes never leave it.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -439,7 +439,7 @@ private struct OllamaSetupSheet: View {
                 }
                 .buttonStyle(.bordered)
                 Text("Opens the official installer page in your browser.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -453,7 +453,7 @@ private struct OllamaSetupSheet: View {
                 }
                 .buttonStyle(.bordered)
                 Text("Already installed? This launches it in the background and re-checks the connection.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
 
@@ -492,11 +492,11 @@ private struct OllamaModelPicker: View {
             }
             if !chosen.isEmpty, !installed.contains(chosen) {
                 Text("\(chosen) isn't installed any more, so GRASP is using \(automaticName ?? "another model").")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             } else {
                 Text("Used for lessons, card refinement and AI test questions. Larger models write better lessons but take longer.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -516,16 +516,16 @@ private struct PasswordForOtherDevices: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Password for other devices").font(.headline)
+            Text("Password for other devices").font(.graspHeadline)
             Text("GRASP on Windows signs in with email and password. Set a password here, then sign in there with this account's email.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.graspCaption).foregroundStyle(.secondary)
             HStack {
                 SecureField("New password (at least 6 characters)", text: $password)
                 Button("Set Password") { save() }
                     .disabled(working || password.count < 6)
             }
             if let result {
-                Text(result).font(.caption).foregroundStyle(failed ? .red : .secondary)
+                Text(result).font(.graspCaption).foregroundStyle(failed ? .red : .secondary)
             }
         }
     }
@@ -566,7 +566,7 @@ private struct AccountSyncSection: View {
                 }
                 if sync.state == .signedOut {
                     Text("This Mac's sign-in has expired. Sign in again to keep syncing -- nothing here is lost.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.graspCaption).foregroundStyle(.secondary)
                     SignInButtons { signedIn in sync.resume(signedIn) }
                 }
                 if account.provider == "google" {
@@ -575,10 +575,10 @@ private struct AccountSyncSection: View {
                 Button("Sign Out…", role: .destructive) { confirmingSignOut = true }
             } else {
                 Text("This profile's library is only on this Mac. Sign in to sync it with your other devices -- it's uploaded to your account, and anything you sign in to later gets a copy.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.graspCaption).foregroundStyle(.secondary)
                 SignInButtons { signedIn in link(signedIn) }
                 if let linkError {
-                    Text(linkError).font(.caption).foregroundStyle(.red)
+                    Text(linkError).font(.graspCaption).foregroundStyle(.red)
                 }
             }
         }
@@ -611,9 +611,9 @@ private struct AccountSyncSection: View {
         case .syncing:
             HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing…") }
         case .failed(let message):
-            Text(message).foregroundStyle(.red).font(.caption)
+            Text(message).foregroundStyle(.red).font(.graspCaption)
         case .notConfigured:
-            Text("Sign-in isn't set up in this copy of GRASP.").font(.caption).foregroundStyle(.secondary)
+            Text("Sign-in isn't set up in this copy of GRASP.").font(.graspCaption).foregroundStyle(.secondary)
         default:
             if let last = sync.lastSyncedAt {
                 Text("Last synced \(last.formatted(.relative(presentation: .named)))")

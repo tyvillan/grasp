@@ -119,7 +119,7 @@ struct FigureTransport: View {
                 isPlaying ? stop() : play()
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.graspUI(size: 11, weight: .semibold))
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
@@ -567,7 +567,7 @@ struct LinearTransformView: View {
         let ring = Path(ellipseIn: CGRect(x: end.x - 7, y: end.y - 7, width: 14, height: 14))
         context.stroke(ring, with: .color(color.opacity(0.7)), lineWidth: 1.5)
 
-        var text = context.resolve(Text(label).font(.system(size: 15, weight: .bold)))
+        var text = context.resolve(Text(label).font(.graspUI(size: 15, weight: .bold)))
         text.shading = .color(color)
         context.draw(text, at: CGPoint(x: end.x + 12 * cos(angle), y: end.y + 12 * sin(angle) - 4))
     }
@@ -628,7 +628,7 @@ struct LinearTransformView: View {
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Area scales by \(OverviewFigures.format(current.determinant))")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.graspUI(size: 14, weight: .semibold))
                     .foregroundStyle(FigurePalette.area)
                 Text(determinantNote)
                     .graspType(.body)

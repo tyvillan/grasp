@@ -170,7 +170,7 @@ struct StudyGuideHubView<Destination: View>: View {
         NavigationLink(value: target) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
-                    .font(.system(size: 14))
+                    .font(.graspUI(size: 14))
                     .foregroundStyle(dimmed ? GRASPColor.textTertiary : GRASPColor.accent)
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 2) {
@@ -185,7 +185,7 @@ struct StudyGuideHubView<Destination: View>: View {
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.graspUI(size: 11, weight: .semibold))
                     .foregroundStyle(GRASPColor.textTertiary)
             }
             .padding(.horizontal, 14)
@@ -201,7 +201,7 @@ struct StudyGuideHubView<Destination: View>: View {
         let failed = run.failure != nil
         return HStack(spacing: 10) {
             Image(systemName: failed ? "exclamationmark.triangle" : "checkmark.circle")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(failed ? GRASPColor.rejected : GRASPColor.success)
             VStack(alignment: .leading, spacing: 2) {
                 Text(run.failure ?? (run.guideIds.isEmpty ? "Nothing was written."

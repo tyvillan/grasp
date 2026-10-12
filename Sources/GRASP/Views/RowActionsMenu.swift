@@ -17,7 +17,7 @@ private struct HoverActionsModifier<Actions: View>: ViewModifier {
             actions()
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 12, weight: .bold))
+                .font(.graspUI(size: 12, weight: .bold))
                 .foregroundStyle(GRASPColor.textSecondary)
                 .frame(width: 26, height: 26)
                 .background(GRASPColor.surfaceRaised, in: RoundedRectangle(cornerRadius: 6, style: .continuous))

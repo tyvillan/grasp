@@ -53,9 +53,9 @@ struct SearchView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(highlighted(result.title, terms: searchTerms))
-                            .font(.body.weight(.medium))
+                            .font(.graspBody.weight(.medium))
                         Text(highlightedSnippet(result.snippet))
-                            .font(.callout)
+                            .font(.graspCallout)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }

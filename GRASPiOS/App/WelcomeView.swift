@@ -19,11 +19,11 @@ struct WelcomeView: View {
             VStack(spacing: 28) {
                 VStack(spacing: 10) {
                     Text("GRASP")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.graspUI(size: 15, weight: .bold))
                         .tracking(5)
                         .foregroundStyle(GRASPColor.accent)
                     Text("Your notes, ready to study.")
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(.graspUI(size: 26, weight: .semibold))
                         .tracking(-0.5)
                         .foregroundStyle(GRASPColor.textPrimary)
                         .multilineTextAlignment(.center)
@@ -114,7 +114,7 @@ private struct ProfileRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: profile.account == nil ? "person.crop.circle" : "arrow.triangle.2.circlepath.circle")
-                .font(.system(size: 26))
+                .font(.graspUI(size: 26))
                 .foregroundStyle(GRASPColor.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)

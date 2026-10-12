@@ -174,7 +174,7 @@ struct CalendarView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(periodTitle)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.graspUI(size: 20, weight: .semibold))
                     .tracking(-0.4)
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text(summaryLine)
@@ -207,7 +207,7 @@ struct CalendarView: View {
                     if isSyncing {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11))
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.graspUI(size: 11))
                     }
                     Text("Sync Calendar")
                 }
@@ -221,7 +221,7 @@ struct CalendarView: View {
                 creating = newEvent(on: calendar.startOfDay(for: Date()))
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "plus").font(.system(size: 11))
+                    Image(systemName: "plus").font(.graspUI(size: 11))
                     Text("New Event")
                 }
             }
@@ -448,7 +448,7 @@ private struct DayCell: View {
                 if isHovering {
                     Button(action: onAdd) {
                         Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.graspUI(size: 9, weight: .semibold))
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
                     .buttonStyle(.plain)
@@ -489,10 +489,10 @@ private struct EventChip: View {
         Button(action: onOpen) {
             HStack(spacing: 4) {
                 Image(systemName: event.kind.icon)
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.graspUI(size: 8, weight: .semibold))
                     .foregroundStyle(event.kind.tint)
                 Text(event.title.isEmpty ? event.kind.label : event.title)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.graspUI(size: 10, weight: .medium))
                     .foregroundStyle(GRASPColor.textPrimary)
                     .lineLimit(1)
             }
@@ -549,7 +549,7 @@ private struct WeekColumn: View {
                         .graspType(.eyebrow)
                         .foregroundStyle(GRASPColor.textTertiary)
                     Text(day.formatted(.dateTime.day()))
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.graspUI(size: 16, weight: .semibold))
                         .monospacedDigit()
                         .foregroundStyle(isToday ? GRASPColor.accent : GRASPColor.textPrimary)
                 }
@@ -557,7 +557,7 @@ private struct WeekColumn: View {
                 if isHovering {
                     Button(action: onAdd) {
                         Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.graspUI(size: 10, weight: .semibold))
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
                     .buttonStyle(.plain)
@@ -591,7 +591,7 @@ private struct WeekEventCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Image(systemName: event.kind.icon)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.graspUI(size: 9, weight: .semibold))
                         .foregroundStyle(event.kind.tint)
                     Text(event.kind.label)
                         .graspType(.eyebrow)
@@ -753,10 +753,10 @@ struct CalendarEventEditSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: kind.icon)
-                    .font(.system(size: 24))
+                    .font(.graspUI(size: 24))
                     .foregroundStyle(kind.tint)
                 Text(isNew ? "New Event" : "Edit Event")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
             }

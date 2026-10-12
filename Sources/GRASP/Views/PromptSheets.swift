@@ -19,10 +19,10 @@ struct ConfirmationSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(isDestructive ? GRASPColor.rejected : GRASPColor.accent)
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
             }
@@ -73,10 +73,10 @@ struct ResultSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(GRASPColor.accent)
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
                 if let leadText {
@@ -94,7 +94,7 @@ struct ResultSheet: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 6) {
                                     Image(systemName: section.icon)
-                                        .font(.system(size: 11, weight: .semibold))
+                                        .font(.graspUI(size: 11, weight: .semibold))
                                         .foregroundStyle(section.tint)
                                     Text("\(section.title) (\(section.items.count))")
                                         .graspType(.meta)

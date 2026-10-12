@@ -36,7 +36,7 @@ struct TimelineField: View {
                 if allowsNoTimeline, !text.isEmpty {
                     Button("No Timeline") { text = "" }
                         .buttonStyle(.link)
-                        .font(.caption)
+                        .font(.graspCaption)
                 }
             }
 
@@ -48,7 +48,7 @@ struct TimelineField: View {
                             isFocused = false
                         } label: {
                             Text(semester.name)
-                                .font(.callout)
+                                .font(.graspCallout)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)

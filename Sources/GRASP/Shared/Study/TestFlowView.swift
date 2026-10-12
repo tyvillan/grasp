@@ -95,10 +95,10 @@ struct TestSetupSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "checklist")
-                    .font(.system(size: 26))
+                    .font(.graspUI(size: 26))
                     .foregroundStyle(GRASPColor.accent)
                 Text("Test: \(deckName)")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
                 Text(guide != nil
@@ -171,10 +171,10 @@ struct TestSetupSheet: View {
             }
 
             if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
-                Text("Enable at least one question type.").font(.caption).foregroundStyle(.red)
+                Text("Enable at least one question type.").font(.graspCaption).foregroundStyle(.red)
             } else if noQuestions {
                 Text("No cards match these settings, so there's nothing to test.")
-                    .font(.caption).foregroundStyle(.red)
+                    .font(.graspCaption).foregroundStyle(.red)
             }
 
             if let aiActivity {
@@ -192,7 +192,7 @@ struct TestSetupSheet: View {
                 if isStarting, aiActivity == nil {
                     ProgressView().controlSize(.small)
                     Text(store.isAITestQuestionsEnabled ? "Generating AI questions…" : "Starting test…")
-                        .font(.caption)
+                        .font(.graspCaption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -266,7 +266,7 @@ struct TestSetupSheet: View {
                     ForEach(history) { entry in
                         VStack(spacing: 3) {
                             Text("\(Int((entry.fraction * 100).rounded()))")
-                                .font(.system(size: 9)).monospacedDigit()
+                                .font(.graspUI(size: 9)).monospacedDigit()
                                 .foregroundStyle(GRASPColor.textTertiary)
                             RoundedRectangle(cornerRadius: 3)
                                 .fill(entry.fraction >= 0.8 ? GRASPColor.success : GRASPColor.accent)
@@ -356,7 +356,7 @@ struct TestRunView: View {
     private func warningBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
+                .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.accent)
             Text(message)
                 .graspType(.meta)
@@ -367,7 +367,7 @@ struct TestRunView: View {
                 warningDismissed = true
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.graspUI(size: 9, weight: .semibold))
                     .foregroundStyle(GRASPColor.textTertiary)
             }
             .buttonStyle(.plain)
@@ -384,7 +384,7 @@ struct TestRunView: View {
                     confirmingExit = true
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.graspUI(size: 11, weight: .semibold))
                         .foregroundStyle(GRASPColor.textSecondary)
                         .frame(width: 22, height: 22)
                         .background(GRASPColor.surface, in: Circle())
@@ -459,17 +459,17 @@ struct TestRunView: View {
     private func questionLabel(_ question: LearnEngine.RoundQuestion) -> some View {
         if let code = question.code {
             Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
-                .font(.system(size: 11, weight: .medium))
+                .font(.graspUI(size: 11, weight: .medium))
                 .foregroundStyle(GRASPColor.accent)
                 .help("A code question: from your study guide, or written by AI and checked by running it")
         } else if let problem = question.problem {
             Label("\(problem.kind.label) · \(problem.subject.label)", systemImage: "function")
-                .font(.system(size: 11, weight: .medium))
+                .font(.graspUI(size: 11, weight: .medium))
                 .foregroundStyle(GRASPColor.accent)
                 .help("Written by AI, then checked before it was saved")
         } else if question.cardId == nil {
             Label("No card", systemImage: "sparkles")
-                .font(.system(size: 11, weight: .medium))
+                .font(.graspUI(size: 11, weight: .medium))
                 .foregroundStyle(GRASPColor.accent)
                 .help("Not from one of your cards: from a study guide, or written by AI for this test")
         }
@@ -538,7 +538,7 @@ struct TestRunView: View {
         case .written:
             TextField("Type the answer", text: $writtenAnswer)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.graspUI(size: 15))
                 .padding(.horizontal, 13)
                 .frame(height: 38)
                 .background(
@@ -569,7 +569,7 @@ struct TestRunView: View {
         HStack(spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                 Text(lastCorrect
                      ? (wasOverridden ? "Marked correct" : "Correct")
                      : (question.code == nil && question.problem == nil
@@ -654,7 +654,7 @@ struct TestRunView: View {
                     .foregroundStyle(GRASPColor.textTertiary)
             }
         }
-        .font(.system(size: 11, weight: .semibold))
+        .font(.graspUI(size: 11, weight: .semibold))
         .frame(width: 17, height: 17)
         .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(GRASPColor.inset))
         .padding(.top, 1)
@@ -754,19 +754,19 @@ struct TestResultsView: View {
             VStack(spacing: 0) {
                 SectionLabel("Test results")
                 Text(deckName)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.graspUI(size: 20, weight: .semibold))
                     .tracking(-0.4)
                     .foregroundStyle(GRASPColor.textPrimary)
                     .padding(.top, 6)
 
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text("\(correct)")
-                        .font(.system(size: 44, weight: .semibold)).monospacedDigit()
+                        .font(.graspUI(size: 44, weight: .semibold)).monospacedDigit()
                         .tracking(-1.4)
                         .foregroundStyle(correct == total ? GRASPColor.success : GRASPColor.textPrimary)
                         .contentTransition(.numericText())
                     Text("/ \(total)")
-                        .font(.system(size: 20, weight: .medium)).monospacedDigit()
+                        .font(.graspUI(size: 20, weight: .medium)).monospacedDigit()
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
                 .padding(.top, 14)
@@ -799,7 +799,7 @@ struct TestResultsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: item.isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .font(.system(size: 11))
+                            .font(.graspUI(size: 11))
                             .foregroundStyle(item.isCorrect ? GRASPColor.success : GRASPColor.accent)
                         Text(item.question.prompt)
                             .graspType(.rowTitle)
@@ -808,7 +808,7 @@ struct TestResultsView: View {
                         if item.question.cardId == nil {
                             Label("AI-generated", systemImage: "sparkles")
                                 .labelStyle(.iconOnly)
-                                .font(.system(size: 11))
+                                .font(.graspUI(size: 11))
                                 .foregroundStyle(GRASPColor.accent)
                                 .help("AI-generated for this test -- not saved as a card, worth double-checking")
                         }
@@ -831,7 +831,7 @@ struct TestResultsView: View {
                     if !item.isCorrect && item.question.type == .written {
                         Button("I actually got this right") { override(item) }
                             .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.graspUI(size: 12, weight: .medium))
                             .foregroundStyle(GRASPColor.accent)
                             .padding(.top, 2)
                     }

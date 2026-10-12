@@ -17,7 +17,7 @@ struct SidebarView: View {
         List(selection: $selectedCourseId) {
             HStack(spacing: 7) {
                 Image(systemName: "house.fill")
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                     .frame(width: 16)
                 Text("Home").graspType(.rowTitle)
                 Spacer(minLength: 0)
@@ -27,7 +27,7 @@ struct SidebarView: View {
 
             HStack(spacing: 7) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                     .frame(width: 16)
                 Text("Calendar").graspType(.rowTitle)
                 Spacer(minLength: 0)
@@ -37,7 +37,7 @@ struct SidebarView: View {
 
             HStack(spacing: 7) {
                 Image(systemName: "graduationcap")
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                     .frame(width: 16)
                 Text("Study Guide").graspType(.rowTitle)
                 Spacer(minLength: 0)
@@ -47,7 +47,7 @@ struct SidebarView: View {
 
             HStack(spacing: 7) {
                 Image(systemName: "books.vertical")
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                     .frame(width: 16)
                 Text("Library").graspType(.rowTitle)
                 Spacer(minLength: 0)

@@ -22,18 +22,18 @@ struct ProfilePickerView: View {
             // what the eye should land on.
             VStack(spacing: 10) {
                 Text("GRASP")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.graspUI(size: 15, weight: .bold))
                     .tracking(5)
                     .foregroundStyle(GRASPColor.accent)
                 Text("Who's studying?")
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.graspUI(size: 26, weight: .semibold))
                     .tracking(-0.5)
                     .foregroundStyle(GRASPColor.textPrimary)
             }
             .padding(.top, 40)
 
             if let loadError {
-                Text(loadError).font(.caption).foregroundStyle(.red)
+                Text(loadError).font(.graspCaption).foregroundStyle(.red)
             }
 
             ScrollView {
@@ -54,7 +54,7 @@ struct ProfilePickerView: View {
                     } label: {
                         VStack(spacing: 10) {
                             Image(systemName: "plus")
-                                .font(.system(size: 20, weight: .medium))
+                                .font(.graspUI(size: 20, weight: .medium))
                                 .foregroundStyle(GRASPColor.textTertiary)
                                 .frame(width: 64, height: 64)
                             Text("New profile")
@@ -166,7 +166,7 @@ private struct ProfileTile: View {
                         .lineLimit(1)
                     if profile.pinHash != nil {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 9))
+                            .font(.graspUI(size: 9))
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
                 }
@@ -203,7 +203,7 @@ private struct NewProfileSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Profile").font(.headline)
+            Text("New Profile").font(.graspHeadline)
             TextField("Name", text: $name)
             Toggle("Protect with a 4-digit PIN", isOn: $usePIN)
             if usePIN {
@@ -239,7 +239,7 @@ private struct UnlockProfileSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text(profile.name).font(.headline)
+            Text(profile.name).font(.graspHeadline)
             SecureField("PIN", text: $pin)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 140)
@@ -249,7 +249,7 @@ private struct UnlockProfileSheet: View {
                 }
                 .onSubmit(tryUnlock)
             if wrongPIN {
-                Text("Wrong PIN").font(.caption).foregroundStyle(.red)
+                Text("Wrong PIN").font(.graspCaption).foregroundStyle(.red)
             }
             HStack {
                 Button("Cancel") { dismiss() }

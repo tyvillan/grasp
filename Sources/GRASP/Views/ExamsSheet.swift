@@ -22,10 +22,10 @@ struct ExamsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 24))
+                    .font(.graspUI(size: 24))
                     .foregroundStyle(GRASPColor.accent)
                 Text("Dates for This Course")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
             }
@@ -54,7 +54,7 @@ struct ExamsSheet: View {
                     )
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "plus").font(.system(size: 11))
+                        Image(systemName: "plus").font(.graspUI(size: 11))
                         Text("Add Date")
                     }
                 }
@@ -82,7 +82,7 @@ struct ExamsSheet: View {
         Button { editing = event } label: {
             HStack(spacing: 10) {
                 Image(systemName: event.kind.icon)
-                    .font(.system(size: 12))
+                    .font(.graspUI(size: 12))
                     .foregroundStyle(event.kind.tint)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {

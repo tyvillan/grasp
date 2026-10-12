@@ -168,7 +168,7 @@ struct DeckListView: View {
                 .pickerStyle(.inline)
             } label: {
                 Image(systemName: "arrow.up.arrow.down.circle")
-                    .font(.system(size: 14))
+                    .font(.graspUI(size: 14))
                     .foregroundStyle(GRASPColor.textSecondary)
             }
             .menuStyle(.borderlessButton)
@@ -176,14 +176,14 @@ struct DeckListView: View {
             .help("Sort decks: \(sortOption.label)")
             Button(action: onAddStudyGuide) {
                 Label("Add Guide", systemImage: "graduationcap")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.graspUI(size: 11, weight: .medium))
                     .foregroundStyle(GRASPColor.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Add a study guide for an exam in this course")
             Button(action: onNewDeck) {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 15))
+                    .font(.graspUI(size: 15))
                     .foregroundStyle(GRASPColor.accent)
             }
             .buttonStyle(.plain)
@@ -224,7 +224,7 @@ private struct AllCardsRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: 11))
+                .font(.graspUI(size: 11))
                 .foregroundStyle(GRASPColor.accent)
             Text("All Cards")
                 .graspType(.rowTitle)
@@ -232,7 +232,7 @@ private struct AllCardsRow: View {
             Spacer(minLength: 4)
             if dueCount > 0 {
                 Text("\(dueCount)")
-                    .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                    .font(.graspUI(size: 10, weight: .bold)).monospacedDigit()
                     .foregroundStyle(GRASPColor.accent)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(GRASPColor.accentSoft, in: Capsule())
@@ -255,7 +255,7 @@ private struct ExamRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "graduationcap.fill")
-                .font(.system(size: 11))
+                .font(.graspUI(size: 11))
                 .foregroundStyle(GRASPColor.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(exam.title)
@@ -286,7 +286,7 @@ private struct DeckRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 if let kicker {
                     Text(kicker)
-                        .font(.caption2.weight(.semibold))
+                        .font(.graspCaption2.weight(.semibold))
                         .foregroundStyle(GRASPColor.accent)
                 }
                 Text(name)
@@ -296,7 +296,7 @@ private struct DeckRow: View {
             Spacer(minLength: 4)
             if dueCount > 0 {
                 Text("\(dueCount)")
-                    .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                    .font(.graspUI(size: 10, weight: .bold)).monospacedDigit()
                     .foregroundStyle(GRASPColor.accent)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(GRASPColor.accentSoft, in: Capsule())

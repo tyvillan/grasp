@@ -40,7 +40,7 @@ struct AIProgressStrip: View {
                     .truncationMode(.middle)
                 if activity.runsInCloud {
                     Label("Cloud", systemImage: "cloud")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.graspUI(size: 10, weight: .semibold))
                         .foregroundStyle(GRASPColor.accent)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(GRASPColor.accentSoft, in: Capsule())

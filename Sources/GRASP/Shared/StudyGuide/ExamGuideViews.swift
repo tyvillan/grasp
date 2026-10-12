@@ -108,7 +108,7 @@ private struct SkillsByTopic: View {
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: open.contains(bucket.topic) ? "chevron.down" : "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(.graspUI(size: 10, weight: .semibold))
                                     .foregroundStyle(GRASPColor.textTertiary)
                                     .frame(width: 12)
                                 Text(bucket.topic.label)
@@ -254,7 +254,7 @@ private struct PartSection: View {
             Button { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } } label: {
                 HStack(alignment: .center, spacing: 10) {
                     Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.graspUI(size: 10, weight: .semibold))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .frame(width: 12)
                     header
@@ -384,7 +384,7 @@ private struct PartSection: View {
         let covered = decks.filter { part.deckIds.contains($0.id) }
         return HStack(spacing: 6) {
             Image(systemName: "rectangle.stack")
-                .font(.system(size: 11))
+                .font(.graspUI(size: 11))
                 .foregroundStyle(GRASPColor.textTertiary)
             if covered.isEmpty {
                 Text("No lecture deck yet — this guide is the only source for this part.")
@@ -467,7 +467,7 @@ private struct PartNotes: View {
                             Button(showsOriginal ? "Hide original" : "Show original") { showsOriginal.toggle() }
                             Button("Rewrite again") { rewrite(fresh: true) }
                         }
-                        .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(GRASPColor.accent)
+                        .buttonStyle(.plain).font(.graspUI(size: 11)).foregroundStyle(GRASPColor.accent)
                         if showsOriginal { original }
                     }
                 case .failed:
@@ -584,7 +584,7 @@ private struct SkillRow: View {
                     let selected = skill.rating == rating
                     Button(rating.label) { onRate(selected ? nil : rating) }
                         .buttonStyle(.plain)
-                        .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                        .font(.graspUI(size: 11, weight: selected ? .semibold : .regular))
                         .foregroundStyle(selected ? rating.tint : GRASPColor.textTertiary)
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(selected ? rating.tint.opacity(0.14) : Color.clear, in: Capsule())
@@ -592,7 +592,7 @@ private struct SkillRow: View {
                 }
                 Button(shown ? "Hide meaning" : "What is this?") { toggle() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.graspUI(size: 11))
                     .foregroundStyle(GRASPColor.accent)
                     .padding(.leading, 8)
             }

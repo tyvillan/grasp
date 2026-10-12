@@ -178,7 +178,7 @@ struct FocusTimerBar: View {
                     model.start()
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: "timer").font(.system(size: 11))
+                        Image(systemName: "timer").font(.graspUI(size: 11))
                         Text("Start Focus Timer")
                     }
                 }
@@ -186,11 +186,11 @@ struct FocusTimerBar: View {
                 .help("A Pomodoro-style work/break timer for this session")
             } else {
                 Image(systemName: model.phase == .breaking ? "cup.and.saucer.fill" : "timer")
-                    .font(.system(size: 11))
+                    .font(.graspUI(size: 11))
                     .foregroundStyle(tint)
 
                 Text(model.isElapsed ? elapsedPrompt : model.timeText)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.graspUI(size: 13, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(model.isElapsed ? tint : GRASPColor.textPrimary)
 
@@ -219,7 +219,7 @@ struct FocusTimerBar: View {
                 Button {
                     model.reset()
                 } label: {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "xmark").font(.graspUI(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(GRASPColor.textTertiary)
@@ -238,7 +238,7 @@ struct FocusTimerBar: View {
                 showingSettings = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 11))
+                    .font(.graspUI(size: 11))
                     .foregroundStyle(GRASPColor.textTertiary)
             }
             .buttonStyle(.plain)
@@ -279,10 +279,10 @@ private struct FocusTimerSettingsSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "timer")
-                    .font(.system(size: 24))
+                    .font(.graspUI(size: 24))
                     .foregroundStyle(GRASPColor.accent)
                 Text("Focus Timer")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.graspUI(size: 18, weight: .semibold))
                     .tracking(-0.3)
                     .foregroundStyle(GRASPColor.textPrimary)
             }

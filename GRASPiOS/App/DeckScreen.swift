@@ -211,7 +211,7 @@ struct DeckScreen: View {
                         try? store.approveAllDrafts(inDecks: deckIds)
                         load()
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.graspSubheadline.weight(.semibold))
                 }
             }
             .graspSection()
@@ -293,9 +293,9 @@ private struct StudyModeButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 20))
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text(subtitle).font(.system(size: 11)).opacity(0.8)
+                Image(systemName: icon).font(.graspUI(size: 20))
+                Text(title).font(.graspUI(size: 14, weight: .semibold))
+                Text(subtitle).font(.graspUI(size: 11)).opacity(0.8)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)

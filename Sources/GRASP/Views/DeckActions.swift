@@ -30,9 +30,9 @@ struct DeckCreateSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New Deck").font(.headline)
+            Text("New Deck").font(.graspHeadline)
             Text("A custom module or unit for cards you organize by hand.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
             TextField("Deck name (e.g. Midterm Review)", text: $name)
             HStack {
@@ -70,7 +70,7 @@ struct DeckRenameSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Rename Deck").font(.headline)
+            Text("Rename Deck").font(.graspHeadline)
             TextField("Deck name", text: $name)
             HStack {
                 Spacer()
@@ -117,9 +117,9 @@ struct DeckDeleteSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Delete \"\(deck.name)\"?").font(.headline)
+            Text("Delete \"\(deck.name)\"?").font(.graspHeadline)
             Text("This deck has \(cardCount) \(cardWord). Choose what happens to them.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 10) {
@@ -145,7 +145,7 @@ struct DeckDeleteSheet: View {
                 }
                 .toggleStyle(.radioGroupCompat)
                 Text("Review history is kept even when cards are deleted.")
-                    .font(.caption)
+                    .font(.graspCaption)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 20)
             }
@@ -191,9 +191,9 @@ struct DeckLectureDateSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Lecture Date for \"\(deck.name)\"").font(.headline)
+            Text("Lecture Date for \"\(deck.name)\"").font(.graspHeadline)
             Text("Shown in the sidebar when GRASP can't read a date from this deck's notes.")
-                .font(.callout)
+                .font(.graspCallout)
                 .foregroundStyle(.secondary)
             DatePicker(isRange ? "Starts" : "Date", selection: $date, displayedComponents: .date)
             Toggle("This deck covers more than one lecture", isOn: $isRange)

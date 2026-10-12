@@ -272,7 +272,7 @@ private struct DeckRow: View {
             Image(systemName: icon).foregroundStyle(GRASPColor.accent).frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 if let kicker {
-                    Text(kicker).font(.caption2.weight(.semibold)).foregroundStyle(GRASPColor.accent)
+                    Text(kicker).font(.graspCaption2.weight(.semibold)).foregroundStyle(GRASPColor.accent)
                 }
                 Text(name).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
                 Text("\(counts.cards) cards").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)

@@ -123,7 +123,7 @@ struct OverviewSectionsView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 13))
+                        .font(.graspUI(size: 13))
                 }
                 .borderlessMenu()
                 .menuIndicator(.hidden)
@@ -314,7 +314,7 @@ private struct ObjectivesCallout: View {
                 ForEach(Array(objectives.enumerated()), id: \.offset) { _, objective in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.graspUI(size: 10, weight: .bold))
                             .foregroundStyle(GRASPColor.textTertiary)
                         Text(overviewInline(objective))
                             .graspType(.prose)
@@ -397,7 +397,7 @@ private struct CheckCallout: View {
             } label: {
                 Label(isRevealed ? "Hide answer" : "Show answer",
                       systemImage: isRevealed ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.graspUI(size: 12, weight: .semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(GRASPColor.accent)
@@ -418,7 +418,7 @@ private struct TakeawaysView: View {
                 ForEach(Array(takeaways.enumerated()), id: \.offset) { index, takeaway in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(index + 1)")
-                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .font(.graspUI(size: 13, weight: .semibold).monospacedDigit())
                             .foregroundStyle(GRASPColor.accent)
                             .frame(width: 16, alignment: .trailing)
                         Text(overviewInline(takeaway))

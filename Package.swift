@@ -16,6 +16,10 @@ let appTargets: [Target] = [
             .product(name: "Supabase", package: "supabase-swift"),
         ],
         path: "Sources/GRASP",
+        // The bundled fonts are copied into the .app by build.sh (and into
+        // the iPhone app by its synchronized Shared folder), not handled as
+        // SwiftPM resources.
+        exclude: ["Shared/Fonts"],
         swiftSettings: [.defaultIsolation(MainActor.self)]
     ),
 ]

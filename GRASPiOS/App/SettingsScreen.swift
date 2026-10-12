@@ -36,18 +36,18 @@ struct SettingsScreen: View {
                         .disabled(sync.state == .syncing || sync.state == .signedOut)
                     if sync.state == .signedOut {
                         Text("This iPhone's sign-in has expired. Sign in again to keep syncing.")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.graspFootnote).foregroundStyle(.secondary)
                         SignInButtons { sync.resume($0) }
                             .frame(maxWidth: .infinity)
                     }
                     Button("Sign Out", role: .destructive) { confirmingSignOut = true }
                 } else {
                     Text("This profile is only on this iPhone. Sign in to sync it with your Mac and other devices.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.graspFootnote).foregroundStyle(.secondary)
                     SignInButtons { link($0) }
                         .frame(maxWidth: .infinity)
                     if let linkError {
-                        Text(linkError).font(.footnote).foregroundStyle(.red)
+                        Text(linkError).font(.graspFootnote).foregroundStyle(.red)
                     }
                 }
             } header: {
@@ -115,7 +115,7 @@ struct SettingsScreen: View {
         case .syncing:
             HStack(spacing: 6) { ProgressView(); Text("Syncing…") }
         case .failed(let message):
-            Text(message).foregroundStyle(.red).font(.footnote)
+            Text(message).foregroundStyle(.red).font(.graspFootnote)
         case .signedOut:
             Text("Signed out").foregroundStyle(.red)
         default:
