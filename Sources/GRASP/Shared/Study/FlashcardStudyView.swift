@@ -28,6 +28,12 @@ struct FlashcardStudyView: View {
     /// review and a second history row for one look at the card.
     @State private var markedIds: Set<String> = []
     @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The card's turn during a flip: it rotates edge-on, the answer
+    /// appears, and it turns back -- the question stays on the same face.
+    @State private var flipAngle: Double = 0
+    /// A brief yellow flash of the progress bar after "I Know This".
+    @State private var progressFlash = false
 
     @AppStorage("focusWorkMinutes") private var workMinutes = 25
     @AppStorage("focusBreakMinutes") private var breakMinutes = 5
@@ -130,40 +136,14 @@ struct FlashcardStudyView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
 
-            ProgressBar(value: min(index, queue.count), total: queue.count, height: 2)
+            ProgressBar(value: min(index, queue.count), total: queue.count, height: progressFlash ? 4 : 2)
+                .brightness(progressFlash ? 0.15 : 0)
+                .animation(Motion.snappy, value: progressFlash)
         }
     }
 
     private var completionView: some View {
-        VStack(spacing: 0) {
-            Text("Session complete")
-                .font(.graspUI(size: 22, weight: .semibold))
-                .tracking(-0.4)
-                .foregroundStyle(GRASPColor.textPrimary)
-
-            HStack(spacing: 0) {
-                tally(understoodCount, "understood", GRASPColor.success)
-                Rectangle()
-                    .fill(GRASPColor.hairline)
-                    .frame(width: 1, height: 32)
-                    .padding(.horizontal, 26)
-                tally(reviewCount, "to review", GRASPColor.accent)
-            }
-            .padding(.top, 24)
-
-            Button("Done") { dismiss() }
-                .buttonStyle(GRASPProminentButton())
-                .keyboardShortcut(.defaultAction)
-                .padding(.top, 30)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func tally(_ value: Int, _ label: String, _ tint: Color) -> some View {
-        VStack(spacing: 2) {
-            Text("\(value)").graspType(.numeral).foregroundStyle(tint)
-            Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-        }
+        SessionCompleteView(understood: understoodCount, toReview: reviewCount) { dismiss() }
     }
 
     /// The card gets the whole canvas. Front and back share one surface --
@@ -207,8 +187,27 @@ struct FlashcardStudyView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 22)
         )
+        .rotation3DEffect(.degrees(flipAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
         .contentShape(Rectangle())
-        .onTapGesture { isFlipped.toggle() }
+        .onTapGesture { flip() }
+    }
+
+    /// Reveal (or hide) the answer. Revealing is a quick half-turn of the
+    /// card, about 220ms in all; under Reduce Motion it's a plain fade.
+    private func flip() {
+        guard !isFlipped else {
+            isFlipped = false
+            return
+        }
+        if reduceMotion {
+            withAnimation(Motion.fade) { isFlipped = true }
+            return
+        }
+        withAnimation(.easeIn(duration: 0.11)) { flipAngle = 90 } completion: {
+            isFlipped = true
+            flipAngle = -90
+            withAnimation(.easeOut(duration: 0.11)) { flipAngle = 0 }
+        }
     }
 
     /// Controls group tight against the bottom edge so the canvas above
@@ -221,9 +220,10 @@ struct FlashcardStudyView: View {
                     markButton("Needs Review", "1", GRASPColor.accent, understood: false)
                     markButton("I Know This", "2", GRASPColor.success, understood: true)
                 }
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
             } else {
                 Button {
-                    isFlipped = true
+                    flip()
                 } label: {
                     HStack(spacing: 6) {
                         Text("Reveal answer").graspType(.body)
@@ -244,6 +244,8 @@ struct FlashcardStudyView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 20)
+        .animation(Motion.choose(Motion.bouncy, reduceMotion: reduceMotion), value: isFlipped)
+        .sensoryFeedback(.impact(weight: .light), trigger: index)
     }
 
     private func markButton(_ title: String, _ key: String, _ color: Color, understood: Bool) -> some View {
@@ -268,7 +270,7 @@ struct FlashcardStudyView: View {
         guard index < queue.count else { return .ignored }
         switch press.key {
         case .space:
-            isFlipped.toggle()
+            flip()
             return .handled
         case .leftArrow:
             if index > 0 { index -= 1; isFlipped = false }
@@ -318,8 +320,13 @@ struct FlashcardStudyView: View {
             if understood { understoodCount += 1 } else { reviewCount += 1 }
             focusTimer.countCard()
         }
+        if understood {
+            progressFlash = true
+            Task { try? await Task.sleep(for: .milliseconds(260)); progressFlash = false }
+        }
         index += 1
         isFlipped = false
+        flipAngle = 0
     }
 }
 
@@ -347,5 +354,87 @@ private struct CardQuickEditSheet: View {
         }
         .padding(20)
         .macSheetFrame(width: 420)
+    }
+}
+
+/// The end of a session: the two tallies count up from zero and a few
+/// yellow squares drift in. Under 1.5s; a click skips straight to the
+/// final numbers, and Reduce Motion shows them at once.
+struct SessionCompleteView: View {
+    let understood: Int
+    let toReview: Int
+    let onDone: () -> Void
+    @State private var shownUnderstood = 0
+    @State private var shownReview = 0
+    @State private var drift = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if !reduceMotion {
+                ForEach(0..<7, id: \.self) { i in
+                    BrandDot(size: CGFloat(6 + (i % 3) * 3))
+                        .rotationEffect(.degrees(drift ? Double(i) * 37 : 0))
+                        .offset(x: CGFloat(i - 3) * 70, y: drift ? CGFloat((i % 2 == 0 ? -1 : 1) * (90 + i * 6)) : 0)
+                        .opacity(drift ? 0.0 : 0.9)
+                        .allowsHitTesting(false)
+                }
+            }
+            VStack(spacing: 0) {
+                SectionLabel("Session complete")
+                Text(understood + toReview == 1 ? "1 card done" : "\(understood + toReview) cards done")
+                    .font(.graspDisplay(34))
+                    .tracking(-0.6)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .padding(.top, 10)
+
+                HStack(spacing: 0) {
+                    tally(shownUnderstood, "understood", GRASPColor.success)
+                    Rectangle()
+                        .fill(GRASPColor.hairline)
+                        .frame(width: 1, height: 40)
+                        .padding(.horizontal, 30)
+                    tally(shownReview, "to review", GRASPColor.accent)
+                }
+                .padding(.top, 26)
+
+                Button("Done", action: onDone)
+                    .buttonStyle(GRASPProminentButton())
+                    .keyboardShortcut(.defaultAction)
+                    .padding(.top, 32)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { skip() }
+        .onAppear {
+            if reduceMotion { skip(); return }
+            withAnimation(.easeOut(duration: 1.2)) { drift = true }
+            withAnimation(Motion.settle.delay(0.15)) {
+                shownUnderstood = understood
+                shownReview = toReview
+            }
+        }
+    }
+
+    private func skip() {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) {
+            shownUnderstood = understood
+            shownReview = toReview
+            drift = true
+        }
+    }
+
+    private func tally(_ value: Int, _ label: String, _ tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .font(.graspDisplay(44))
+                .monospacedDigit()
+                .contentTransition(.numericText(value: Double(value)))
+                .foregroundStyle(tint)
+            Text(label).graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+        }
     }
 }

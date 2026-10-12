@@ -10,7 +10,7 @@ struct ProgressBar: View {
     let value: Int
     let total: Int
     var checkpoints: Int = 0
-    var tint: Color = GRASPColor.accent
+    var tint: Color = GRASPColor.brand
     var height: CGFloat = 7
 
     var body: some View {
@@ -30,7 +30,7 @@ struct ProgressBar: View {
                 Capsule(style: .continuous)
                     .fill(tint)
                     .frame(width: max(fraction > 0 ? height : 0, fraction * geo.size.width))
-                    .animation(.easeOut(duration: 0.28), value: value)
+                    .animation(Motion.fill, value: value)
             }
         }
         .frame(height: height)
