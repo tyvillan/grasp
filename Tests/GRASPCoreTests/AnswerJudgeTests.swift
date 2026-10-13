@@ -157,6 +157,30 @@ struct AnswerJudgeTests {
         #expect(result.source == .localFallback)
     }
 
+    @Test("a borderline answer accepted without the judge says it was accepted offline")
+    func offlineNote() async {
+        let down = StubJudge(nil)
+        let offline = await AnswerLadder.judge(question: "q", expected: "platform to write code on",
+                                               given: "program to write code on", judge: down.judge)
+        #expect(offline.outcome == .closeEnough)
+        #expect(offline.offlineNoteIfAny == "Accepted offline. Check the wording.")
+
+        // The judge answered: no note, even when it also says close enough.
+        let up = StubJudge(AIAnswerVerdict(outcome: .closeEnough, reason: "Same idea."))
+        let online = await AnswerLadder.judge(question: "q", expected: "platform to write code on",
+                                              given: "program to write code on", judge: up.judge)
+        #expect(online.outcome == .closeEnough)
+        #expect(online.offlineNoteIfAny == nil)
+
+        // A confident local verdict never involved the judge, so no note.
+        let sure = await AnswerLadder.judge(question: "q", expected: "cache hit rate and miss rate",
+                                            given: "miss rate and cache hit rate", judge: down.judge)
+        #expect(sure.offlineNoteIfAny == nil)
+
+        // A rejected fallback is "Not quite", not an offline acceptance.
+        #expect(JudgedAnswer(outcome: .notQuite, source: .localFallback).offlineNoteIfAny == nil)
+    }
+
     // MARK: Modes
 
     @Test("Local mode never builds a cloud generator, even with a key saved")

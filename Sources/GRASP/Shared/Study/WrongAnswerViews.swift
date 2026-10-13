@@ -240,6 +240,12 @@ struct TypedAnswerFeedback: View {
                         .foregroundStyle(GRASPColor.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let note = judged.offlineNoteIfAny {
+                    Text(note)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         case .notQuite:
             VStack(alignment: .leading, spacing: 4) {

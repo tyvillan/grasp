@@ -29,6 +29,15 @@ public struct JudgedAnswer: Sendable, Equatable {
     public init(outcome: AnswerOutcome, reason: String? = nil, source: Source) {
         self.outcome = outcome; self.reason = reason; self.source = source
     }
+
+    /// Said under a Close enough answer the AI judge was never asked about
+    /// (unreachable or too slow): the local word comparison accepted it alone.
+    public static let offlineNote = "Accepted offline. Check the wording."
+
+    /// `offlineNote` when this answer was accepted that way, else nil.
+    public var offlineNoteIfAny: String? {
+        outcome == .closeEnough && source == .localFallback ? Self.offlineNote : nil
+    }
 }
 
 /// What the AI judge says about one answer.
