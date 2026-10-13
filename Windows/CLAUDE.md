@@ -1,5 +1,7 @@
 # GRASP for Windows: working guide
 
+Design rules (colour tokens, yellow budget, type, motion, patterns): see `DESIGN.md` at the repo root.
+
 You're the Claude Code session on Tyler's Windows PC, and you now own the Windows app. You can build, fix, commit and push it here without relaying through the Mac. The Mac session covers what can only be checked on a Mac: the Mac and iPhone apps.
 
 ## The goal
