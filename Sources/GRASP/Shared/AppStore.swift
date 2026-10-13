@@ -420,6 +420,34 @@ final class AppStore {
         return count
     }
 
+    /// `generateAdditionalCards`, but saying why it came back empty: nothing
+    /// to add, or what went wrong.
+    func addCards(
+        inDecks deckIds: [String], maxPerNote: Int = CardAI.defaultMaxGeneratedPerNote, topic: String? = nil
+    ) async -> CardAI.AdditionalCardsOutcome {
+        let outcome = await CardAI.generateAdditionalCardsOutcome(
+            inDecks: deckIds, maxPerNote: maxPerNote, topic: topic,
+            using: await CardGenerators.select(), database: database
+        )
+        reload()
+        return outcome
+    }
+
+    /// What to tell the student when `addCards` failed.
+    static func message(for failure: CardAI.AdditionalCardsFailure) -> String {
+        switch failure {
+        case .generatorUnavailable:
+            return "No AI model is reachable. Check Settings → AI, then retry."
+        case .readFailed:
+            return "GRASP couldn't read this deck's cards. Try again."
+        case .noSourceNotes:
+            return "None of these cards came from a note, so there is nothing to read new questions from."
+        case .writeFailed(let created, let reason):
+            return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
+                + "Something went wrong saving: \(reason)"
+        }
+    }
+
     /// Drafts from a course's own notes into one deck -- for a deck with no
     /// cards yet, which `generateAdditionalCards` has nothing to read from.
     /// Throws for anything that went wrong; `.generated(created: 0, ...)`

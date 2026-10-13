@@ -76,6 +76,11 @@ struct DeckDetailView: View {
         var id: String { rawValue }
     }
     @State private var fillGapsResult: Int?
+    /// Why the last "Generate questions" run failed, shown as a strip with
+    /// Retry -- a failure is never reported as "No Gaps Found". The request
+    /// is kept for the retry.
+    @State private var additionFailure: String?
+    @State private var lastAddition: (maxPerNote: Int?, topic: String?)?
     /// Cards the current (or last) generation run has written, newest
     /// first -- shown at the top of the list, so a run is visible where the
     /// eye already is. Cleared when the scope changes.
@@ -890,12 +895,14 @@ struct DeckDetailView: View {
         let generation = scopeGeneration
         let deckIds = scopeDeckIds
         let run = AIActivity(headline: "Adding cards to \(deckName) with AI", purpose: "add")
+        additionFailure = nil
+        lastAddition = (maxPerNote, topic)
         store.runAIJob(cardJobKey, activity: run) { [store] run in
-            let count = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+            let outcome = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
                 if let maxPerNote {
-                    await store.generateAdditionalCards(inDecks: deckIds, maxPerNote: maxPerNote, topic: topic)
+                    await store.addCards(inDecks: deckIds, maxPerNote: maxPerNote, topic: topic)
                 } else {
-                    await store.generateAdditionalCards(inDecks: deckIds, topic: topic)
+                    await store.addCards(inDecks: deckIds, topic: topic)
                 }
             }
             // Bail before touching anything scope-dependent (`cards`,
@@ -905,8 +912,18 @@ struct DeckDetailView: View {
             // a scope that's no longer even visible.
             guard generation == scopeGeneration else { return }
             // Cards that landed were shown arriving, and the drafts strip
-            // carries the count; the sheet is only for the empty outcome.
-            if !(run.stopRequested && count == 0), count == 0 { fillGapsResult = count }
+            // carries the count. "No gaps" is only for a run that looked and
+            // found nothing; anything that went wrong is the strip's Retry.
+            switch outcome {
+            case .added:
+                break
+            case .nothingToAdd:
+                if !run.stopRequested { fillGapsResult = 0 }
+            case .failed(let failure):
+                if !run.stopRequested || failure != .generatorUnavailable {
+                    additionFailure = AppStore.message(for: failure)
+                }
+            }
             load()
         }
     }
@@ -934,6 +951,41 @@ struct DeckDetailView: View {
                 Button("Review drafts") { startReviewingDrafts() }
                     .buttonStyle(GRASPQuietButton())
             }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+    }
+
+    /// The "Generate questions" run failed: what went wrong, with Retry --
+    /// the same look as the live strip, in place of it.
+    private func additionFailureStrip(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.graspUI(size: 13))
+                .foregroundStyle(GRASPColor.rejected)
+            Text(message)
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Retry") {
+                let request = lastAddition
+                runGenerate(maxPerNote: request?.maxPerNote, topic: request?.topic)
+            }
+            .buttonStyle(GRASPQuietButton())
+            .disabled(!isGeneratorAvailable || aiActivity != nil)
+            Button {
+                additionFailure = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.graspUI(size: 11, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -1216,6 +1268,11 @@ struct DeckDetailView: View {
                     .selectionDisabled()
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+            } else if let additionFailure {
+                additionFailureStrip(additionFailure)
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
             } else if draftCount > 0 || !duplicateGroups.isEmpty {
                 statusStrip
                     .selectionDisabled()
@@ -1441,6 +1498,7 @@ struct DeckDetailView: View {
         recentAIIds = []
         hiddenNewIds = []
         countHeldIds = []
+        additionFailure = nil
         switch scope {
         case .deck(let id):
             let deck = (try? store.deck(id)) ?? nil

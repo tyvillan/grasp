@@ -35,6 +35,9 @@ struct DeckScreen: View {
     @State private var notice: String?
     @State private var generationFinished = 0
     @State private var confirmingApproveAll = false
+    /// Why the last "Generate Questions" run failed, shown with Retry
+    /// instead of the "no new cards" message.
+    @State private var additionFailure: String?
 
     private enum CardFilter: String, CaseIterable, Identifiable {
         case all = "All", drafts = "Drafts", due = "Due", understood = "Understood"
@@ -241,13 +244,18 @@ struct DeckScreen: View {
     private func addCards() {
         let ids = deckIds
         let run = AIActivity(headline: "Adding cards to \(route.name) with AI", purpose: "add")
+        additionFailure = nil
         store.runAIJob(store.cardJobKey(courseId: courseId), activity: run) { [store] run in
-            let count = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
-                await store.generateAdditionalCards(inDecks: ids)
+            let outcome = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                await store.addCards(inDecks: ids)
             }
-            if !(run.stopRequested && count == 0) {
-                aiMessage = count == 0 ? "The notes are already well covered -- no new cards."
-                    : "Added \(count) new card\(count == 1 ? "" : "s") as drafts for you to review."
+            switch outcome {
+            case .added(let count):
+                aiMessage = "Added \(count) new card\(count == 1 ? "" : "s") as drafts for you to review."
+            case .nothingToAdd:
+                if !run.stopRequested { aiMessage = "The notes are already well covered -- no new cards." }
+            case .failed(let failure):
+                additionFailure = AppStore.message(for: failure)
             }
         }
     }
@@ -298,6 +306,20 @@ struct DeckScreen: View {
     private var cardSections: some View {
         if isGeneratingCards {
             Section { generatingStrip }.graspSection()
+        } else if let additionFailure {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(GRASPColor.rejected)
+                    Text(additionFailure).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+                    Spacer(minLength: 6)
+                    Button("Retry") { addCards() }
+                        .font(.graspUI(size: 13, weight: .semibold))
+                        .disabled(!store.isGeneratorAvailable || runningJob != nil)
+                    Button { self.additionFailure = nil } label: { Image(systemName: "xmark") }
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
+            .graspSection()
         }
         if !cards.isEmpty {
             Section {
