@@ -42,6 +42,9 @@ struct LearnRoundView: View {
     @State private var isAnswered = false
     @State private var isAtCheckpoint = false
     @State private var isEmpty = false
+    /// Fixed when the round starts: every card was already marked
+    /// understood, so Learn is reinforcing at random rather than teaching.
+    @State private var isPracticeRound = false
     @FocusState private var writtenFieldFocused: Bool
 
     var body: some View {
@@ -95,7 +98,7 @@ struct LearnRoundView: View {
                         .graspType(.title)
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(1)
-                    Text("Learn")
+                    Text(isPracticeRound ? "Practice round" : "Learn")
                         .graspType(.meta)
                         .textCase(.uppercase)
                         .tracking(0.7)
@@ -120,6 +123,11 @@ struct LearnRoundView: View {
                         Text("Reviewing what you missed")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if isPracticeRound {
+                        Text("Everything is marked understood. These questions keep it that way.")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 8) {
@@ -216,6 +224,7 @@ struct LearnRoundView: View {
         isEmpty = queue.isEmpty
         resetAnswerState()
         refreshMastery()
+        isPracticeRound = !queue.isEmpty && deckMastery.total > 0 && deckMastery.mastered == deckMastery.total
     }
 
     /// Whichever pass is live: the main run-through, or the review of what

@@ -28,6 +28,8 @@ struct StudyGuideHubView<Destination: View>: View {
     @State private var courses: [StudyGuideActions.HubCourse] = []
     @State private var openTarget: StudyGuideHubTarget?
     @State private var showingGenerator = false
+    /// Courses whose full list of upcoming exams is showing.
+    @State private var expandedCourses: Set<String> = []
     /// Set when "Make a study guide" is pressed on an exam row.
     @State private var generatorPreset: (courseId: String, examId: String)?
 
@@ -85,9 +87,18 @@ struct StudyGuideHubView<Destination: View>: View {
     /// as a void while an exam is ahead. A past exam without a guide has
     /// nothing to offer and is left off.
     private func load() {
-        courses = store.studyGuideHub().filter { course in
+        let kept = store.studyGuideHub().filter { course in
             course.exams.contains { !$0.guides.isEmpty || !$0.isPast } || !course.practiceSets.isEmpty
         }
+        // The course with the nearest exam first; courses with none ahead
+        // keep their order after them.
+        func soonest(_ course: StudyGuideActions.HubCourse) -> Date {
+            course.exams.filter { !$0.isPast }.map(\.exam.startsAt).min() ?? .distantFuture
+        }
+        courses = kept.enumerated().sorted { a, b in
+            let (x, y) = (soonest(a.element), soonest(b.element))
+            return x == y ? a.offset < b.offset : x < y
+        }.map(\.element)
     }
 
     // MARK: - Content
@@ -171,7 +182,21 @@ struct StudyGuideHubView<Destination: View>: View {
                 .tracking(-0.3)
                 .foregroundStyle(GRASPColor.textPrimary)
             if !upcoming.isEmpty {
-                group("Upcoming exams", upcoming.map { examRow($0, in: course.course) })
+                let limit = 3
+                let expanded = expandedCourses.contains(course.id)
+                let shown = expanded ? upcoming : Array(upcoming.prefix(limit))
+                group("Upcoming exams", shown.map { examRow($0, in: course.course) })
+                if upcoming.count > limit {
+                    Button(expanded ? "Show fewer" : "Show \(upcoming.count - limit) more") {
+                        withAnimation(Motion.fade) {
+                            if expanded { expandedCourses.remove(course.id) } else { expandedCourses.insert(course.id) }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.graspUI(size: 13, weight: .medium))
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .padding(.top, 2)
+                }
             }
             if !course.practiceSets.isEmpty {
                 group("Practice sets", course.practiceSets.map { practiceRow($0, in: course.course) })
