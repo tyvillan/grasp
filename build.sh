@@ -51,6 +51,13 @@ if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
+# The brand yellow as the app's accent colour (gold in light mode), so the
+# system's own selected states, such as the Settings tab strip, follow it.
+# Info.plist's NSAccentColorName names it.
+xcrun actool Resources/Assets.xcassets --compile "$APP_DIR/Contents/Resources" \
+  --platform macosx --minimum-deployment-target 14.0 --accent-color AccentColor \
+  --output-partial-info-plist /dev/null >/dev/null
+
 # Desktop widgets. A widget has to be an app extension (.appex), which
 # SwiftPM can't produce, so it's built from the GRASPWidgetsMac target in the
 # iOS Xcode project -- the same widget code the iPhone uses -- and embedded

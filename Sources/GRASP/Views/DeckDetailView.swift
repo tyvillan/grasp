@@ -585,9 +585,19 @@ struct DeckDetailView: View {
             }
             .help("Pick up the test you left, at the next question")
         }
-        modeButton("Test", "checklist", prominent: false) { testPhase = .setup }
-            .disabled(activeCount == 0)
-            .help("A graded quiz on this deck's cards")
+        // Test is never dimmed while the deck has cards. With none approved
+        // yet it explains itself instead of looking broken.
+        modeButton("Test", "checklist", prominent: false) {
+            if activeCount == 0 {
+                cardRefineResult = CardRefineMessage(
+                    icon: "checklist", title: "Approve some cards first",
+                    lead: "A test asks about approved cards, and every card in this deck is still a draft or suspended. Approve the ones that look right, then come back.")
+            } else {
+                testPhase = .setup
+            }
+        }
+        .disabled(cards.isEmpty)
+        .help("A graded quiz on this deck's cards")
     }
 
     /// The right side of the toolbar, which follows the Cards / Overview

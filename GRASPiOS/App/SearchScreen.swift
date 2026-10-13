@@ -32,7 +32,44 @@ struct SearchScreen: View {
         }
         .graspList()
         .navigationTitle("Search")
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Words in your notes")
+        .navigationBarTitleDisplayMode(.inline)
+        // The system keeps a title small and centred over a list that never
+        // scrolls, so the title and the field are drawn here, like the other
+        // tabs' large titles.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Search")
+                    .font(.graspDisplay(34))
+                    .tracking(-0.7)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.graspUI(size: 14))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                    TextField("Words in your notes", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .font(.graspBody)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 40)
+                .background(GRASPColor.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(GRASPColor.hairline, lineWidth: 1))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            .background(GRASPColor.canvas)
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .onChange(of: query) { _, newValue in
             results = (try? store.searchNotes(query: newValue)) ?? []
         }

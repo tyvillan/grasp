@@ -13,6 +13,14 @@ struct GRASPiOSApp: App {
 
     init() {
         _ = GRASPFonts.available
+        // The tab bar is a solid panel with a hairline on top, in both
+        // appearances, rather than the system's translucent glass.
+        let bar = UITabBarAppearance()
+        bar.configureWithOpaqueBackground()
+        bar.backgroundColor = UIColor(GRASPColor.surface)
+        bar.shadowColor = UIColor(GRASPColor.hairline)
+        UITabBar.appearance().standardAppearance = bar
+        UITabBar.appearance().scrollEdgeAppearance = bar
     }
 
     var body: some Scene {

@@ -54,7 +54,15 @@ struct ExamScreen: View {
             }
         }
         .background(GRASPColor.canvas)
-        .fullScreenCover(item: $testPhase, onDismiss: load) { phase in
+        .testFlow($testPhase, onDismiss: load) {
+            if let page {
+                TestSetupSheet(deckIds: page.deckIds, deckName: page.exam.title,
+                               onResume: { id in $testPhase.advance(to: TestPhase.resuming(id, store: store), store: store) },
+                               guide: (page, testScopeKey)) { attemptId, questions, aiWarning in
+                    $testPhase.advance(to: .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning), store: store)
+                }
+            }
+        } run: { phase in
             if let page { testView(phase, page: page) }
         }
         .navigationTitle(page?.exam.title ?? "Exam")
@@ -134,24 +142,16 @@ struct ExamScreen: View {
     private func testView(_ phase: TestPhase, page: StudyGuideActions.ExamPage) -> some View {
         switch phase {
         case .setup:
-            ScrollView {
-                TestSetupSheet(deckIds: page.deckIds, deckName: page.exam.title,
-                               onResume: { id in testPhase = TestPhase.resuming(id, store: store) },
-                               guide: (page, testScopeKey)) { attemptId, questions, aiWarning in
-                    testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 24)
-            }
+            EmptyView()   // presented as a sheet by `testFlow`
         case .running(let attemptId, let questions, let aiWarning, let answered):
             TestRunView(attemptId: attemptId, deckName: page.exam.title, questions: questions, aiWarning: aiWarning,
                         answered: answered) { graded in
                 _ = try? store.finishTest(attemptId: attemptId)
-                testPhase = .results(attemptId: attemptId, graded: graded)
+                $testPhase.advance(to: .results(attemptId: attemptId, graded: graded), store: store)
             }
         case .results(let attemptId, let graded):
             TestResultsView(deckName: page.exam.title, attemptId: attemptId, graded: graded, deckIds: page.deckIds) { id, questions in
-                testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+                $testPhase.advance(to: .running(attemptId: id, questions: questions, aiWarning: nil), store: store)
             }
         }
     }

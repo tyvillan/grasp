@@ -9,29 +9,78 @@ struct MainTabView: View {
     /// A deck a widget tap asked for, pushed onto Today's stack.
     @State private var widgetDeck: DeckRoute?
 
+    private struct TabSpec: Identifiable {
+        let id: String
+        let title: String
+        let symbol: String
+    }
+
+    private static let tabs = [
+        TabSpec(id: "today", title: "Today", symbol: "sun.max"),
+        TabSpec(id: "study", title: "Courses", symbol: "rectangle.stack"),
+        TabSpec(id: "calendar", title: "Calendar", symbol: "calendar"),
+        TabSpec(id: "settings", title: "Settings", symbol: "gearshape"),
+        TabSpec(id: "search", title: "Search", symbol: "magnifyingglass"),
+    ]
+
     var body: some View {
+        // The system's tab bar is Liquid Glass and floats over the content,
+        // so the bar is drawn here instead: a solid panel with a hairline,
+        // sitting in the bottom safe area so nothing ends up beneath it.
         TabView(selection: $tab) {
-            Tab("Today", systemImage: "sun.max", value: "today") {
+            Tab(value: "today") {
                 NavigationStack {
                     TodayView()
                         .navigationDestination(item: $widgetDeck) { DeckScreen(route: $0) }
                 }
             }
-            Tab("Courses", systemImage: "rectangle.stack", value: "study") {
+            Tab(value: "study") {
                 NavigationStack { CoursesView() }
             }
-            Tab("Calendar", systemImage: "calendar", value: "calendar") {
+            Tab(value: "calendar") {
                 NavigationStack { CalendarScreen() }
             }
-            Tab("Settings", systemImage: "gearshape", value: "settings") {
+            Tab(value: "settings") {
                 NavigationStack { SettingsScreen(onSwitchProfile: onSwitchProfile) }
             }
-            Tab(value: "search", role: .search) {
+            Tab(value: "search") {
                 NavigationStack { SearchScreen() }
             }
         }
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+        .tint(GRASPColor.accent)
         .onAppear(perform: openWidgetLink)
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Self.tabs) { spec in
+                let selected = tab == spec.id
+                Button {
+                    tab = spec.id
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: selected && spec.symbol == "sun.max" ? "sun.max.fill" : spec.symbol)
+                            .font(.system(size: 20, weight: .regular))
+                            .frame(height: 24)
+                        Text(spec.title)
+                            .font(.graspUI(size: 11, weight: selected ? .semibold : .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .foregroundStyle(selected ? GRASPColor.accent : GRASPColor.textTertiary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(spec.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .background(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+        .background(GRASPColor.surface.ignoresSafeArea(edges: .bottom))
     }
 
     private func openWidgetLink() {

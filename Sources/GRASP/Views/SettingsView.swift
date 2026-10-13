@@ -13,10 +13,171 @@ struct SettingsView: View {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
             AISettingsTab()
-                .tabItem { Label("AI", systemImage: "sparkles") }
+                // The sparkle is the AI mark, so it is yellow whether or
+                // not its tab is the selected one.
+                .tabItem { Label { Text("AI") } icon: { Image(nsImage: Self.yellowSparkle) } }
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
         }
+        .tint(GRASPColor.accent)
+    }
+
+    /// The sparkle as a non-template image in the brand yellow, which the
+    /// toolbar's tab strip draws as is instead of tinting.
+    private static let yellowSparkle: NSImage = {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+            .applying(.init(paletteColors: [NSColor(red: 1, green: 0.831, blue: 0.231, alpha: 1)]))
+        let image = NSImage(systemSymbolName: AIGlyph.symbol, accessibilityDescription: "AI")?
+            .withSymbolConfiguration(configuration) ?? NSImage()
+        image.isTemplate = false
+        return image
+    }()
+}
+
+// MARK: - Page pieces
+
+/// A settings tab's page: the app's ground, a column of grouped boxes. It
+/// replaces the system's grouped form, which drew in the system's grey and
+/// its own type.
+private struct SettingsPage<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                content()
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(GRASPColor.canvas)
+        .font(.graspBody)
+        .foregroundStyle(GRASPColor.textPrimary)
+        .tint(GRASPColor.accent)
+        .toggleStyle(GRASPSwitchStyle())
+        .buttonStyle(GRASPQuietButton())
+        .textFieldStyle(GRASPFieldStyle())
+    }
+}
+
+/// A heading in Bricolage over a box of rows split by hairlines.
+private struct SettingsGroup<Content: View>: View {
+    let title: String
+    var systemImage: String?
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.graspUI(size: 12, weight: .semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                }
+                Text(title)
+                    .font(.graspDisplay(17, heavy: false))
+                    .tracking(-0.2)
+                    .foregroundStyle(GRASPColor.textPrimary)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline, lineWidth: 1)
+            )
+        }
+    }
+}
+
+/// One row in a group: padded, with a hairline above all but the first.
+private struct SettingsRow<Content: View>: View {
+    var showsDivider = true
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsDivider { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+            VStack(alignment: .leading, spacing: 8) {
+                content()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A number you step: the words on the left, the stepper at the right edge.
+private struct StepperRow: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    var step = 1
+    let text: String
+
+    var body: some View {
+        HStack {
+            Text(text).monospacedDigit()
+            Spacer()
+            Stepper("", value: $value, in: range, step: step)
+                .labelsHidden()
+        }
+    }
+}
+
+/// A muted line of explanation under a control.
+private struct Footnote: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .graspType(.meta)
+            .foregroundStyle(GRASPColor.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// An outlined pill that turns coral only when the pointer is on it, for
+/// the few actions that remove something.
+private struct DangerOnHoverButton: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.graspUI(size: 13.5, weight: .medium))
+            .foregroundStyle(hovering ? GRASPColor.rejected : GRASPColor.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 30)
+            .background(Capsule().fill(hovering ? GRASPColor.rejectedSoft : .clear))
+            .overlay(Capsule().strokeBorder(hovering ? GRASPColor.rejected.opacity(0.6) : GRASPColor.textPrimary.opacity(0.4), lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .contentShape(Capsule())
+            .onHover { hovering = $0 }
+            .animation(Motion.fade, value: hovering)
+    }
+}
+
+/// A web link in the page's own look: gold text, underlined on hover.
+private struct LinkText: View {
+    let title: String
+    let url: URL
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(url)
+        } label: {
+            Text(title)
+                .underline(hovering, color: GRASPColor.accent)
+        }
+        .buttonStyle(.plain)
+        .font(.graspUI(size: 12.5, weight: .medium))
+        .foregroundStyle(GRASPColor.accent)
+        .onHover { hovering = $0 }
+        .help(url.absoluteString)
     }
 }
 
@@ -30,35 +191,28 @@ private struct GeneralSettingsTab: View {
     @AppStorage("focusCardTarget") private var focusCardTarget = 20
 
     var body: some View {
-        Form {
-            Section("Study Goals") {
-                Stepper(value: $dailyGoal, in: 0...500, step: 5) {
-                    Text(dailyGoal == 0 ? "No daily goal" : "\(dailyGoal) cards a day")
-                        .monospacedDigit()
+        SettingsPage {
+            SettingsGroup(title: "Study goals") {
+                SettingsRow(showsDivider: false) {
+                    StepperRow(value: $dailyGoal, range: 0...500, step: 5, text: dailyGoal == 0 ? "No daily goal" : "\(dailyGoal) cards a day")
+                    Footnote("Sets the progress bar on Home and what counts as a full day. Your study streak counts any day with at least one review, whatever the goal, so a light day still keeps it alive.")
                 }
-                Text("Sets the progress bar on Home and what counts as a full day. Your study streak counts any day with at least one review, whatever the goal -- so a light day still keeps it alive.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
             }
 
-            Section("Focus Timer") {
-                Stepper(value: $focusWorkMinutes, in: 5...90, step: 5) {
-                    Text("\(focusWorkMinutes) min work interval").monospacedDigit()
+            SettingsGroup(title: "Focus timer") {
+                SettingsRow(showsDivider: false) {
+                    StepperRow(value: $focusWorkMinutes, range: 5...90, step: 5, text: "\(focusWorkMinutes) min work interval")
                 }
-                Stepper(value: $focusBreakMinutes, in: 1...30) {
-                    Text("\(focusBreakMinutes) min break").monospacedDigit()
+                SettingsRow {
+                    StepperRow(value: $focusBreakMinutes, range: 1...30, text: "\(focusBreakMinutes) min break")
                 }
-                Stepper(value: $focusCardTarget, in: 0...200, step: 5) {
-                    Text(focusCardTarget == 0 ? "No card target" : "\(focusCardTarget) cards per interval")
-                        .monospacedDigit()
+                SettingsRow {
+                    StepperRow(value: $focusCardTarget, range: 0...200, step: 5, text: focusCardTarget == 0 ? "No card target" : "\(focusCardTarget) cards per interval")
+                    Footnote("Used by the focus timer in a flashcard session. It never pauses or interrupts you. When an interval is up the bar changes colour and waits.")
                 }
-                Text("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 480, height: 430)
+        .frame(width: 480, height: 460)
     }
 }
 
@@ -68,14 +222,19 @@ private struct AccountSettingsTab: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        Form {
-            Section("Profile") {
-                Text(store.profile.name)
+        SettingsPage {
+            SettingsGroup(title: "Profile") {
+                SettingsRow(showsDivider: false) {
+                    HStack {
+                        Text("Name")
+                        Spacer()
+                        Text(store.profile.name).foregroundStyle(GRASPColor.textSecondary)
+                    }
+                }
             }
             AccountSyncSection()
         }
-        .formStyle(.grouped)
-        .frame(width: 480, height: 580)
+        .frame(width: 480, height: 560)
     }
 }
 
@@ -91,14 +250,13 @@ private struct AISettingsTab: View {
 
     var body: some View {
         @Bindable var store = store
-        Form {
+        SettingsPage {
             modelSection
             cloudSection
             localSection
             featuresSection
         }
-        .formStyle(.grouped)
-        .frame(width: 480, height: 640)
+        .frame(width: 480, height: 660)
         .task {
             await store.refreshOllamaStatus()
             if store.hasCloudKey || AIKeyStore.read() != nil { await store.testCloudConnection() }
@@ -127,38 +285,43 @@ private struct AISettingsTab: View {
     // MARK: Model
 
     private var modelSection: some View {
-        Section("Model") {
-            Picker("Runs on", selection: Binding(
-                get: { store.aiMode },
-                set: { mode in
-                    if mode.usesCloud && !AIPreferences.hasAcceptedCloudNotice {
-                        pendingMode = mode
-                    } else {
-                        store.setAIMode(mode)
-                    }
+        SettingsGroup(title: "Model") {
+            SettingsRow(showsDivider: false) {
+                HStack {
+                    Text("Runs on")
+                    Spacer()
+                    GRASPSegmented(
+                        selection: Binding(
+                            get: { store.aiMode },
+                            set: { mode in
+                                if mode.usesCloud && !AIPreferences.hasAcceptedCloudNotice {
+                                    pendingMode = mode
+                                } else {
+                                    store.setAIMode(mode)
+                                }
+                            }
+                        ),
+                        options: AIMode.allCases.map { ($0, $0.label) }
+                    )
                 }
-            )) {
-                ForEach(AIMode.allCases) { Text($0.label).tag($0) }
             }
-            .pickerStyle(.segmented)
-            HStack(alignment: .firstTextBaseline) {
-                Text(store.generatorStatus)
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
-                    .font(.graspCaption)
+            SettingsRow {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(store.generatorStatus)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                    Spacer()
+                    Button("Refresh") { Task { await store.refreshGeneratorStatus() } }
+                }
+                Footnote(modeExplanation)
             }
-            Text(modeExplanation)
-                .font(.graspCaption)
-                .foregroundStyle(.secondary)
         }
     }
 
     private var modeExplanation: String {
         switch store.aiMode {
         case .local:
-            return "Everything runs on this Mac -- Ollama if it's running, else Apple's on-device model. Nothing leaves your Mac. With no model at all, cards come from the parser only."
+            return "Everything runs on this Mac: Ollama if it's running, else Apple's on-device model. Nothing leaves your Mac. With no model at all, cards come from the parser only."
         case .cloud:
             return "Everything runs on Google Gemini: much stronger lessons and cards than a local model, and quick. When today's free limit runs out, AI features stop until it resets at midnight Pacific."
         case .automatic:
@@ -169,63 +332,83 @@ private struct AISettingsTab: View {
     // MARK: Cloud
 
     private var cloudSection: some View {
-        Section("Cloud: \(CloudProvider.name)") {
+        SettingsGroup(title: "Cloud: \(CloudProvider.name)") {
             if store.hasCloudKey {
-                HStack(spacing: 8) {
-                    StatusBadge(text: cloudStatusText, isPositive: cloudIsHealthy)
-                    Spacer()
-                    Button {
-                        Task { await store.testCloudConnection() }
-                    } label: {
-                        if store.isCheckingCloud { ProgressView().controlSize(.small) } else { Text("Test Connection") }
+                SettingsRow(showsDivider: false) {
+                    HStack(spacing: 8) {
+                        StatusBadge(text: cloudStatusText, tone: cloudTone)
+                        Spacer()
+                        Button {
+                            Task { await store.testCloudConnection() }
+                        } label: {
+                            if store.isCheckingCloud { ProgressView().controlSize(.small) } else { Text("Test connection") }
+                        }
+                        .disabled(store.isCheckingCloud)
+                        Button("Remove key") { Task { await store.removeCloudKey() } }
+                            .buttonStyle(DangerOnHoverButton())
                     }
-                    .disabled(store.isCheckingCloud)
-                    Button("Remove Key", role: .destructive) { Task { await store.removeCloudKey() } }
                 }
                 if !store.cloudModels.isEmpty {
-                    Picker("Model", selection: $cloudModel) {
-                        Text(automaticModelLabel).tag("")
-                        ForEach(store.cloudModels, id: \.self) { Text(modelLabel($0)).tag($0) }
-                    }
-                    .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
-                    if let note = modelSwitchNote {
-                        Label(note, systemImage: "arrow.triangle.branch")
-                            .font(.graspCaption)
-                            .foregroundStyle(.secondary)
+                    SettingsRow {
+                        HStack {
+                            Text("Model")
+                            Spacer()
+                            GRASPPicker(
+                                selection: $cloudModel,
+                                options: [("", automaticModelLabel)] + store.cloudModels.map { ($0, modelLabel($0)) }
+                            )
+                            .frame(maxWidth: 260, alignment: .trailing)
+                        }
+                        .onChange(of: cloudModel) { _, new in store.setCloudModel(new) }
+                        if let note = modelSwitchNote {
+                            Footnote(note)
+                        }
                     }
                 }
                 if let detail = cloudErrorDetail {
-                    Label(detail, systemImage: "exclamationmark.triangle.fill")
-                        .font(.graspCaption)
-                        .foregroundStyle(GRASPColor.rejected)
-                        .textSelection(.enabled)
+                    SettingsRow {
+                        Label(detail, systemImage: "exclamationmark.triangle.fill")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.rejected)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                usageRow
+                SettingsRow { usageRow }
             } else {
                 if let problem = store.cloudKeyProblem {
-                    Label(problem, systemImage: "exclamationmark.triangle.fill")
-                        .font(.graspCaption)
-                        .foregroundStyle(GRASPColor.rejected)
-                }
-                HStack(spacing: 8) {
-                    SecureField("Paste your Gemini API key", text: $keyDraft)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Save") {
-                        let key = keyDraft
-                        keyDraft = ""
-                        Task { await store.saveCloudKey(key) }
+                    SettingsRow(showsDivider: false) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.rejected)
                     }
-                    .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                Link("Get a free key at Google AI Studio", destination: CloudProvider.keyPageURL)
-                    .font(.graspCaption)
-                Text("Stored in your Keychain, never in your library or synced to GRASP's server.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                SettingsRow(showsDivider: store.cloudKeyProblem != nil) {
+                    HStack(spacing: 8) {
+                        SecureField("Paste your Gemini API key", text: $keyDraft)
+                        Button("Save") {
+                            let key = keyDraft
+                            keyDraft = ""
+                            Task { await store.saveCloudKey(key) }
+                        }
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    LinkText(title: "Get a free key at Google AI Studio", url: CloudProvider.keyPageURL)
+                    Footnote("Stored in your Keychain, never in your library or synced to GRASP's server.")
+                }
             }
-            Label(Self.freeTierNotice, systemImage: "exclamationmark.triangle")
-                .font(.graspCaption)
-                .foregroundStyle(.secondary)
+            SettingsRow {
+                Label {
+                    Text(Self.freeTierNotice)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
         }
     }
 
@@ -243,8 +426,8 @@ private struct AISettingsTab: View {
 
     private func modelLabel(_ model: String) -> String {
         _ = store.cloudUsageRevision
-        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model) -- \(note)" }
-        if model == CloudUsage.shared.lastUsedModel { return "\(model) -- in use" }
+        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model), \(note)" }
+        if model == CloudUsage.shared.lastUsedModel { return "\(model), in use" }
         return model
     }
 
@@ -260,6 +443,15 @@ private struct AISettingsTab: View {
 
     /// Why the last cloud request or check didn't go through, in words.
     private var cloudErrorDetail: String? {
+        guard let raw = rawCloudErrorDetail else { return nil }
+        // A system error's debug description is not for reading.
+        if raw.contains("Error Domain=") || raw.contains("UserInfo=") {
+            return "GRASP couldn't reach Google. Check your connection, then test again."
+        }
+        return raw
+    }
+
+    private var rawCloudErrorDetail: String? {
         _ = store.cloudUsageRevision
         if case .failed(let detail) = store.cloudCheck { return detail }
         if case .offline = store.cloudCheck {
@@ -271,46 +463,51 @@ private struct AISettingsTab: View {
         return CloudUsage.shared.lastTransportError
     }
 
-    private var cloudIsHealthy: Bool {
-        if case .ok = store.cloudCheck, CloudUsage.shared.pausedUntil == nil { return true }
-        return false
+    /// Red is only for a real failure: a check in flight or not yet made
+    /// is neutral.
+    private var cloudTone: StatusBadge.Tone {
+        _ = store.cloudUsageRevision
+        if CloudUsage.shared.pausedUntil != nil { return .negative }
+        switch store.cloudCheck {
+        case .ok: return .positive
+        case .badKey, .quotaUsedUp, .offline, .failed: return .negative
+        case nil: return .neutral
+        }
     }
 
     private var cloudStatusText: String {
         _ = store.cloudUsageRevision
-        if CloudUsage.shared.pausedUntil != nil { return "Free Limit Reached" }
+        if CloudUsage.shared.pausedUntil != nil { return "Free limit reached" }
         switch store.cloudCheck {
         case .ok: return "Connected"
-        case .badKey: return "Key Not Accepted"
-        case .quotaUsedUp: return "Free Limit Reached"
-        case .offline: return "Can't Reach Google"
-        case .failed: return "Check Failed"
-        case nil: return store.isCheckingCloud ? "Checking…" : "Not Checked"
+        case .badKey: return "Key not accepted"
+        case .quotaUsedUp: return "Free limit reached"
+        case .offline: return "Can't reach Google"
+        case .failed: return "Check failed"
+        case nil: return store.isCheckingCloud ? "Checking…" : "Not checked"
         }
     }
 
     private var usageRow: some View {
         _ = store.cloudUsageRevision
         let used = CloudUsage.shared.requestsToday
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Today")
                 Spacer()
                 Text("\(used) of about \(CloudProvider.estimatedRequestsPerDay) free requests")
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(GRASPColor.textSecondary)
             }
-            ProgressBar(value: min(used, CloudProvider.estimatedRequestsPerDay), total: CloudProvider.estimatedRequestsPerDay)
-            HStack(spacing: 4) {
-                Text("An estimate: Google sets each project's own limit, and resets it at midnight Pacific.")
-                Link("See yours", destination: CloudProvider.usagePageURL)
+            ProgressBar(value: min(used, CloudProvider.estimatedRequestsPerDay), total: CloudProvider.estimatedRequestsPerDay,
+                        tint: GRASPColor.textPrimary.opacity(0.55), height: 5)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Footnote("An estimate: Google sets each project's own limit, and resets it at midnight Pacific.")
+                Spacer(minLength: 0)
+                LinkText(title: "See yours", url: CloudProvider.usagePageURL)
             }
-            .font(.graspCaption)
-            .foregroundStyle(.secondary)
             if let last = CloudUsage.shared.lastFallback, store.aiMode == .automatic {
-                Text("Last switch to local: \(last)")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                Footnote("Last switch to local: \(last)")
             }
         }
     }
@@ -318,11 +515,13 @@ private struct AISettingsTab: View {
     // MARK: Local
 
     private var localSection: some View {
-        Section("Local: Ollama") {
-            ollamaStatusRow
-            ollamaDetailText
+        SettingsGroup(title: "Local: Ollama") {
+            SettingsRow(showsDivider: false) { ollamaStatusRow }
+            SettingsRow { ollamaDetailText }
             if !store.ollamaStatus.isRunning {
-                Button("Setup Local AI…") { showingOllamaSetup = true }
+                SettingsRow {
+                    Button("Set up local AI…") { showingOllamaSetup = true }
+                }
             }
         }
     }
@@ -331,19 +530,19 @@ private struct AISettingsTab: View {
 
     private var featuresSection: some View {
         @Bindable var store = store
-        return Section("AI Features") {
-            Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
-            Text("Custom Tests mix in a few fresh, written questions grounded in your notes. They're generated each time and never saved as cards or scheduled.")
-                .font(.graspCaption)
-                .foregroundStyle(.secondary)
+        return SettingsGroup(title: "AI features", systemImage: AIGlyph.symbol) {
+            SettingsRow(showsDivider: false) {
+                Toggle("Include AI-generated practice questions in tests", isOn: $store.isAITestQuestionsEnabled)
+                Footnote("Custom tests mix in a few fresh, written questions grounded in your notes. They're generated each time and never saved as cards or scheduled.")
+            }
         }
     }
 
     private var ollamaStatusRow: some View {
         HStack(spacing: 8) {
             StatusBadge(
-                text: store.ollamaStatus.isRunning ? "Ollama Running" : "Ollama Not Detected",
-                isPositive: store.ollamaStatus.isRunning
+                text: store.ollamaStatus.isRunning ? "Ollama running" : "Ollama not detected",
+                tone: store.ollamaStatus.isRunning ? .positive : .negative
             )
             Spacer()
             Button {
@@ -352,12 +551,13 @@ private struct AISettingsTab: View {
                 if store.isCheckingOllama {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise").font(.graspUI(size: 11, weight: .semibold))
+                        Text("Check again")
+                    }
                 }
             }
-            .buttonStyle(.borderless)
             .disabled(store.isCheckingOllama)
-            .help("Check again")
         }
     }
 
@@ -366,16 +566,12 @@ private struct AISettingsTab: View {
         if store.ollamaStatus.isRunning {
             let models = store.ollamaStatus.models
             if models.isEmpty {
-                Text("Connected, but no models are pulled yet -- run \"ollama pull qwen3.5:9b\" in Terminal.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                Footnote("Connected, but no models are pulled yet. Run \"ollama pull qwen3.5:9b\" in Terminal.")
             } else {
                 OllamaModelPicker(installed: models)
             }
         } else {
-            Text("GRASP couldn't reach a local Ollama server on this Mac. Install it, or start it if it's already installed, to enable on-device AI refinement.")
-                .font(.graspCaption)
-                .foregroundStyle(.secondary)
+            Footnote("GRASP couldn't reach a local Ollama server on this Mac. Install it, or start it if it's already installed, to enable on-device AI refinement.")
         }
     }
 
@@ -392,26 +588,39 @@ private struct AISettingsTab: View {
     }
 }
 
-/// A colored capsule for a two-state fact -- the same tint/tintSoft
-/// language `DeckDetailView`'s card chips use, reused here rather than a
-/// plain colored dot, so a status this prominent gets the same visual
-/// weight as everywhere else in the app that reports a state at a glance.
+/// A capsule for a fact's state. Green for good, coral for a real failure,
+/// muted while it is unknown or being checked.
 private struct StatusBadge: View {
+    enum Tone { case positive, negative, neutral }
     let text: String
-    let isPositive: Bool
+    let tone: Tone
+
+    private var tint: Color {
+        switch tone {
+        case .positive: return GRASPColor.success
+        case .negative: return GRASPColor.rejected
+        case .neutral: return GRASPColor.textTertiary
+        }
+    }
+    private var soft: Color {
+        switch tone {
+        case .positive: return GRASPColor.successSoft
+        case .negative: return GRASPColor.rejectedSoft
+        case .neutral: return GRASPColor.inset
+        }
+    }
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(isPositive ? GRASPColor.success : GRASPColor.rejected)
-                .frame(width: 6, height: 6)
+            Circle().fill(tint).frame(width: 6, height: 6)
             Text(text)
         }
-        .font(.graspCaption.weight(.semibold))
-        .foregroundStyle(isPositive ? GRASPColor.success : GRASPColor.rejected)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(isPositive ? GRASPColor.successSoft : GRASPColor.rejectedSoft, in: Capsule())
+        .font(.graspUI(size: 12, weight: .semibold))
+        .foregroundStyle(tone == .neutral ? GRASPColor.textSecondary : tint)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(soft, in: Capsule())
+        .overlay(Capsule().strokeBorder(tone == .neutral ? GRASPColor.hairline : .clear, lineWidth: 1))
     }
 }
 
@@ -494,19 +703,21 @@ private struct OllamaModelPicker: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker("Model", selection: $chosen) {
-                Text(automaticName.map { "Automatic (\($0))" } ?? "Automatic").tag("")
-                ForEach(installed, id: \.self) { Text($0).tag($0) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Model")
+                Spacer()
+                GRASPPicker(
+                    selection: $chosen,
+                    options: [("", automaticName.map { "Automatic (\($0))" } ?? "Automatic")]
+                        + installed.map { ($0, $0) }
+                )
+                .frame(maxWidth: 260, alignment: .trailing)
             }
             if !chosen.isEmpty, !installed.contains(chosen) {
-                Text("\(chosen) isn't installed any more, so GRASP is using \(automaticName ?? "another model").")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                Footnote("\(chosen) isn't installed any more, so GRASP is using \(automaticName ?? "another model").")
             } else {
-                Text("Used for lessons, card refinement and AI test questions. Larger models write better lessons but take longer.")
-                    .font(.graspCaption)
-                    .foregroundStyle(.secondary)
+                Footnote("Used for lessons, card refinement and AI test questions. Larger models write better lessons but take longer.")
             }
         }
     }
@@ -522,19 +733,21 @@ private struct PasswordForOtherDevices: View {
     @State private var working = false
     @State private var result: String?
     @State private var failed = false
+    private let minimumLength = 6
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Password for other devices").font(.graspHeadline)
-            Text("GRASP on Windows signs in with email and password. Set a password here, then sign in there with this account's email.")
-                .font(.graspCaption).foregroundStyle(.secondary)
-            HStack {
-                SecureField("New password (at least 6 characters)", text: $password)
-                Button("Set Password") { save() }
-                    .disabled(working || password.count < 6)
+            FieldLabel("New password")
+            HStack(spacing: 8) {
+                SecureField("New password", text: $password)
+                Button("Set password") { save() }
+                    .disabled(working || password.count < minimumLength)
             }
+            Footnote("At least \(minimumLength) characters.")
             if let result {
-                Text(result).font(.graspCaption).foregroundStyle(failed ? .red : .secondary)
+                Text(result)
+                    .graspType(.meta)
+                    .foregroundStyle(failed ? GRASPColor.rejected : GRASPColor.textSecondary)
             }
         }
     }
@@ -564,30 +777,53 @@ private struct AccountSyncSection: View {
 
     var body: some View {
         let sync = store.sync!
-        Section("Account & Sync") {
+        Group {
             if let account = sync.account {
-                LabeledContent("Signed in as", value: account.email ?? "Your account")
-                HStack {
-                    statusText(sync)
-                    Spacer()
-                    Button("Sync Now") { sync.syncNow() }
-                        .disabled(sync.state == .syncing || sync.state == .signedOut)
-                }
-                if sync.state == .signedOut {
-                    Text("This Mac's sign-in has expired. Sign in again to keep syncing -- nothing here is lost.")
-                        .font(.graspCaption).foregroundStyle(.secondary)
-                    SignInButtons { signedIn in sync.resume(signedIn) }
+                SettingsGroup(title: "Sync") {
+                    SettingsRow(showsDivider: false) {
+                        HStack {
+                            Text("Signed in as")
+                            Spacer()
+                            Text(account.email ?? "Your account").foregroundStyle(GRASPColor.textSecondary)
+                        }
+                    }
+                    SettingsRow {
+                        HStack {
+                            statusText(sync)
+                            Spacer()
+                            Button("Sync now") { sync.syncNow() }
+                                .disabled(sync.state == .syncing || sync.state == .signedOut)
+                        }
+                        if sync.state == .signedOut {
+                            Footnote("This Mac's sign-in has expired. Sign in again to keep syncing. Nothing here is lost.")
+                            SignInButtons { signedIn in sync.resume(signedIn) }
+                        }
+                    }
                 }
                 if account.provider == "google" {
-                    PasswordForOtherDevices(userId: account.userId)
+                    SettingsGroup(title: "Password for other devices") {
+                        SettingsRow(showsDivider: false) {
+                            PasswordForOtherDevices(userId: account.userId)
+                        }
+                    }
+                    Footnote("GRASP on Windows signs in with email and password. Set a password here, then sign in there with this account's email.")
+                        .padding(.horizontal, 4)
+                        .padding(.top, -10)
                 }
-                Button("Sign Out…", role: .destructive) { confirmingSignOut = true }
+                HStack {
+                    Spacer()
+                    Button("Sign out…") { confirmingSignOut = true }
+                        .buttonStyle(DangerOnHoverButton())
+                }
             } else {
-                Text("This profile's library is only on this Mac. Sign in to sync it with your other devices -- it's uploaded to your account, and anything you sign in to later gets a copy.")
-                    .font(.graspCaption).foregroundStyle(.secondary)
-                SignInButtons { signedIn in link(signedIn) }
-                if let linkError {
-                    Text(linkError).font(.graspCaption).foregroundStyle(.red)
+                SettingsGroup(title: "Sync") {
+                    SettingsRow(showsDivider: false) {
+                        Footnote("This profile's library is only on this Mac. Sign in to sync it with your other devices. It's uploaded to your account, and anything you sign in to later gets a copy.")
+                        SignInButtons { signedIn in link(signedIn) }
+                        if let linkError {
+                            Text(linkError).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                        }
+                    }
                 }
             }
         }
@@ -606,7 +842,7 @@ private struct AccountSyncSection: View {
         .sheet(isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } })) {
             ConfirmationSheet(
                 icon: "arrow.triangle.merge", title: "Your account already has a library",
-                message: "This profile's library will be added to the one already in your account. If both came from the same notes you'll get duplicate cards -- to use your account's library on this Mac instead, switch profile and sign in from there.",
+                message: "This profile's library will be added to the one already in your account. If both came from the same notes you'll get duplicate cards. To use your account's library on this Mac instead, switch profile and sign in from there.",
                 confirmTitle: "Combine them", isDestructive: false
             ) {
                 if let pendingLink { finishLink(pendingLink) }
@@ -618,17 +854,17 @@ private struct AccountSyncSection: View {
     private func statusText(_ sync: SyncController) -> some View {
         switch sync.state {
         case .syncing:
-            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing…") }
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Syncing…").foregroundStyle(GRASPColor.textSecondary) }
         case .failed(let message):
-            Text(message).foregroundStyle(.red).font(.graspCaption)
+            Text(message).foregroundStyle(GRASPColor.rejected).graspType(.meta)
         case .notConfigured:
-            Text("Sign-in isn't set up in this copy of GRASP.").font(.graspCaption).foregroundStyle(.secondary)
+            Footnote("Sign-in isn't set up in this copy of GRASP.")
         default:
             if let last = sync.lastSyncedAt {
                 Text("Last synced \(last.formatted(.relative(presentation: .named)))")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(GRASPColor.textSecondary)
             } else {
-                Text("Not synced yet").foregroundStyle(.secondary)
+                Text("Not synced yet").foregroundStyle(GRASPColor.textSecondary)
             }
         }
     }

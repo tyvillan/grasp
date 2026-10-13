@@ -35,6 +35,8 @@ struct DeckScreen: View {
     @State private var notice: String?
     @State private var generationFinished = 0
     @State private var confirmingApproveAll = false
+    /// Shown when Test is tapped on a deck with no approved cards yet.
+    @State private var approveFirstNotice = false
     /// Why the last "Generate Questions" run failed, shown with Retry
     /// instead of the "no new cards" message.
     @State private var additionFailure: String?
@@ -119,10 +121,16 @@ struct DeckScreen: View {
             Section {
                 studyButtons
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                if let why = studyUnavailableNote {
+                    Text(why)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 4, trailing: 0))
                 }
-                .pickerStyle(.segmented)
+                GRASPSegmented(
+                    selection: $tab, options: Tab.allCases.map { ($0, $0.rawValue) }, fillsWidth: true
+                )
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
             .listRowBackground(Color.clear)
@@ -169,7 +177,13 @@ struct DeckScreen: View {
         .fullScreenCover(isPresented: $learning, onDismiss: load) {
             LearnRoundView(deckIds: deckIds, deckName: route.name)
         }
-        .fullScreenCover(item: $testPhase, onDismiss: load) { phase in
+        .testFlow($testPhase, onDismiss: load) {
+            TestSetupSheet(deckIds: deckIds, deckName: route.name, onResume: { id in
+                $testPhase.advance(to: TestPhase.resuming(id, store: store), store: store)
+            }) { attemptId, questions, aiWarning in
+                $testPhase.advance(to: .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning), store: store)
+            }
+        } run: { phase in
             testView(phase)
         }
         .sheet(item: $editing) { card in
@@ -188,6 +202,12 @@ struct DeckScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+        }
+        .sheet(isPresented: $approveFirstNotice) {
+            ResultSheet(
+                icon: "checklist", title: "Approve some cards first",
+                leadText: "A test asks about approved cards, and every card in this deck is still a draft. Approve the ones that look right, then come back."
+            )
         }
         .sheet(isPresented: $confirmingApproveAll) {
             let aiDrafts = cards.filter { $0.status == .draft && $0.origin == .aiGenerated }.count
@@ -290,19 +310,40 @@ struct DeckScreen: View {
         }
     }
 
-    private var studyButtons: some View {
-        HStack(spacing: 10) {
-            StudyModeButton(title: "Study", subtitle: dueCount > 0 ? "\(dueCount) due" : "None due",
-                            icon: "rectangle.stack.fill", prominent: dueCount > 0) { studying = true }
-                .disabled(dueCount == 0)
-            StudyModeButton(title: "Learn", subtitle: "\(activeCount) cards",
-                            icon: "graduationcap.fill", prominent: dueCount == 0 && activeCount > 0) { learning = true }
-                .disabled(activeCount == 0)
-            StudyModeButton(title: "Test", subtitle: unfinishedTest.map { "\($0.answered)/\($0.total) saved" } ?? "Quiz",
-                            icon: "checklist", prominent: false) { testPhase = .setup }
-                .disabled(activeCount == 0)
+    /// One short line for why Study or Learn is dimmed, when it is.
+    private var studyUnavailableNote: String? {
+        let c = counts
+        if c.all == 0 { return nil }
+        if c.active == 0 {
+            return c.drafts > 0
+                ? "\(c.drafts) draft\(c.drafts == 1 ? "" : "s") to approve before you can study."
+                : "Nothing active to study. Reactivate suspended cards."
         }
-        .buttonStyle(.plain)
+        if dueCount == 0 { return "Nothing due right now. Learn or Test any time." }
+        return nil
+    }
+
+    /// The Mac's row: Study (yellow when cards are due), Learn, Test. Test is
+    /// never dimmed while the deck has cards; with none approved yet it says
+    /// what to do instead of looking broken.
+    private var studyButtons: some View {
+        HStack(spacing: 8) {
+            StudyPill(title: "Study", icon: "rectangle.stack.fill", style: .primary,
+                      detail: dueCount > 0 ? "\(dueCount)" : nil) { studying = true }
+                .disabled(dueCount == 0)
+            StudyPill(title: "Learn", icon: "graduationcap.fill", style: .quiet, detail: nil) { learning = true }
+                .disabled(activeCount == 0)
+            StudyPill(title: unfinishedTest == nil ? "Test" : "Continue test", icon: "checklist", style: .quiet,
+                      detail: unfinishedTest.map { "\($0.answered)/\($0.total)" }) {
+                if activeCount == 0 {
+                    approveFirstNotice = true
+                } else if let unfinishedTest {
+                    testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
+                } else {
+                    testPhase = .setup
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -404,25 +445,16 @@ struct DeckScreen: View {
     private func testView(_ phase: TestPhase) -> some View {
         switch phase {
         case .setup:
-            // The setup sheet has its own Cancel and Start buttons.
-            ScrollView {
-                TestSetupSheet(deckIds: deckIds, deckName: route.name, onResume: { id in
-                    testPhase = TestPhase.resuming(id, store: store)
-                }) { attemptId, questions, aiWarning in
-                    testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 24)
-            }
+            EmptyView()   // presented as a sheet by `testFlow`
         case .running(let attemptId, let questions, let aiWarning, let answered):
             TestRunView(attemptId: attemptId, deckName: route.name, questions: questions, aiWarning: aiWarning,
                         answered: answered) { graded in
                 _ = try? store.finishTest(attemptId: attemptId)
-                testPhase = .results(attemptId: attemptId, graded: graded)
+                $testPhase.advance(to: .results(attemptId: attemptId, graded: graded), store: store)
             }
         case .results(let attemptId, let graded):
             TestResultsView(deckName: route.name, attemptId: attemptId, graded: graded, deckIds: deckIds) { id, questions in
-                testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+                $testPhase.advance(to: .running(attemptId: id, questions: questions, aiWarning: nil), store: store)
             }
         }
     }
@@ -611,30 +643,44 @@ struct DeckScreen: View {
     }
 }
 
-private struct StudyModeButton: View {
+/// A compact mode button for the deck page's row. `primary` is the
+/// screen's one filled yellow button.
+private struct StudyPill: View {
+    enum Style { case primary, quiet }
     let title: String
-    let subtitle: String
     let icon: String
-    let prominent: Bool
+    let style: Style
+    let detail: String?
     let action: () -> Void
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.graspUI(size: 20))
-                Text(title).font(.graspUI(size: 14, weight: .semibold))
-                Text(subtitle).font(.graspUI(size: 11)).opacity(0.8)
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.graspUI(size: 12, weight: .semibold))
+                Text(title).font(.graspUI(size: 14, weight: .semibold)).lineLimit(1)
+                if let detail {
+                    Text(detail)
+                        .font(.graspUI(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                        .opacity(0.75)
+                }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            // The accent is dark gold in light mode and bright amber in
-            // dark, so the text on it flips to stay readable on both.
-            .foregroundStyle(prominent ? GRASPColor.dynamic(light: 0xFFFFFF, dark: 0x16130C) : GRASPColor.textPrimary)
-            .background(prominent ? GRASPColor.accent : GRASPColor.inset,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(height: 40)
+            .foregroundStyle(style == .primary && isEnabled ? GRASPColor.ink : GRASPColor.textPrimary)
+            .background {
+                if style == .primary && isEnabled {
+                    Capsule().fill(GRASPColor.brand)
+                } else {
+                    Capsule().fill(GRASPColor.surface)
+                        .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
+                }
+            }
             .opacity(isEnabled ? 1 : 0.45)
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
     }
 }
 

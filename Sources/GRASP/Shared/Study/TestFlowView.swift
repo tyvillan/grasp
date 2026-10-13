@@ -53,10 +53,48 @@ extension Binding where Value == TestPhase? {
             store.presentedStudySheets = Swift.max(0, store.presentedStudySheets - 1)
         }
         #else
-        wrappedValue = phase
+        // Leaving the setup sheet for the full-screen run: the sheet has to
+        // finish dismissing before the next presentation can start.
+        if case .setup? = wrappedValue {
+            wrappedValue = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                wrappedValue = phase
+            }
+        } else {
+            wrappedValue = phase
+        }
         #endif
     }
 }
+
+#if os(iOS)
+extension View {
+    /// A test's phases on iPhone: setup is a proper sheet (grabber, fitted
+    /// detent) and the questions and results are full screen.
+    func testFlow<Setup: View, Run: View>(
+        _ phase: Binding<TestPhase?>, onDismiss: @escaping () -> Void,
+        @ViewBuilder setup: @escaping () -> Setup,
+        @ViewBuilder run: @escaping (TestPhase) -> Run
+    ) -> some View {
+        let setupBinding = Binding<TestPhase?>(
+            get: { if case .setup? = phase.wrappedValue { return phase.wrappedValue } else { return nil } },
+            set: { if $0 == nil, case .setup? = phase.wrappedValue { phase.wrappedValue = nil } }
+        )
+        let runBinding = Binding<TestPhase?>(
+            get: { if case .setup? = phase.wrappedValue { return nil } else { return phase.wrappedValue } },
+            set: { if $0 == nil { phase.wrappedValue = nil } }
+        )
+        return self
+            .sheet(item: setupBinding, onDismiss: onDismiss) { _ in
+                setup()
+                    .presentationDetents([.height(620), .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: runBinding, onDismiss: onDismiss) { run($0) }
+    }
+}
+#endif
 
 /// One answered question, carrying enough state for the results screen to
 /// render it and, for a written question, let the user override a wrong
