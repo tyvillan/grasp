@@ -242,6 +242,10 @@ struct TestSetupSheet: View {
                             }
                         }
                         .toggleStyle(GRASPSwitchStyle())
+                        Text("Fresh questions written by AI for this test only. They aren't saved as cards.")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                         if store.isAITestQuestionsEnabled {
                             let saved = store.codeQuestionCount(inDecks: deckIds)
                             Text(saved > 0
