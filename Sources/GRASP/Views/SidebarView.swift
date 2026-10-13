@@ -90,7 +90,7 @@ struct SidebarView: View {
     private func courseRow(_ course: Course) -> some View {
         SidebarRow(isSelected: isSelected(course.id), namespace: selection) { hovering in
             CourseDot(color: store.courseColor(course), size: 8)
-                .scaleEffect(hovering ? 1.3 : 1)
+                .scaleEffect(hovering && !Motion.isReduced ? 1.3 : 1)
                 .animation(Motion.bouncy, value: hovering)
                 .frame(width: 20)
             Text(course.name)

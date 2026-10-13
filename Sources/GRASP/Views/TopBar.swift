@@ -66,6 +66,7 @@ private struct Wordmark: View {
                     .frame(width: 16, height: 16)
                     .rotationEffect(.degrees(isActive && !reduceMotion ? 90 : 0))
                     .scaleEffect(isActive && !reduceMotion ? 1.12 : 1)
+                    .opacity(isActive && reduceMotion ? 0.75 : 1)
                 Text("GRASP")
                     .font(.graspDisplay(22))
                     .tracking(isActive ? 22 * 0.07 : 0)

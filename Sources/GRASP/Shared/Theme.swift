@@ -436,6 +436,11 @@ enum Motion {
     /// Motion (an opacity-only change).
     static var countUp: Animation { isReduced ? instant : out(glideDuration) }
 
+    /// The 190 pt Home numeral rolling to its value: `base`-length, because the
+    /// digit morph blurs and a longer roll is still soft after `glide`.
+    /// Instant under Reduce Motion.
+    static var numeral: Animation { isReduced ? instant : out(baseDuration) }
+
     /// A thumb or bar that travels between two places (matched geometry):
     /// `glideInOut`, and no travel at all under Reduce Motion.
     static var thumb: Animation { isReduced ? instant : inOut(glideDuration) }
@@ -456,6 +461,14 @@ enum Motion {
     static var fill: Animation { glide }
     /// The card flip's two halves are `baseDuration / 2` each.
     static var flip: Animation { base }
+    /// Two things that swap places (a status word and the actions that
+    /// replace it): the outgoing one fades out in the first half of `base`
+    /// and is gone before the incoming one starts, so both are never visible.
+    /// Instant under Reduce Motion.
+    static var swapOut: Animation { isReduced ? instant : out(baseDuration / 2) }
+    static var swapIn: Animation {
+        isReduced ? instant : out(baseDuration / 2).delay(baseDuration / 2)
+    }
     /// Gap between items in a staggered reveal (capped by callers).
     static let stagger: Double = 0.05
 

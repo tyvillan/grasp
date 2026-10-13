@@ -2213,6 +2213,7 @@ private struct CardRow: View {
                     .foregroundStyle(GRASPColor.textTertiary)
                     .lineLimit(1)
                     .opacity(isActive ? 0 : 1)
+                    .animation(isActive ? Motion.swapOut : Motion.swapIn, value: isActive)
                 HStack(spacing: 6) {
                     previewButton
                     approveButton
@@ -2251,10 +2252,10 @@ private struct CardRow: View {
                 .help("Card actions")
                 }
                 .opacity(isActive ? 1 : 0)
+                .animation(isActive ? Motion.swapIn : Motion.swapOut, value: isActive)
                 .allowsHitTesting(isActive)
             }
             .frame(width: 104, alignment: .trailing)
-            .animation(Motion.fade, value: isActive)
         }
         .padding(.vertical, 7)
         .animation(Motion.fade, value: selectionActive)
