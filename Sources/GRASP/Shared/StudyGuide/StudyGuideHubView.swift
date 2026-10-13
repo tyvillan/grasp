@@ -117,9 +117,16 @@ struct StudyGuideHubView<Destination: View>: View {
                     }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
+                #if os(macOS)
+                // Starts where Home and Library start, not centered.
+                .padding(.horizontal, 40)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                #else
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)
                 .frame(maxWidth: .infinity)
+                #endif
             }
         }
     }

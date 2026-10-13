@@ -147,6 +147,7 @@ struct DeckScreen: View {
             if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {
                 filter = match
             }
+            if DebugLaunch.confirmApproveAll { confirmingApproveAll = true }
             if DebugLaunch.select {
                 editMode = .active
                 selection = Set(cards.filter { $0.status == .draft }.prefix(3).map(\.id))

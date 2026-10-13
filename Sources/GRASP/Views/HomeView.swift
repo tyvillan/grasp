@@ -22,6 +22,7 @@ struct HomeView: View {
     @State private var studying: StudyTarget?
     /// "yyyy-MM-dd|id,id": which plan steps were ticked off, today only.
     @AppStorage("todayPlanChecked") private var checkedStore = ""
+    @AppStorage("dailyCardGoal") private var dailyGoal = 20
 
     /// Below this the hero and the plan stack instead of sitting side by side.
     private let twoColumnBreakpoint: CGFloat = 820
@@ -46,12 +47,19 @@ struct HomeView: View {
                     if wide {
                         HStack(alignment: .top, spacing: GRASPSpace.l) {
                             hero.frame(maxWidth: .infinity)
-                            planCard.frame(maxWidth: .infinity)
+                            // The plan hugs its steps; what's freed below it
+                            // is "Today so far".
+                            VStack(spacing: GRASPSpace.l) {
+                                planCard
+                                todaySoFar
+                            }
+                            .frame(maxWidth: .infinity)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                     } else {
                         hero
                         planCard
+                        todaySoFar
                     }
                     lowerCards
                     if let deck = Dashboard.jumpBackIn(decks) {
@@ -211,10 +219,61 @@ struct HomeView: View {
                 .overlay { CelebrationBurst(trigger: allDone) }
                 .padding(.top, GRASPSpace.l)
             }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .graspCard(padding: 28)
+    }
+
+    // MARK: - Today so far
+
+    /// What has actually happened today, from data the app keeps: cards
+    /// reviewed (against the daily goal in Settings, when there is one), the
+    /// streak, and how many of today's plan steps are ticked. Time spent is
+    /// not shown: reviews don't record how long they took.
+    @ViewBuilder
+    private var todaySoFar: some View {
+        let doneSteps = plan.steps.filter { checked.contains($0.id) }.count
+        VStack(alignment: .leading, spacing: 14) {
+            SectionLabel("Today so far")
+            HStack(alignment: .top, spacing: GRASPSpace.xl) {
+                soFarFigure("\(streak.reviewsToday)", streak.reviewsToday == 1 ? "card reviewed" : "cards reviewed")
+                if streak.days > 0 {
+                    soFarFigure("\(streak.days)", streak.days == 1 ? "day streak" : "day streak")
+                }
+                if !plan.steps.isEmpty {
+                    soFarFigure("\(doneSteps) of \(plan.steps.count)", "plan steps done")
+                }
+                Spacer(minLength: 0)
+            }
+            if dailyGoal > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressBar(value: min(streak.reviewsToday, dailyGoal), total: dailyGoal,
+                                tint: GRASPColor.textPrimary.opacity(0.55))
+                    Text(streak.reviewsToday >= dailyGoal
+                         ? "Daily goal of \(dailyGoal) cards reached"
+                         : "\(dailyGoal - streak.reviewsToday) more to reach today's goal of \(dailyGoal)")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .graspCard(padding: 24)
+        .revealOnAppear(index: 2)
+    }
+
+    private func soFarFigure(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.graspDisplay(28))
+                .tracking(-0.4)
+                .monospacedDigit()
+                .foregroundStyle(GRASPColor.textPrimary)
+                .contentTransition(.numericText())
+            Text(label)
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        }
     }
 
     private func run(_ step: TodayPlan.Step) {

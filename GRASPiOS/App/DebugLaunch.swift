@@ -23,6 +23,8 @@ enum DebugLaunch {
     /// Deck screen: run a pretend generation that writes one AI draft
     /// every second, to watch the live strip.
     static var simulateGeneration: Bool { env["GRASP_SIM_GENERATE"] == "1" }
+    /// Deck screen: open the Approve All confirmation (nothing is approved).
+    static var confirmApproveAll: Bool { env["GRASP_CONFIRM_APPROVE"] == "1" }
     #else
     static let skipWelcome = false
     static let course: String? = nil
@@ -32,5 +34,6 @@ enum DebugLaunch {
     static let filter: String? = nil
     static let select = false
     static let simulateGeneration = false
+    static let confirmApproveAll = false
     #endif
 }
