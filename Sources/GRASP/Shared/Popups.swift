@@ -22,6 +22,13 @@ struct GRASPSheet<Content: View, Footer: View>: View {
 
     typealias Tone = PopupTone
 
+    #if os(iOS)
+    /// What a phone sheet needs to show all of itself, so its presenter can
+    /// fit the detent to it (`SheetFitHeightKey`).
+    @State private var contentHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+    #endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             #if os(macOS)
@@ -34,6 +41,7 @@ struct GRASPSheet<Content: View, Footer: View>: View {
                     header
                     contentArea(content)
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
             #endif
             if Footer.self != EmptyView.self {
@@ -43,12 +51,16 @@ struct GRASPSheet<Content: View, Footer: View>: View {
                     .padding(.vertical, 14)
                     .background(GRASPColor.surface)
                     .overlay(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                    #if os(iOS)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                    #endif
             }
         }
         #if os(macOS)
         .frame(width: width, height: height)
         #else
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .preference(key: SheetFitHeightKey.self, value: contentHeight + footerHeight)
         #endif
         .graspPopup()
     }
@@ -100,6 +112,12 @@ extension GRASPSheet where Footer == EmptyView {
         self.init(eyebrow: eyebrow, title: title, message: message, icon: icon, tone: tone,
                   width: width, height: height, showsClose: showsClose, content: content, footer: { EmptyView() })
     }
+}
+
+/// The height a `GRASPSheet` needs on iPhone: its content plus its footer.
+struct SheetFitHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// The color of a popup's icon tile and its confirming button.

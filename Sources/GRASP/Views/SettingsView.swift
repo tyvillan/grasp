@@ -445,7 +445,7 @@ private struct AISettingsTab: View {
     private var cloudErrorDetail: String? {
         guard let raw = rawCloudErrorDetail else { return nil }
         // A system error's debug description is not for reading.
-        if raw.contains("Error Domain=") || raw.contains("UserInfo=") {
+        if raw.contains("Error Domain=") || raw.contains("UserInfo=") || raw.contains("(code ") {
             return "GRASP couldn't reach Google. Check your connection, then test again."
         }
         return raw
@@ -761,7 +761,7 @@ private struct PasswordForOtherDevices: View {
                 failed = false
                 password = ""
             } catch {
-                result = "Couldn't set the password: \(error.localizedDescription)"
+                result = PlainError.message(error, couldnt: "set the password")
                 failed = true
             }
             working = false
@@ -886,7 +886,7 @@ private struct AccountSyncSection: View {
         do {
             try store.sync.link(signedIn, uploadLibrary: true)
         } catch {
-            linkError = "Couldn't turn on sync: \(error.localizedDescription)"
+            linkError = PlainError.message(error, couldnt: "turn on sync")
         }
     }
 }

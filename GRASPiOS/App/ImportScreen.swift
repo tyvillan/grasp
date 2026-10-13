@@ -99,7 +99,7 @@ struct ImportScreen: View {
                 let summary = await store.importFiles(copies, intoCourse: targetCourse)
                 result = describe(summary)
             } catch {
-                result = "Couldn't import: \(error.localizedDescription)"
+                result = PlainError.message(error, couldnt: "import")
             }
         }
     }

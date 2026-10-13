@@ -184,7 +184,7 @@ struct ExamScreen: View {
                         + "like \"Exam 1 Study Guide\" or \"Midterm Review\"."
                 }
             } catch {
-                message = "Couldn't add the guide: \(error.localizedDescription)"
+                message = PlainError.message(error, couldnt: "add the guide")
             }
             load()
         }

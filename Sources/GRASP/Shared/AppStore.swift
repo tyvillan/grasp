@@ -203,8 +203,8 @@ final class AppStore {
                 // silently studying into a scratch database meant every
                 // import and review was thrown away on quit.
                 db = try! GRASPDatabase.inMemory()
-                openError = "GRASP couldn't open this profile's library (\(error.localizedDescription)). "
-                    + "Nothing you do now will be saved -- quit and reopen, or switch profiles."
+                openError = "GRASP couldn't open this profile's library. "
+                    + "Nothing you do now will be saved. Quit and reopen, or switch profiles."
             }
         }
         self.database = db
@@ -241,11 +241,11 @@ final class AppStore {
             status = "Gemini (\(automatic.cloud.modelName)), falling back to Apple's on-device model"
         case let ollama as OllamaGenerator:
             status = "Ollama (\(ollama.modelName))"
-            if aiMode == .automatic && !hasCloudKey { status += " -- add a Gemini key to use the cloud" }
+            if aiMode == .automatic && !hasCloudKey { status += ". Add a Gemini key to use the cloud" }
         case is NoGenerator:
             status = aiMode == .cloud && !hasCloudKey
-                ? "None -- add a Gemini API key to use the cloud"
-                : "None -- cards come from the parser only"
+                ? "None. Add a Gemini API key to use the cloud"
+                : "None. Cards come from the parser only"
         default:
             status = "Apple on-device model"
         }
@@ -444,9 +444,9 @@ final class AppStore {
             return "None of these cards came from a note, so there is nothing to read new questions from."
         case .modelGaveNoAnswer(let reason):
             return "The AI model didn't give a usable answer. \(reason) Try again, or check Settings → AI."
-        case .writeFailed(let created, let reason):
+        case .writeFailed(let created, _):
             return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
-                + "Something went wrong saving: \(reason)"
+                + "Couldn't save the cards. Try again, and restart GRASP if it keeps happening."
         }
     }
 
@@ -523,7 +523,8 @@ final class AppStore {
                 deckCounts = try Self.deckCounts(for: decks, db)
             }
         } catch {
-            importError = "Failed to read database: \(error)"
+            NSLog("GRASP: couldn't read the database: %@", String(describing: error))
+            importError = "GRASP couldn't read the library. Restart GRASP and try again."
         }
         revision += 1
         // Every local change comes through here; sync pushes it shortly.
@@ -1544,7 +1545,7 @@ final class AppStore {
             }
             scanForDuplicatesAfterImport()
         } catch {
-            importError = "Import failed: \(error)"
+            importError = PlainError.message(error, couldnt: "finish the import")
         }
         reload()
     }
@@ -1571,7 +1572,7 @@ final class AppStore {
             scanForDuplicatesAfterImport()
         } catch {
             summary = ImportSummary()
-            importError = "Import failed: \(error)"
+            importError = PlainError.message(error, couldnt: "finish the import")
         }
         reload()
         return summary

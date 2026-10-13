@@ -29,6 +29,25 @@ struct TodayPlan {
 
     static let maxSteps = 4
 
+    /// The review step's title. When the exam covers only some of the
+    /// course's decks, it says so ("Review 139 of 155 due for the midterm");
+    /// when everything due is in scope it is the plain "Review N due cards".
+    static func reviewTitle(due: Int, courseDue: Int, examNoun: String) -> String {
+        if courseDue > due, due > 0 {
+            return "Review \(due) of \(courseDue) due for the \(examNoun)"
+        }
+        return "Review \(due) due card\(due == 1 ? "" : "s")"
+    }
+
+    /// "midterm", "final", "quiz" or "exam", from the event's own title.
+    static func examNoun(title: String, kind: CalendarEventKind) -> String {
+        let lower = title.lowercased()
+        if lower.contains("midterm") { return "midterm" }
+        if lower.contains("final") { return "final" }
+        if lower.contains("quiz") || kind == .quiz { return "quiz" }
+        return "exam"
+    }
+
     /// Seconds per card, from what a review actually takes: about ten for
     /// a due card, a little longer for one still being learned.
     static func estimate(cards: Int, secondsEach: Double) -> Int {
@@ -54,7 +73,11 @@ extension AppStore {
                 let id = "\(item.event.id)#\(step.kind.rawValue)"
                 switch step.kind {
                 case .review:
-                    steps.append(.init(id: id, title: step.text, subtitle: course,
+                    let courseDue = decks.filter { $0.courseId == item.event.courseId }.reduce(0) { $0 + $1.dueCount }
+                    let title = TodayPlan.reviewTitle(
+                        due: standing.dueCards, courseDue: courseDue,
+                        examNoun: TodayPlan.examNoun(title: item.event.title, kind: item.event.kind))
+                    steps.append(.init(id: id, title: title, subtitle: course,
                                        minutes: TodayPlan.estimate(cards: standing.dueCards, secondsEach: 10),
                                        action: .review(deckIds: deckIds, name: item.event.title)))
                     coveredDecks.formUnion(deckIds)

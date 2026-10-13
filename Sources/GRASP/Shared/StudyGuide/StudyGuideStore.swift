@@ -207,7 +207,7 @@ extension AppStore {
                 }
             } catch {
                 outcome = nil
-                failure = "Couldn't save the guide: \(error.localizedDescription)"
+                failure = PlainError.message(error, couldnt: "save the guide")
             }
             if failure == nil, outcome?.guideIds.isEmpty ?? true, !run.stopRequested {
                 failure = "The model didn't write anything usable"

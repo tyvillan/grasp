@@ -643,7 +643,7 @@ struct LinearTransformView: View {
 
     private var determinantNote: String {
         let det = current.determinant
-        if abs(det) < 1e-9 { return "The plane is squashed flat onto a line -- this matrix can't be undone." }
+        if abs(det) < 1e-9 { return "The plane is squashed flat onto a line. This matrix can't be undone." }
         if det < 0 { return "Negative: the plane has been flipped over, so î and ĵ swap sides." }
         return "The yellow square started with area 1. It now has area \(OverviewFigures.format(det))."
     }

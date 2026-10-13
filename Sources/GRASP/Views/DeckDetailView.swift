@@ -476,7 +476,7 @@ struct DeckDetailView: View {
                     icon: "checkmark.seal",
                     title: "Refine Deck with AI Complete",
                     leadText: refineDeckResult.isEmpty
-                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment, and nothing needed a wording cleanup."
+                        ? "Every card checked out fine. Nothing looked like assignment text or an off-topic fragment, and nothing needed a wording cleanup."
                         : (refineDeckResult.wordingRefinedCount > 0
                            ? "Cleaned up wording on \(refineDeckResult.wordingRefinedCount) other card\(refineDeckResult.wordingRefinedCount == 1 ? "" : "s")."
                            : nil),
@@ -890,7 +890,7 @@ struct DeckDetailView: View {
                 cardRefineResult = CardRefineMessage(
                     icon: "exclamationmark.triangle", title: "Couldn't Refine This Card",
                     lead: "This needs an AI connection (Ollama or Apple's on-device model) "
-                        + "and a source note to check against -- one of those isn't available right now."
+                        + "and a source note to check against. One of those isn't available right now."
                 )
             }
             load()
@@ -1063,7 +1063,7 @@ struct DeckDetailView: View {
                     }
                     .font(.graspUI(size: 13.5, weight: .medium))
                     .foregroundStyle(GRASPColor.textTertiary.opacity(0.7))
-                    Text("Add this course's notes first -- questions are written from them.")
+                    Text("Add this course's notes first. Questions are written from them.")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
@@ -1133,14 +1133,14 @@ struct DeckDetailView: View {
                     notice = GenerationNotice(message: "GRASP couldn't read any text in this course's files.", isError: true)
                 case .deckMissing:
                     notice = GenerationNotice(message: "This deck no longer exists.", isError: true)
-                case .writeFailed(let created, let reason):
+                case .writeFailed(let created, _):
                     notice = GenerationNotice(
                         message: (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
-                            + "Something went wrong saving: \(reason)",
+                            + "Couldn't save the cards. Try again, and restart GRASP if it keeps happening.",
                         isError: true)
                 }
             } catch {
-                notice = GenerationNotice(message: error.localizedDescription, isError: true)
+                notice = GenerationNotice(message: PlainError.message(error, couldnt: "write cards"), isError: true)
             }
             guard generation == scopeGeneration else { return }
             generationNotice = notice
@@ -1618,7 +1618,7 @@ private struct RefineDeckConfirmationSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     effectRow(
                         icon: "trash", tint: GRASPColor.rejected,
-                        text: "Removes cards that aren't real course concepts -- assignment text, a document-specific label."
+                        text: "Removes cards that aren't real course concepts, such as assignment text or a document-specific label."
                     )
                     effectRow(
                         icon: "arrow.triangle.2.circlepath", tint: GRASPColor.success,
@@ -1631,7 +1631,7 @@ private struct RefineDeckConfirmationSheet: View {
                 }
                 .popupGroup(padding: 14)
 
-                Text("This can't be undone in bulk -- a removed card is gone, though a rewritten one can be reverted individually from its \"AI Refined\" badge afterward.")
+                Text("This can't be undone in bulk. A removed card is gone, though a rewritten one can be reverted individually from its \"AI Refined\" badge afterward.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2114,7 +2114,7 @@ private struct CardRow: View {
                         Image(systemName: AIGlyph.symbol)
                             .font(.graspUI(size: 11, weight: .semibold))
                             .foregroundStyle(GRASPColor.accent)
-                            .help("Written by the AI -- check it against your notes")
+                            .help("Written by the AI. Check it against your notes")
                     }
                     Text(term.term)
                         .graspType(.rowTitle)
@@ -2303,7 +2303,7 @@ private struct CardRow: View {
         if card.origin == .aiGenerated {
             Label("AI-generated", systemImage: "sparkles")
                 .labelStyle(.iconOnly).foregroundStyle(GRASPColor.textTertiary)
-                .help("AI-generated -- not directly from your notes, worth double-checking")
+                .help("AI-generated, not directly from your notes. Worth double-checking")
         }
     }
 

@@ -116,13 +116,13 @@ final class SyncController {
 
     private static func describe(_ error: Error) -> String {
         let text = error.localizedDescription
-        if (error as? URLError)?.code == .notConnectedToInternet {
-            return "Offline -- changes will sync when you're back online."
+        if (error as? URLError)?.code == .notConnectedToInternet || (error as? URLError)?.code == .networkConnectionLost {
+            return "Offline. Changes will sync when you're back online."
         }
         if text.localizedCaseInsensitiveContains("relation") && text.contains("sync_rows") {
-            return "The sync table isn't set up in Supabase yet -- run supabase/schema.sql."
+            return "The sync table isn't set up in Supabase yet. Run supabase/schema.sql."
         }
-        return "Couldn't sync: \(text)"
+        return PlainError.message(error, couldnt: "sync")
     }
 
     // MARK: - Linking

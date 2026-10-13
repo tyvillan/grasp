@@ -68,7 +68,7 @@ extension WidgetSnapshot {
             streakDays: 6, lastStudyDay: today, reviewsToday: 14, reviewsDay: today,
             due: .init(overdue: 23, upcoming: []),
             decks: [
-                .init(id: "sample-1", name: "Lecture 4 -- Eigenvalues", courseName: "Matrix Theory",
+                .init(id: "sample-1", name: "Lecture 4, Eigenvalues", courseName: "Matrix Theory",
                       lastReviewedAt: now.addingTimeInterval(-3600), due: .init(overdue: 12, upcoming: [])),
                 .init(id: "sample-2", name: "Design Patterns", courseName: "Software Design",
                       lastReviewedAt: nil, due: .init(overdue: 8, upcoming: [])),

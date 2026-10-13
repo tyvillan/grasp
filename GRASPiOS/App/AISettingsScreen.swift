@@ -113,12 +113,12 @@ struct AISettingsScreen: View {
         switch store.aiMode {
         case .local:
             return store.isGeneratorAvailable
-                ? "Everything runs on Apple's on-device model -- nothing leaves your iPhone."
+                ? "Everything runs on Apple's on-device model. Nothing leaves your iPhone."
                 : "Local AI needs Apple Intelligence (iPhone 15 Pro or later, turned on in Settings). Overviews written on your Mac still sync here."
         case .cloud:
             return "Everything runs on Google Gemini: much stronger overviews and cards than the on-device model. When today's free limit runs out, AI features stop until midnight Pacific."
         case .automatic:
-            return "Gemini when it can, Apple's on-device model when it can't -- busy, offline, or out of today's free requests."
+            return "Gemini when it can, Apple's on-device model when it can't: busy, offline, or out of today's free requests."
         }
     }
 
@@ -133,8 +133,8 @@ struct AISettingsScreen: View {
 
     private func modelLabel(_ model: String) -> String {
         _ = store.cloudUsageRevision
-        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model) -- \(note)" }
-        if model == CloudUsage.shared.lastUsedModel { return "\(model) -- in use" }
+        if let note = CloudUsage.shared.skipNote(for: model) { return "\(model), \(note)" }
+        if model == CloudUsage.shared.lastUsedModel { return "\(model), in use" }
         return model
     }
 

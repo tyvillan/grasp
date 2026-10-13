@@ -69,6 +69,24 @@ extension Binding where Value == TestPhase? {
 }
 
 #if os(iOS)
+/// A sheet whose detent is exactly as tall as the content it holds (plus the
+/// home indicator), with the full height behind it for a larger type size
+/// or a long list, and the grabber showing.
+private struct FittedDetentSheet<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @State private var height: CGFloat = 560
+    /// The home indicator's inset, which the detent has to include.
+    @State private var bottomInset: CGFloat = 0
+
+    var body: some View {
+        content()
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
+            .onPreferenceChange(SheetFitHeightKey.self) { if $0 > 0 { height = $0 } }
+            .presentationDetents([.height(height + bottomInset), .large])
+            .presentationDragIndicator(.visible)
+    }
+}
+
 extension View {
     /// A test's phases on iPhone: setup is a proper sheet (grabber, fitted
     /// detent) and the questions and results are full screen.
@@ -87,9 +105,7 @@ extension View {
         )
         return self
             .sheet(item: setupBinding, onDismiss: onDismiss) { _ in
-                setup()
-                    .presentationDetents([.height(620), .large])
-                    .presentationDragIndicator(.visible)
+                FittedDetentSheet { setup() }
             }
             .fullScreenCover(item: runBinding, onDismiss: onDismiss) { run($0) }
     }
@@ -637,7 +653,7 @@ struct TestRunView: View {
                 Text(lastCorrect
                      ? (wasOverridden ? "Marked correct" : "Correct")
                      : (question.code == nil && question.problem == nil
-                        ? "Not quite -- \(question.correctAnswer)" : "Not quite"))
+                        ? "Not quite. \(question.correctAnswer)" : "Not quite"))
                     .graspType(.body)
                     .lineLimit(3)
                     .textSelection(.enabled)
@@ -845,7 +861,7 @@ struct TestResultsView: View {
                 .animation(.default, value: correct)
 
                 Text("Cards you got right just earned a longer flashcard interval. A miss here doesn't "
-                     + "change anything -- it just tells you where to focus.")
+                     + "change anything. It just tells you where to focus.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .multilineTextAlignment(.center)
@@ -874,7 +890,7 @@ struct TestResultsView: View {
                                 .labelStyle(.iconOnly)
                                 .font(.graspUI(size: 11))
                                 .foregroundStyle(GRASPColor.accent)
-                                .help("AI-generated for this test -- not saved as a card, worth double-checking")
+                                .help("AI-generated for this test. Not saved as a card, worth double-checking")
                         }
                     }
                     if !item.isCorrect {

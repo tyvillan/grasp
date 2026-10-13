@@ -141,7 +141,7 @@ struct SettingsScreen: View {
         do {
             try store.sync.link(signedIn, uploadLibrary: true)
         } catch {
-            linkError = "Couldn't turn on sync: \(error.localizedDescription)"
+            linkError = PlainError.message(error, couldnt: "turn on sync")
         }
     }
 }

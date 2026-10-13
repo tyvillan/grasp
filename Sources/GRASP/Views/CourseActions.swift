@@ -83,7 +83,7 @@ private struct CourseDeleteConfirmationModifier: ViewModifier {
         }
         message += ". Your notes in the vault are never touched"
         if course.folderPath != nil {
-            message += ", and re-importing your vault won't bring this course back -- " +
+            message += ", and re-importing your vault won't bring this course back. " +
                 "add its files to a course by hand again if you ever want it back."
         } else {
             message += "."
@@ -162,7 +162,7 @@ struct CourseEditSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     TimelineField(text: $timelineText, allowsNoTimeline: true)
                     if course.folderPath != nil {
-                        Text("Changing this here sticks -- re-importing the vault never overwrites a course's timeline once it's set.")
+                        Text("Changing this here sticks. Re-importing the vault never overwrites a course's timeline once it's set.")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
@@ -182,7 +182,7 @@ struct CourseEditSheet: View {
                             .truncationMode(.head)
                             .textSelection(.enabled)
                     } else {
-                        Text("Added by hand -- no vault folder, so importing won't add notes to it.")
+                        Text("Added by hand. No vault folder, so importing won't add notes to it.")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
                     }
