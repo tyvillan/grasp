@@ -483,7 +483,7 @@ struct SessionCompleteView: View {
         .onAppear {
             if reduceMotion { skip(); return }
             withAnimation(Motion.glide) { drift = true }
-            withAnimation(Motion.settle.delay(0.15)) {
+            withAnimation(Motion.countUp) {
                 shownUnderstood = understood
                 shownReview = toReview
             }

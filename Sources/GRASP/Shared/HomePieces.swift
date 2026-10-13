@@ -73,9 +73,9 @@ struct CountdownHero: View {
         .onAppear {
             guard shown != days else { return }
             if reduceMotion { shown = days; return }
-            withAnimation(Motion.settle.delay(0.12)) { shown = days }
+            withAnimation(Motion.countUp) { shown = days }
         }
-        .onChange(of: days) { withAnimation(Motion.settle) { shown = days } }
+        .onChange(of: days) { withAnimation(Motion.countUp) { shown = days } }
     }
 
     /// Three figures and a sentence on where this exam stands: what is due,
@@ -294,7 +294,7 @@ struct StreakPill: View {
         .background(Capsule().fill(GRASPColor.surface))
         .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
         .help(studiedToday ? "You've studied today" : "Study today to keep your streak")
-        .animation(Motion.glide, value: days)
+        .animation(Motion.countUp, value: days)
     }
 }
 

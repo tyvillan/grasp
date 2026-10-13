@@ -27,4 +27,4 @@ Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
 - Tokens and components come from `Sources/GRASP/Shared/Theme.swift`,
   `Controls.swift` and `Popups.swift`. No new colours or fonts without asking.
 - One filled yellow primary per screen. The sparkle means AI.
-- Every animation has a Reduce Motion path.
+- Every animation uses a `Motion` token (0.12 / 0.20 / 0.32 s, no overshoot), which carries the Reduce Motion rule; see DESIGN.md "Motion".

@@ -432,6 +432,10 @@ enum Motion {
 
     // MARK: Names used across the app (all map to the tokens above)
 
+    /// A number rolling to its value: `glide`, and instant under Reduce
+    /// Motion (an opacity-only change).
+    static var countUp: Animation { isReduced ? instant : out(glideDuration) }
+
     /// A thumb or bar that travels between two places (matched geometry):
     /// `glideInOut`, and no travel at all under Reduce Motion.
     static var thumb: Animation { isReduced ? instant : inOut(glideDuration) }
