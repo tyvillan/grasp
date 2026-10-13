@@ -13,10 +13,14 @@ public struct GeneratedCard: Sendable, Equatable {
 public struct GeneratedTestQuestion: Sendable, Equatable {
     public let prompt: String
     public let correctAnswer: String
+    /// One to three sentences on why the answer is right, written in the
+    /// same call as the question. Nil from a model that left it out.
+    public let explanation: String?
 
-    public init(prompt: String, correctAnswer: String) {
+    public init(prompt: String, correctAnswer: String, explanation: String? = nil) {
         self.prompt = prompt
         self.correctAnswer = correctAnswer
+        self.explanation = explanation
     }
 }
 
@@ -235,6 +239,16 @@ public protocol CardGenerator: Sendable {
     /// generator can't say.
     func explainSkill(_ skill: String, subject: String, context: String) async -> String?
 
+    /// Whether a typed answer means what the card says: lenient about
+    /// wording, strict about facts. Sees only the question, the expected
+    /// answer and the student's answer. nil when this generator can't say.
+    func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict?
+
+    /// Why a student's answer was wrong, in a few sentences: what the
+    /// correct answer is and why, where their answer went off, and a small
+    /// code snippet when it helps. nil when this generator can't say.
+    func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String?
+
     /// Several skills explained in one request, which is much faster than
     /// one request each. Keyed by the skill text; skills it couldn't
     /// explain are left out.
@@ -274,6 +288,10 @@ public extension CardGenerator {
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
 
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
+
+    func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? { nil }
+
+    func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? { nil }
 
     func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] { [] }
 

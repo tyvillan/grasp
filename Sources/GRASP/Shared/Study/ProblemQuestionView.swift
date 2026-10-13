@@ -75,12 +75,7 @@ struct ProblemQuestionView: View {
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(GRASPColor.textPrimary)
                 .textSelection(.enabled)
-            if let explanation = problem.explanation {
-                Text(explanation)
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            WhyBlock(text: problem.explanation)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

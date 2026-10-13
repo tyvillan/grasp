@@ -83,7 +83,7 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
         // Problems saved before the model was told to avoid LaTeX.
         problem.prompt = PlainMath.clean(problem.prompt)
         problem.choices = problem.choices.map(PlainMath.clean)
-        problem.explanation = problem.explanation.map(PlainMath.clean)
+        problem.explanation = QuestionExplanation.clean(problem.explanation.map(PlainMath.clean))
         return problem
     }
 

@@ -126,6 +126,9 @@ struct GradedQuestion: Identifiable {
     let ordinal: Int
     var givenAnswer: String
     var isCorrect: Bool
+    /// For a typed answer: how it was judged, so "close enough" can be
+    /// shown as its own thing while still counting as correct.
+    var judged: JudgedAnswer? = nil
 }
 
 /// The custom-test flow: a config sheet, then a running test over its own
@@ -398,6 +401,8 @@ struct TestRunView: View {
     @State private var isAnswered = false
     @State private var lastCorrect = false
     @State private var wasOverridden = false
+    @State private var judged: JudgedAnswer?
+    @State private var isChecking = false
     @State private var graded: [GradedQuestion] = []
     @State private var warningDismissed = false
     @FocusState private var writtenFieldFocused: Bool
@@ -522,11 +527,21 @@ struct TestRunView: View {
                     questionPrompt(question)
                     answerArea(question)
                     if isAnswered, question.type == .multipleChoice, let explanation = question.problem?.explanation {
-                        Text(explanation)
-                            .graspType(.body)
-                            .foregroundStyle(GRASPColor.textSecondary)
+                        WhyBlock(text: explanation)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // A one-line AI question carries its own explanation.
+                    if isAnswered, question.code == nil, question.problem == nil, question.cardId == nil {
+                        WhyBlock(text: question.explanation)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if isAnswered, !lastCorrect {
+                        ExplainThisBlock(question: question, given: graded.last?.givenAnswer ?? "")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if isAnswered, question.cardId == nil {
+                        FlagQuestionButton { flagCurrent(question) }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .frame(maxWidth: columnWidth)
@@ -637,14 +652,28 @@ struct TestRunView: View {
                         )
                 )
                 .focused($writtenFieldFocused)
-                .disabled(isAnswered)
+                .disabled(isAnswered || isChecking)
                 .onSubmit {
-                    guard !isAnswered, !writtenAnswer.isEmpty else { return }
-                    let verdict = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
-                    submit(verdict != .incorrect, given: writtenAnswer, question: question)
+                    guard !isAnswered, !isChecking,
+                          !writtenAnswer.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    isChecking = true
+                    let given = writtenAnswer
+                    Task {
+                        let result = await store.judgeTypedAnswer(question: question, given: given)
+                        isChecking = false
+                        submit(result.outcome.countsAsCorrect, given: given, question: question, judged: result)
+                    }
                 }
                 .frame(maxWidth: 520)
                 .task { writtenFieldFocused = true }
+            if isChecking {
+                CheckingAnswerLabel()
+                    .frame(maxWidth: 520, alignment: .leading)
+            }
+            if isAnswered, let judged, judged.outcome != .correct {
+                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer)
+                    .frame(maxWidth: 520, alignment: .leading)
+            }
         }
     }
 
@@ -655,9 +684,9 @@ struct TestRunView: View {
                 Image(systemName: lastCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .font(.graspUI(size: 12))
                 Text(lastCorrect
-                     ? (wasOverridden ? "Marked correct" : "Correct")
-                     : (question.code == nil && question.problem == nil
-                        ? "Not quite. \(question.correctAnswer)" : "Not quite"))
+                     ? (wasOverridden ? "Marked correct"
+                        : (judged?.outcome == .closeEnough ? "Close enough" : "Correct"))
+                     : "Not quite")
                     .graspType(.body)
                     .lineLimit(3)
                     .textSelection(.enabled)
@@ -774,12 +803,15 @@ struct TestRunView: View {
         return GRASPColor.hairline
     }
 
-    private func submit(_ correct: Bool, given: String, question: LearnEngine.RoundQuestion) {
+    private func submit(_ correct: Bool, given: String, question: LearnEngine.RoundQuestion,
+                        judged: JudgedAnswer? = nil) {
         lastCorrect = correct
         wasOverridden = false
+        self.judged = judged
         isAnswered = true
         try? store.submitTestAnswer(attemptId: attemptId, ordinal: index, given: given, isCorrect: correct)
-        graded.append(GradedQuestion(question: question, ordinal: index, givenAnswer: given, isCorrect: correct))
+        graded.append(GradedQuestion(question: question, ordinal: index, givenAnswer: given, isCorrect: correct,
+                                     judged: judged))
     }
 
     /// The attempt isn't finished yet at this point, so this only needs to
@@ -789,10 +821,24 @@ struct TestRunView: View {
     private func override(_ question: LearnEngine.RoundQuestion) {
         lastCorrect = true
         wasOverridden = true
+        // The card remembers this wording, so it is accepted next time.
+        if let cardId = question.cardId, let last = graded.last {
+            store.rememberAcceptedAnswer(last.givenAnswer, forCard: cardId)
+        }
         if let last = graded.indices.last {
             graded[last].isCorrect = true
+            graded[last].judged = JudgedAnswer(outcome: .correct, source: .remembered)
         }
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: index, cardId: question.cardId)
+    }
+
+    /// The student flagged this AI-written question while looking at it:
+    /// it stops counting here, and it won't be asked again.
+    private func flagCurrent(_ question: LearnEngine.RoundQuestion) {
+        store.flagQuestion(question)
+        store.discardTestItem(attemptId: attemptId, ordinal: index)
+        graded.removeAll { $0.ordinal == index }
+        advance()
     }
 
     private func advance() {
@@ -801,6 +847,8 @@ struct TestRunView: View {
         writtenAnswer = ""
         isAnswered = false
         wasOverridden = false
+        judged = nil
+        isChecking = false
         if index >= questions.count {
             onFinished(graded)
         }
@@ -882,9 +930,11 @@ struct TestResultsView: View {
             List($graded) { $item in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: item.isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        Image(systemName: item.judged?.outcome == .closeEnough ? "checkmark.circle"
+                              : (item.isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill"))
                             .font(.graspUI(size: 11))
-                            .foregroundStyle(item.isCorrect ? GRASPColor.success : GRASPColor.rejected)
+                            .foregroundStyle(item.judged?.outcome == .closeEnough ? GRASPColor.textSecondary
+                                             : (item.isCorrect ? GRASPColor.success : GRASPColor.rejected))
                         Text(item.question.prompt)
                             .graspType(.rowTitle)
                             .foregroundStyle(GRASPColor.textPrimary)
@@ -897,7 +947,13 @@ struct TestResultsView: View {
                                 .help("AI-generated for this test. Not saved as a card, worth double-checking")
                         }
                     }
-                    if !item.isCorrect {
+                    if !item.isCorrect, let code = item.question.code, code.kind == .codeBlanks,
+                       item.question.type != .multipleChoice {
+                        // The code with the right text filled in beside what
+                        // was typed, rather than two lists of numbers.
+                        FilledBlankComparison(question: code, given: item.givenAnswer)
+                            .padding(.top, 2)
+                    } else if !item.isCorrect {
                         Text("You answered: \(item.question.type == .multipleChoice ? item.givenAnswer : (item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer))")
                             .font(item.question.code == nil ? nil : .system(size: 12, design: .monospaced))
                             .graspType(.meta)
@@ -910,11 +966,25 @@ struct TestResultsView: View {
                             .foregroundStyle(GRASPColor.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if item.isCorrect {
+                    if item.isCorrect, item.judged?.outcome == .closeEnough {
+                        // Counts as correct; says what the card said.
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Close enough")
+                                .graspType(.eyebrow)
+                                .textCase(.uppercase)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                            TypedAnswerFeedback(judged: item.judged!, given: item.givenAnswer,
+                                                expected: item.question.correctAnswer)
+                        }
+                        .padding(.top, 2)
+                    } else if item.isCorrect {
                         Text(item.question.correctAnswer)
                             .graspType(.body)
                             .foregroundStyle(GRASPColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else if item.question.code?.kind == .codeBlanks, item.question.type != .multipleChoice {
+                        // The comparison above already shows the right text.
+                        EmptyView()
                     } else {
                         // A missed row always says which answer was right.
                         VStack(alignment: .leading, spacing: 1) {
@@ -926,6 +996,21 @@ struct TestResultsView: View {
                                 .graspType(.body)
                                 .foregroundStyle(GRASPColor.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 2)
+                    }
+
+                    WhyBlock(text: item.question.whyText)
+                        .padding(.top, 2)
+                    if !item.isCorrect {
+                        ExplainThisBlock(question: item.question, given: item.givenAnswer)
+                            .padding(.top, 4)
+                    }
+                    if item.question.cardId == nil {
+                        FlagQuestionButton {
+                            store.flagQuestion(item.question)
+                            store.discardTestItem(attemptId: attemptId, ordinal: item.ordinal)
+                            withAnimation(Motion.fade) { graded.removeAll { $0.id == item.id } }
                         }
                         .padding(.top, 2)
                     }
@@ -981,6 +1066,10 @@ struct TestResultsView: View {
     private func override(_ item: GradedQuestion) {
         guard let index = graded.firstIndex(where: { $0.id == item.id }) else { return }
         graded[index].isCorrect = true
+        graded[index].judged = JudgedAnswer(outcome: .correct, source: .remembered)
+        if let cardId = item.question.cardId {
+            store.rememberAcceptedAnswer(item.givenAnswer, forCard: cardId)
+        }
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: item.ordinal, cardId: item.question.cardId)
     }
 }

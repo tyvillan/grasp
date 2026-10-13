@@ -54,8 +54,11 @@ extension OllamaGenerator {
         1: answer
         BUGGY_LINE: number (findBug only)
         FIXED_LINE: corrected line (findBug only)
-        EXPLANATION: one sentence on why the answer is right
+        EXPLANATION: \(QuestionExplanation.styleRules)
         ### END
+
+        Rules for blanks: a blank replaces the code that was removed, in the same place, and the removed text must not \
+        appear anywhere else in the program or in a comment. Never put a blank on a comment.
 
         Terms the student already has cards for: \(terms.isEmpty ? "(none)" : terms)
 
@@ -132,8 +135,7 @@ extension OllamaGenerator {
         return GeneratedCodeQuestion(
             kind: kind, prompt: prompt, code: code, answers: answers, buggyLine: buggy,
             fixedLine: (fixed?.isEmpty ?? true) ? nil : fixed,
-            explanation: sections["EXPLANATION"]?.joined(separator: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            explanation: QuestionExplanation.clean(sections["EXPLANATION"]?.joined(separator: " "))
         )
     }
 

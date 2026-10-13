@@ -94,10 +94,25 @@ public enum CodeQuestionBuilder {
         guard draft.answers.count == numbers.count,
               draft.answers.allSatisfy({ !$0.isEmpty && $0[0].count <= 80 && !$0[0].contains("\n") })
         else { throw Rejected(reason: "the answers didn't match the blanks") }
+        // Where the blanks are and whether the answers are already on screen.
+        if let problem = CodeQuestionValidator.problem(code: draft.code, answers: draft.answers, language: language) {
+            throw Rejected(reason: problem)
+        }
 
         func program(_ answers: [String]) -> String { CodeQuestion.fill(draft.code) { answers[$0 - 1] } }
         let primary = draft.answers.map { $0[0] }
         let reference = try await steadyRun(program(primary), language: language, using: executor)
+
+        // A blank that can be filled with nonsense and change nothing isn't
+        // asking for anything (a blank on a comment, or after a return).
+        for index in primary.indices {
+            var trial = primary
+            trial[index] = "__grasp_unfilled__"
+            let result = await executor.run(program(trial), language: language)
+            if result.succeeded, result.stdout == reference.stdout {
+                throw Rejected(reason: "blank \(index + 1) can be left as nonsense and the program still prints the same")
+            }
+        }
 
         // An alternative is accepted only if the program still prints the
         // same thing with it.
@@ -116,7 +131,8 @@ public enum CodeQuestionBuilder {
         let output = printing(reference.stdout)
         let question = CodeQuestion(kind: .codeBlanks, language: language,
                                     prompt: "Fill in the blanks so the program prints:\n" + output,
-                                    code: draft.code, blanks: accepted, expectedOutput: output, explanation: draft.explanation)
+                                    code: draft.code, blanks: accepted, expectedOutput: output,
+                                    explanation: QuestionExplanation.clean(draft.explanation))
         return await addingChoices(to: question, using: executor)
     }
 
@@ -158,7 +174,8 @@ public enum CodeQuestionBuilder {
         guard blankNumbers(in: draft.code).isEmpty else { throw Rejected(reason: "it had blanks in a predict-the-output question") }
         let run = try await steadyRun(draft.code, language: language, using: executor)
         return CodeQuestion(kind: .predictOutput, language: language, prompt: "What does this program print?",
-                            code: draft.code, expectedOutput: printing(run.stdout), explanation: draft.explanation)
+                            code: draft.code, expectedOutput: printing(run.stdout),
+                            explanation: QuestionExplanation.clean(draft.explanation))
     }
 
     private static func verifyBug(_ draft: GeneratedCodeQuestion, language: CodeLanguage,
@@ -180,7 +197,7 @@ public enum CodeQuestionBuilder {
         return CodeQuestion(kind: .findBug, language: language,
                             prompt: "One line of this program is wrong. It should print:\n" + output + "\nWhich line is the bug?",
                             code: draft.code, expectedOutput: output, buggyLine: buggy, fixedLine: fixed,
-                            explanation: draft.explanation)
+                            explanation: QuestionExplanation.clean(draft.explanation))
     }
 
     private static func verifyFunction(_ draft: GeneratedCodeQuestion, language: CodeLanguage,
@@ -188,11 +205,15 @@ public enum CodeQuestionBuilder {
         guard blankNumbers(in: draft.code) == [1], let body = draft.answers.first?.first,
               body.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3
         else { throw Rejected(reason: "the missing code wasn't a single [[1]] with an answer") }
+        if let problem = CodeQuestionValidator.problem(code: draft.code, answers: [[body]], language: language) {
+            throw Rejected(reason: problem)
+        }
         let run = try await steadyRun(CodeQuestion.fillBlock(draft.code, with: body), language: language, using: executor)
         let output = printing(run.stdout)
         return CodeQuestion(kind: .completeFunction, language: language,
                             prompt: "Write the missing code so the program prints:\n" + output,
-                            code: draft.code, blanks: [[body]], expectedOutput: output, explanation: draft.explanation)
+                            code: draft.code, blanks: [[body]], expectedOutput: output,
+                            explanation: QuestionExplanation.clean(draft.explanation))
     }
 
     // MARK: - Writing a deck's questions
@@ -259,6 +280,9 @@ public enum CodeQuestionBank {
             let choice: LearnEngine.RoundQuestion?
             let typed: LearnEngine.RoundQuestion?
             if let code = record.question {
+                // A saved question written before the checks existed may
+                // have its answer on show or a blank on a comment.
+                if CodeQuestionValidator.problem(in: code) != nil { continue }
                 choice = allowMultipleChoice ? ChoiceVersions.codeVersion(code, using: &rng) : nil
                 typed = allowWritten ? code.roundQuestion() : nil
             } else if let problem = record.problem {

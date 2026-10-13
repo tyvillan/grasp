@@ -1061,11 +1061,12 @@ final class AppStore {
            Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed > 0 {
             let budget = Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed
             let database = database
+            let flagged = flaggedQuestionKeys
             let skipped = aiTestQuestionsSkipped
             let task = Task {
                 await CardAI.generateTestQuestions(
                     inDecks: deckIds, maxCount: budget, using: await CardGenerators.select(),
-                    database: database, skipped: { skipped.value }
+                    database: database, flagged: flagged, skipped: { skipped.value }
                 )
             }
             aiTestQuestionTask = task
@@ -1187,6 +1188,129 @@ final class AppStore {
 
     func weakSpotCount(forDecks deckIds: [String]) -> Int {
         (try? database.queue.read { db in try Study.weakCardIds(forDecks: deckIds, db: db).count }) ?? 0
+    }
+
+    // MARK: - Judging a typed answer
+
+    /// Grades a typed answer by meaning (see `AnswerLadder`): a remembered
+    /// answer first, then the local word comparison, then the AI judge for a
+    /// borderline case only, which never holds the student up more than a
+    /// few seconds. The AI sees the question, the card's answer and this
+    /// answer, in whichever mode (Local, Cloud, Automatic) is set.
+    func judgeTypedAnswer(question: LearnEngine.RoundQuestion, given: String) async -> JudgedAnswer {
+        let accepted = question.cardId.map { acceptedAnswers(forCard: $0) } ?? []
+        // A canned judge for screenshots and demos when no model is
+        // reachable: GRASP_STUB_JUDGE=1 at launch.
+        let stub = ProcessInfo.processInfo.environment["GRASP_STUB_JUDGE"] == "1"
+        let judge: AnswerLadder.Judge = { prompt, expected, given in
+            if stub {
+                try? await Task.sleep(for: .milliseconds(1500))
+                return AIAnswerVerdict(outcome: .closeEnough, reason: "Same idea in different words.")
+            }
+            let generator = await CardGenerators.select()
+            guard await generator.isAvailable else { return nil }
+            return await generator.judgeAnswer(question: prompt, expected: expected, given: given)
+        }
+        return await AnswerLadder.judge(question: question.prompt, expected: question.correctAnswer, given: given,
+                                        accepted: accepted, judge: judge)
+    }
+
+    private static func acceptedAnswersKey(for profile: Profile) -> String { "acceptedTypedAnswers.\(profile.id)" }
+
+    /// Answers this student has said were right for a card ("I actually got
+    /// this right"), normalised. Kept on this device only: no existing
+    /// synced table has a safe place for them, and a new one would be a
+    /// migration. The card itself is never changed.
+    func acceptedAnswers(forCard cardId: String) -> [String] {
+        let all = UserDefaults.standard.dictionary(forKey: Self.acceptedAnswersKey(for: profile)) as? [String: [String]]
+        return all?[cardId] ?? []
+    }
+
+    func rememberAcceptedAnswer(_ answer: String, forCard cardId: String) {
+        let normalized = AnswerGrading.normalize(answer)
+        guard !normalized.isEmpty else { return }
+        let key = Self.acceptedAnswersKey(for: profile)
+        var all = (UserDefaults.standard.dictionary(forKey: key) as? [String: [String]]) ?? [:]
+        var list = all[cardId] ?? []
+        if !list.contains(normalized) { list.append(normalized) }
+        all[cardId] = Array(list.suffix(10))
+        UserDefaults.standard.set(all, forKey: key)
+    }
+
+    // MARK: - Explain this, and flagged questions
+
+    /// Explanations written this session, so asking again for the same
+    /// answer costs nothing. Keyed by question, right answer and the
+    /// student's answer.
+    private var explanationCache: [String: String] = [:]
+
+    /// A short personal explanation of why `given` was wrong. Never called
+    /// on its own: only when the student asks. Throws a plain sentence.
+    func explainWrongAnswer(for question: LearnEngine.RoundQuestion, given: String) async throws -> String {
+        let key = QuestionFlags.key(prompt: question.prompt + "\u{1F}" + question.correctAnswer + "\u{1F}" + given,
+                                    code: question.code?.code)
+        if let cached = explanationCache[key] { return cached }
+        // A canned reply for screenshots and demos when no model is
+        // reachable: set GRASP_STUB_EXPLAIN=1 in the launch environment.
+        if ProcessInfo.processInfo.environment["GRASP_STUB_EXPLAIN"] == "1" {
+            try? await Task.sleep(for: .milliseconds(1400))
+            let right = question.code?.plainAnswer ?? question.correctAnswer
+            let text = "`\(right)` is what the code needs here, because it is the name the rest of the program uses. "
+                + "Your choice goes a different way and leaves that name undefined. "
+                + "Remember: read what each name refers to before picking."
+            explanationCache[key] = text
+            return text
+        }
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable else {
+            throw ExplainThisError.message("No AI model is reachable. Check Settings, then try again.")
+        }
+        var context = question.code?.code ?? ""
+        if let output = question.code?.expectedOutput, !output.isEmpty { context += "\n\nIt prints:\n" + output }
+        if let problem = question.problem, let choices = problem.choices, question.type == .multipleChoice {
+            context += choices.enumerated().map { "\(["A", "B", "C", "D"][min($0.offset, 3)])) \($0.element)" }.joined(separator: "\n")
+        }
+        // Plain words, never the numbered "1: House" the results screen uses.
+        let shownGiven = question.code.map { $0.plainGiven(given) } ?? given
+        let shownCorrect = question.code?.plainAnswer ?? question.correctAnswer
+        guard let text = await generator.explainWrongAnswer(
+            prompt: question.prompt, correctAnswer: shownCorrect, givenAnswer: shownGiven, context: context)
+        else {
+            throw ExplainThisError.message("Couldn't explain this. Try again in a moment.")
+        }
+        explanationCache[key] = text
+        return text
+    }
+
+    enum ExplainThisError: Error { case message(String) }
+
+    private static let flaggedKey = "flaggedAIQuestionKeys"
+
+    /// Hashes of AI-written questions the student flagged, kept on this
+    /// device only (they are hashes, never the question text). A saved
+    /// question is retired in the bank instead, which is where saved
+    /// questions already live.
+    var flaggedQuestionKeys: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.flaggedKey) ?? [])
+    }
+
+    /// Flags a question: it is not asked again. A saved question is retired
+    /// from the bank; a one-line AI question's key is remembered. Returns
+    /// what was done, for the confirmation line.
+    @discardableResult
+    func flagQuestion(_ question: LearnEngine.RoundQuestion) -> Bool {
+        let key = QuestionFlags.key(prompt: question.prompt, code: question.code?.code)
+        var keys = flaggedQuestionKeys
+        keys.insert(key)
+        // Bounded: the newest few hundred are plenty.
+        UserDefaults.standard.set(Array(keys.prefix(500)), forKey: Self.flaggedKey)
+        _ = try? database.queue.write { db in try QuestionFlags.retireSaved(key: key, db: db) }
+        return true
+    }
+
+    /// Takes a flagged AI question out of its attempt, so it stops counting.
+    func discardTestItem(attemptId: String, ordinal: Int) {
+        _ = try? database.queue.write { db in try Study.discardTestItem(attemptId: attemptId, ordinal: ordinal, db: db) }
     }
 
     /// Records one answer to a test item. Keyed by `ordinal` rather than

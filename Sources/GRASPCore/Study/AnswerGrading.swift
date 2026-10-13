@@ -42,7 +42,7 @@ public enum AnswerGrading {
         String(normalized.filter { $0.isNumber || symbols.contains($0) })
     }
 
-    static func normalize(_ s: String) -> String {
+    public static func normalize(_ s: String) -> String {
         // Unicode minus and dashes, curly quotes, and line breaks first, so
         // what follows only has to know one of each.
         var t = s

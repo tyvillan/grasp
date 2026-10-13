@@ -79,7 +79,7 @@ extension OllamaGenerator {
         UNIT: unit, or leave out
         SCRIPT:
         python lines (number and matrix only)
-        EXPLANATION: one or two sentences showing how to get the answer
+        EXPLANATION: \(QuestionExplanation.styleRules)
         ### END
 
         Terms the student already has cards for: \(terms.isEmpty ? "(none)" : terms)
@@ -165,7 +165,7 @@ extension OllamaGenerator {
             kind: kind, prompt: prompt, choices: choices, correct: correct, claimedAnswer: answer,
             unit: unit.isEmpty || unit.lowercased() == "none" ? nil : unit,
             script: script.isEmpty ? nil : script,
-            explanation: text("EXPLANATION").replacingOccurrences(of: "\n", with: " ").nilIfEmptyProblem
+            explanation: QuestionExplanation.clean(text("EXPLANATION").replacingOccurrences(of: "\n", with: " "))
         )
     }
 
@@ -200,6 +200,84 @@ extension OllamaGenerator {
         guard let reply = try? await chatText(prompt: prompt, maxTokens: 220) else { return nil }
         let text = PlainMath.clean(reply.trimmingCharacters(in: .whitespacesAndNewlines))
         return text.isEmpty || text.count > 900 ? nil : text
+    }
+
+    /// Why this answer was wrong, written for this answer rather than for
+    /// the question in general. Asked again once if the first reply breaks
+    /// the style rules; nil when neither does.
+    public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
+        var note = ""
+        for attempt in 0..<2 {
+            let text = Self.explainWrongAnswerPrompt(prompt: prompt, correctAnswer: correctAnswer,
+                                                     givenAnswer: givenAnswer, context: context) + note
+            if let reply = try? await chatText(prompt: text, maxTokens: 400),
+               let cleaned = QuestionExplanation.cleanLong(reply) {
+                return cleaned
+            }
+            if attempt == 0 {
+                note = "\n\nYour last reply broke the rules. Write to \"you\", never \"the student\", and never show "
+                    + "an option number or a format like \"1: House\"."
+            }
+        }
+        return nil
+    }
+
+    /// Judges a typed answer by meaning. The prompt carries the question,
+    /// the card's answer and the student's answer, and nothing else.
+    public func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? {
+        let prompt = Self.judgeAnswerPrompt(question: question, expected: expected, given: given)
+        guard let reply = try? await chat(prompt: prompt) else { return nil }
+        return Self.parseJudgement(reply)
+    }
+
+    static func judgeAnswerPrompt(question: String, expected: String, given: String) -> String {
+        """
+        You grade a student's typed answer to a flashcard.
+
+        Question: \(question.prefix(600))
+        Expected answer: \(expected.prefix(600))
+        Student's answer: \(given.prefix(600))
+
+        Be lenient about wording, synonyms, word order and grammar. Be strict about facts, numbers, negation \
+        and opposites. Accept an answer that contains the key idea even if it is shorter or longer than the \
+        expected answer.
+
+        Reply with JSON only: {"verdict": "correct" | "closeEnough" | "notQuite", "reason": "one short sentence"}. \
+        Use "correct" for the same words, "closeEnough" for the same idea in different words, "notQuite" when \
+        a fact is wrong or missing.
+        """
+    }
+
+    static func parseJudgement(_ reply: String) -> AIAnswerVerdict? {
+        struct DTO: Decodable { let verdict: String; let reason: String? }
+        guard let data = salvageJSON(reply).data(using: .utf8),
+              let dto = try? JSONDecoder().decode(DTO.self, from: data) else { return nil }
+        let reason = dto.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let short = (reason?.isEmpty ?? true) || (reason?.count ?? 0) > 200 ? nil : reason
+        switch dto.verdict.lowercased().replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "_", with: "") {
+        case "correct": return AIAnswerVerdict(outcome: .correct, reason: short)
+        case "closeenough", "close": return AIAnswerVerdict(outcome: .closeEnough, reason: short)
+        case "notquite", "incorrect", "wrong": return AIAnswerVerdict(outcome: .notQuite, reason: short)
+        default: return nil
+        }
+    }
+
+    static func explainWrongAnswerPrompt(prompt: String, correctAnswer: String, givenAnswer: String, context: String) -> String {
+        """
+        Someone answered a question wrong. Explain it to them.
+
+        Question:
+        \(prompt.prefix(1500))
+
+        Correct answer:
+        \(correctAnswer.prefix(600))
+
+        What they chose or typed:
+        \(givenAnswer.isEmpty ? "(nothing)" : String(givenAnswer.prefix(600)))
+        \(context.isEmpty ? "" : "\nCode or notes the question refers to:\n\(context.prefix(1200))\n")
+        \(QuestionExplanation.styleRules)
+        Reply with the explanation only.
+        """
     }
 
     /// Explains a handful of skills in one request. Anything the reply

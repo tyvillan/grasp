@@ -95,6 +95,11 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
   muted line under the row (Mac and iPhone use the same wording).
 - **Calendar dots.** The dot beside a day number is that day's cards due (1 to 20
   green, 21 to 50 yellow, over 50 coral); the month's footer is the legend.
+- **Typed answers** have three outcomes: Correct (green), Close enough (counts as
+  correct: "Your answer works. The card says: ..." plus one muted reason line, a
+  neutral check on Test results) and Not quite (coral, "Your answer" and "Card says"
+  on separate lines). "Checking..." shows while the AI judge looks at a borderline
+  answer, for at most 3 s.
 - **Study sheets** (Learn, Test, flashcards) sit on a near-black scrim, one progress
   bar, answers never replace the question.
 

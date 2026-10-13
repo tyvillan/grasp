@@ -283,12 +283,7 @@ struct CodeQuestionView: View {
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             }
-            if let explanation = question.explanation {
-                Text(explanation)
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            WhyBlock(text: question.explanation)
         }
     }
 }

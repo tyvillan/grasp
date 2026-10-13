@@ -144,7 +144,8 @@ public struct OllamaGenerator: CardGenerator {
               let decoded = Self.decodeList(TestQuestionDTO.self, from: content)
         else { return [] }
         return Array(decoded.prefix(maxCount)).map {
-            GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.answer))
+            GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.answer),
+                                  explanation: QuestionExplanation.clean($0.explanation))
         }
     }
 
@@ -784,6 +785,8 @@ public struct OllamaGenerator: CardGenerator {
     private struct TestQuestionDTO: Decodable {
         let prompt: String
         let answer: String
+        /// Optional so a model that leaves it out still gives a question.
+        let explanation: String?
     }
 
     private struct ContextValidationDTO: Decodable {
@@ -981,7 +984,8 @@ public struct OllamaGenerator: CardGenerator {
         \(covered.isEmpty ? "(none yet)" : covered)
 
         Respond with ONLY one JSON object shaped {"items": [...]}, where items holds at most \
-        \(maxCount) objects, each shaped {"prompt": "...", "answer": "..."}. Return {"items": []} \
+        \(maxCount) objects, each shaped {"prompt": "...", "answer": "...", "explanation": "..."}. The \
+        explanation follows these rules: \(QuestionExplanation.styleRules) Return {"items": []} \
         if there is nothing worth asking. No other text.
         """
     }
