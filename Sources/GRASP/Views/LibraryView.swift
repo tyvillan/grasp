@@ -27,7 +27,7 @@ struct LibraryView: View {
                 header
                     .padding(.bottom, GRASPSpace.s)
                 vaultCard
-                    .revealOnAppear(index: 0, distance: 14)
+                    .revealOnAppear(index: 0)
                 HStack(alignment: .top, spacing: GRASPSpace.l) {
                     LibraryHiddenTile(
                         icon: "archivebox", title: "Archived courses", count: store.archivedCourses.count,

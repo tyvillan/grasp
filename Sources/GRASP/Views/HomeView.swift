@@ -148,7 +148,7 @@ struct HomeView: View {
         .graspCard(padding: 28)
         .contentShape(RoundedRectangle(cornerRadius: GRASPRadius.card))
         .onTapGesture { if let exam = nextExam { study(exam) } }
-        .revealOnAppear(index: 0, distance: 14)
+        .revealOnAppear(index: 0)
     }
 
     // MARK: - Plan

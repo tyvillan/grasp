@@ -139,7 +139,7 @@ struct TodayView: View {
         .graspCard(padding: 22)
         .contentShape(RoundedRectangle(cornerRadius: GRASPRadius.card))
         .onTapGesture { if let exam = exams.first { open(exam) } }
-        .revealOnAppear(index: 0, distance: 14)
+        .revealOnAppear(index: 0)
     }
 
     // MARK: - Plan
