@@ -8,6 +8,11 @@ import Foundation
 public enum LearnEngine {
     public enum Level: Int, Sendable {
         case new = 0, recognition = 1, recall = 2, mastered = 3
+        /// Said "I know this" in Study but not yet shown in Learn. Not
+        /// mastered: Learn asks it once as a typed answer, and a right answer
+        /// makes it mastered. A client that doesn't know this value reads it
+        /// as `.new` (`Level(rawValue:) ?? .new`), so it just gets tested.
+        case familiar = 4
     }
 
     public enum QuestionType: String, Sendable {
@@ -103,7 +108,7 @@ public enum LearnEngine {
                 return trueFalseQuestion(for: candidate, allCandidates: allCandidates, using: &rng)
             }
             return multipleChoiceQuestion(for: candidate, allCandidates: allCandidates, using: &rng)
-        case .recall, .mastered:
+        case .recall, .mastered, .familiar:
             return RoundQuestion(cardId: candidate.cardId, prompt: candidate.front,
                                   correctAnswer: candidate.back, type: .written)
         }
@@ -189,6 +194,12 @@ public enum LearnEngine {
     /// correct (capped at mastered), demotion by one level on a miss
     /// (never below new).
     public static func advance(level: Level, consecutiveCorrect: Int, wasCorrect: Bool) -> (level: Level, consecutiveCorrect: Int) {
+        // Familiar sits outside the 0...3 ladder (its raw value is 4), so
+        // the arithmetic below would misread it: a right answer proves it,
+        // a miss sends it to the gentlest rung.
+        if level == .familiar {
+            return wasCorrect ? (.mastered, consecutiveCorrect + 1) : (.recognition, 0)
+        }
         if wasCorrect {
             let next = Level(rawValue: min(level.rawValue + 1, Level.mastered.rawValue)) ?? .mastered
             return (next, consecutiveCorrect + 1)

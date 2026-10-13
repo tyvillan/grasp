@@ -5,7 +5,7 @@ import GRDB
 
 /// Study, Learn, and Test filtering all now read the same "understood"
 /// signal (`learnState.level == .mastered`), set two different ways:
-/// Study's two-button `markCard` jumps straight to mastered/new, Learn's
+/// Study's two-button `markCard` sets familiar/new (a self-rating is not mastery), Learn's
 /// `recordLearnAnswer` climbs the ladder gradually. This verifies both
 /// paths against real content, and that a test built with
 /// `excludeMastered` actually excludes what Study just approved.
@@ -30,13 +30,13 @@ struct MasteryIntegrationTests {
             try card.save(conn)
             try LearnState(
                 cardId: cardId,
-                level: understood ? LearnEngine.Level.mastered.rawValue : LearnEngine.Level.new.rawValue,
-                consecutiveCorrect: understood ? 1 : 0, lastSeenAt: now
+                level: understood ? LearnEngine.Level.familiar.rawValue : LearnEngine.Level.new.rawValue,
+                consecutiveCorrect: 0, lastSeenAt: now
             ).save(conn)
         }
     }
 
-    @Test("marking a card understood in Study sets the shared mastery signal Learn and Test both read")
+    @Test("marking a card understood in Study makes it familiar: Learn still asks it and the understood count does not move")
     func markCardSetsSharedMasterySignal() async throws {
         let db = try await VaultFixture.database()
         let (cardId, deckId) = try await db.queue.read { conn -> (String, String) in
@@ -62,11 +62,10 @@ struct MasteryIntegrationTests {
         let level = try await db.queue.read { conn in
             try LearnState.fetchOne(conn, key: cardId)?.level
         }
-        #expect(level == LearnEngine.Level.mastered.rawValue)
+        #expect(level == LearnEngine.Level.familiar.rawValue)
 
-        // Learn mode's own round builder must now skip this card (unless
-        // the deck is mostly mastered, which a single card out of 232
-        // is not).
+        // Learn mode's round builder still asks a familiar card (it is not
+        // mastered), and a test built with excludeMastered keeps it.
         let candidates = try await db.queue.read { conn -> [LearnEngine.Candidate] in
             let cardIds = try DeckCard.filter(Column("deckId") == deckId).fetchAll(conn).map(\.cardId)
             let cards = try Card.filter(cardIds.contains(Column("id")))
@@ -81,16 +80,13 @@ struct MasteryIntegrationTests {
             }
         }
         var rng = SystemRandomNumberGenerator()
-        let round = LearnEngine.buildRound(from: candidates, using: &rng)
-        #expect(!round.contains { $0.cardId == cardId })
-
-        // And a test built with excludeMastered must skip it too.
+        #expect(candidates.first { $0.cardId == cardId }?.level == .familiar)
         let pool = candidates.filter { $0.level != .mastered }
             .map { (cardId: $0.cardId, front: $0.front, back: $0.back) }
         let questions = TestBuilder.build(
             from: pool, config: .init(questionCount: 300, excludeMastered: true), using: &rng
         )
-        #expect(!questions.contains { $0.cardId == cardId })
+        #expect(questions.contains { $0.cardId == cardId })
     }
 
     @Test("marking a card for review resets it to new, not left at whatever level Learn had climbed it to")

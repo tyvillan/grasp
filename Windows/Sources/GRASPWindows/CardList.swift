@@ -91,7 +91,7 @@ struct CardList: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(matching.prefix(shown)), id: \.id) { card in
-                        CardRowView(card: card, understood: levels[card.id] == .mastered,
+                        CardRowView(card: card, understood: levels[card.id] == .mastered, familiar: levels[card.id] == .familiar,
                                     selected: selection.map { $0.contains(card.id) }) {
                             if var picked = selection {
                                 if picked.contains(card.id) { picked.remove(card.id) } else { picked.insert(card.id) }
@@ -263,6 +263,7 @@ enum CardFilter: CaseIterable, Equatable {
 private struct CardRowView: View {
     let card: Card
     let understood: Bool
+    var familiar = false
     /// nil when not selecting.
     let selected: Bool?
     let open: () -> Void
@@ -310,6 +311,7 @@ private struct CardRowView: View {
         var parts: [String] = []
         if card.status == .draft { parts.append("PENDING") }
         if card.status == .suspended { parts.append("SUSPENDED") }
+        if card.status == .active && familiar { parts.append("FAMILIAR") }
         if card.isContextRefined { parts.append("AI REFINED") }
         if card.origin == .aiGenerated { parts.append("AI") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")

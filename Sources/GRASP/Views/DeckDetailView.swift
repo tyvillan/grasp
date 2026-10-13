@@ -2308,6 +2308,7 @@ private struct CardRow: View {
             case .new: return GRASPColor.hairlineStrong
             case .recognition: return GRASPColor.textPrimary.opacity(0.3)
             case .recall: return GRASPColor.textPrimary.opacity(0.6)
+            case .familiar: return GRASPColor.textPrimary.opacity(0.8)
             case .mastered: return GRASPColor.textPrimary
             }
         }
@@ -2322,6 +2323,7 @@ private struct CardRow: View {
             case .new: return "Not started"
             case .recognition: return "Recognized"
             case .recall: return "Recalled"
+            case .familiar: return "Familiar"
             case .mastered: return "Understood"
             }
         }
@@ -2332,13 +2334,16 @@ private struct CardRow: View {
             if mastery == .mastered {
                 Label("Understood", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(GRASPColor.success)
+            } else if mastery == .familiar {
+                Label("Familiar", systemImage: "checkmark.circle")
+                    .foregroundStyle(GRASPColor.textSecondary)
             } else {
                 Label("Needs review", systemImage: "circle")
                     .foregroundStyle(GRASPColor.textTertiary)
             }
         }
         .labelStyle(.iconOnly)
-        .help(mastery == .mastered ? "Understood" : "Needs Review")
+        .help(mastery == .mastered ? "Understood" : (mastery == .familiar ? "Familiar" : "Needs Review"))
     }
 
     /// Independent of approval status -- a card can be `.active` *and*

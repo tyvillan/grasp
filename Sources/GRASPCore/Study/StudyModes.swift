@@ -10,14 +10,21 @@ extension Study {
     /// The Study screen's two-verdict grading: "Needs Review" or "I Know
     /// This" stands in for FSRS's four grades. It schedules the card
     /// (again / good) and also moves its Learn level, so Flashcards, Learn
-    /// and Test share one idea of what's understood.
+    /// and Test share one idea of what's understood. "I Know This" is a
+    /// self-rating, so it makes the card `.familiar`, not `.mastered`:
+    /// Learn still asks it once, and only a right answer there masters it.
     public static func mark(_ cardId: String, understood: Bool, source: String = "flashcards",
                             now: Date = Date(), db: Database) throws {
         try grade(cardId, grade: understood ? .good : .again, source: source, now: now, db: db)
+        // A card Learn already proved is not demoted by a self-rating.
+        if understood, let existing = try LearnState.fetchOne(db, key: cardId),
+           existing.level == LearnEngine.Level.mastered.rawValue {
+            return
+        }
         try LearnState(
             cardId: cardId,
-            level: understood ? LearnEngine.Level.mastered.rawValue : LearnEngine.Level.new.rawValue,
-            consecutiveCorrect: understood ? 1 : 0, lastSeenAt: now
+            level: understood ? LearnEngine.Level.familiar.rawValue : LearnEngine.Level.new.rawValue,
+            consecutiveCorrect: 0, lastSeenAt: now
         ).save(db)
     }
 

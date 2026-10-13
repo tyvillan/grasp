@@ -375,7 +375,7 @@ public struct Review: Codable, FetchableRecord, PersistableRecord, Identifiable,
 public struct LearnState: Codable, FetchableRecord, PersistableRecord, Sendable {
     public static let databaseTableName = "learnState"
     public var cardId: String
-    public var level: Int   // 0 new, 1 recognition, 2 recall, 3 mastered
+    public var level: Int   // 0 new, 1 recognition, 2 recall, 3 mastered, 4 familiar (self-rated in Study)
     public var consecutiveCorrect: Int
     public var lastSeenAt: Date?
 
