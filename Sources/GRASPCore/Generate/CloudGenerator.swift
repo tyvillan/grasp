@@ -57,6 +57,12 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.generateAdditional(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
     }
 
+    public func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult {
+        await pipeline.generateAdditionalResult(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+    }
+
     public func generateTestQuestions(
         existing: [CandidatePair], noteContext: String, maxCount: Int
     ) async -> [GeneratedTestQuestion] {
@@ -315,6 +321,15 @@ public struct FallbackGenerator: CardGenerator {
         await run(
             cloud: { await cloud.generateAdditional(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic) },
             local: { await local.generateAdditional(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic) }
+        )
+    }
+
+    public func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult {
+        await run(
+            cloud: { await cloud.generateAdditionalResult(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic) },
+            local: { await local.generateAdditionalResult(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic) }
         )
     }
 

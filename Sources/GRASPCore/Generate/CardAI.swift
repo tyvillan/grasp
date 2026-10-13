@@ -287,6 +287,9 @@ public enum CardAI {
         case readFailed(reason: String)
         /// The deck has no card tied to a note, so there is nothing to read.
         case noSourceNotes
+        /// The model was reachable but gave no usable answer for any note
+        /// (an error, or replies that could not be read).
+        case modelGaveNoAnswer(reason: String)
         /// Cards could not be saved; `created` were saved before it went wrong.
         case writeFailed(created: Int, reason: String)
     }
@@ -312,11 +315,11 @@ public enum CardAI {
 
     /// `generateAdditionalCards` with the reason for an empty result.
     ///
-    /// Limit: a generator that is reachable but answers a note with nothing
-    /// (an unparseable reply, say) can't be told apart from "nothing to add"
-    /// at this layer -- `CardGenerator.generateAdditional` returns no error.
-    /// What is caught is the model being unavailable at the start or gone by
-    /// the end of the run.
+    /// Per-note results come from `generateAdditionalResult`: a note the
+    /// model answered with nothing is a finding, one it gave no usable answer
+    /// for is a failure. Every note failing is `.failed(.modelGaveNoAnswer)`;
+    /// some failing while others were fine is a run like any other (what was
+    /// found is kept and reported).
     public static func generateAdditionalCardsOutcome(
         inDecks deckIds: [String], maxPerNote: Int = defaultMaxGeneratedPerNote, topic: String? = nil,
         using generator: any CardGenerator, database: GRASPDatabase
@@ -349,6 +352,8 @@ public enum CardAI {
         var createdCount = 0
         var writeFailure: String?
         var notesAsked = 0
+        var notesFailed = 0
+        var lastFailureReason: String?
         let progress = AIProgress.current
         progress?.expect(existingByMaterial.count)
         for (index, (materialId, existing)) in existingByMaterial.enumerated() {
@@ -359,10 +364,18 @@ public enum CardAI {
             let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
             progress?.begin("Reading note \(index + 1) of \(existingByMaterial.count)")
             notesAsked += 1
-            let proposed = await generator.generateAdditional(
+            let result = await generator.generateAdditionalResult(
                 existing: candidates, noteContext: context, maxCount: maxPerNote, topic: topic)
             progress?.advance()
             if Task.isCancelled { break }
+            let proposed: [GeneratedCard]
+            switch result {
+            case .cards(let cards): proposed = cards
+            case .failed(let reason):
+                notesFailed += 1
+                lastFailureReason = reason
+                continue
+            }
             guard !proposed.isEmpty else { continue }
             let snapshot = duplicateIndex
             do {
@@ -393,9 +406,12 @@ public enum CardAI {
         }
         if let writeFailure { return .failed(.writeFailed(created: createdCount, reason: writeFailure)) }
         if createdCount > 0 { return .added(createdCount) }
-        // Nothing came back. If the model has since gone, that was a failure,
-        // not a finding.
+        // Nothing came back. If the model has since gone, or it gave no
+        // usable answer for any note, that was a failure, not a finding.
         if notesAsked > 0, !Task.isCancelled, await !generator.isAvailable { return .failed(.generatorUnavailable) }
+        if notesAsked > 0, notesFailed == notesAsked, !Task.isCancelled {
+            return .failed(.modelGaveNoAnswer(reason: lastFailureReason ?? "No usable answer."))
+        }
         return .nothingToAdd
     }
 

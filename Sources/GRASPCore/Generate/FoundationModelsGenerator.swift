@@ -344,8 +344,18 @@ public struct FoundationModelsGenerator: CardGenerator {
     public func generateAdditional(
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> [GeneratedCard] {
+        let result = await generateAdditionalResult(
+            existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        if case .cards(let cards) = result { return cards }
+        return []
+    }
+
+    public func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult {
         #if canImport(FoundationModels)
-        guard await isAvailable, maxCount > 0, !noteContext.isEmpty else { return [] }
+        guard maxCount > 0, !noteContext.isEmpty else { return .cards([]) }
+        guard await isAvailable else { return .failed("The on-device model isn't available.") }
         let instructions = """
             You are a student's study assistant. Given one of their lecture notes and the flashcards \
             already made from it, find at most a few additional concepts the note itself mentions or \
@@ -364,11 +374,13 @@ public struct FoundationModelsGenerator: CardGenerator {
         Propose at most \(maxCount) additional card(s).
         """
         guard let response = try? await session.respond(to: prompt, generating: AdditionalCards.self) else {
-            return []
+            return .failed("The on-device model didn't answer.")
         }
-        return response.content.cards.prefix(maxCount).map { GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back)) }
+        return .cards(response.content.cards.prefix(maxCount).map {
+            GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back))
+        })
         #else
-        return []
+        return .failed("The on-device model isn't available.")
         #endif
     }
 

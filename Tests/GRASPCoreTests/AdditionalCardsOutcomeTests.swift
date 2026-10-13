@@ -127,3 +127,150 @@ struct AdditionalCardsOutcomeTests {
         #expect(await CardAI.generateAdditionalCards(inDecks: [deckId], using: generator, database: db) == 0)
     }
 }
+
+/// A generator that overrides the per-note result, as the real ones do.
+@Suite("Additional cards, per-note results")
+struct AdditionalNoteResultTests {
+    private final class Reporting: CardGenerator, @unchecked Sendable {
+        var results: [AdditionalNoteResult] = []
+        private var next = 0
+        var isAvailable: Bool { get async { true } }
+        var overviewContextWordBudget: Int { 1_800 }
+        func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] { [] }
+        func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] { [] }
+        func generateAdditional(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> [GeneratedCard] { [] }
+        func generateAdditionalResult(existing: [CandidatePair], noteContext: String, maxCount: Int,
+                                      topic: String?) async -> AdditionalNoteResult {
+            defer { next += 1 }
+            return results[min(next, results.count - 1)]
+        }
+        func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] { [] }
+        func validateContext(front: String, back: String, noteContext: String, courseName: String) async -> ContextValidation {
+            ContextValidation(.valid)
+        }
+        func generateOverview(noteTitle: String, courseName: String, noteContext: String,
+                              includeFormulas: Bool, partLabel: String?) async -> GeneratedOverview { .empty }
+        func generateFigures(noteTitle: String, courseName: String, noteContext: String,
+                             sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
+    }
+
+    /// A deck with `notes` notes of one card each.
+    private func makeDeck(notes: Int) async throws -> (GRASPDatabase, String) {
+        let db = try GRASPDatabase.inMemory()
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "Biology")
+            try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "Deck")
+            try deck.insert(conn)
+            for n in 0..<notes {
+                let material = Material(courseId: course.id, relativePath: "/v/\(n).md", kind: .markdown,
+                                        contentHash: "h\(n)", title: "Note \(n)")
+                try material.insert(conn)
+                let text = "Chlorophyll absorbs light. Note number \(n) talks about the Calvin cycle."
+                try NoteText(materialId: material.id, raw: text, reflowed: text, wordCount: 12, hasMath: false).insert(conn)
+                let card = Card(materialId: material.id, front: "Term \(n)", back: "Def \(n)", origin: .parser, status: .active)
+                try card.insert(conn)
+                try DeckCard(deckId: deck.id, cardId: card.id, sortIndex: n).insert(conn)
+            }
+            return deck.id
+        }
+        return (db, deckId)
+    }
+
+    @Test("every note answered with an empty list is nothing to add")
+    func allEmptyIsNothingToAdd() async throws {
+        let (db, deckId) = try await makeDeck(notes: 3)
+        let generator = Reporting()
+        generator.results = [.cards([])]
+        #expect(await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: generator, database: db) == .nothingToAdd)
+    }
+
+    @Test("every note failing is a failure with the reason, not 'no gaps'")
+    func allFailedIsFailure() async throws {
+        let (db, deckId) = try await makeDeck(notes: 3)
+        let generator = Reporting()
+        generator.results = [.failed("The model's reply couldn't be read.")]
+        let outcome = await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: generator, database: db)
+        #expect(outcome == .failed(.modelGaveNoAnswer(reason: "The model's reply couldn't be read.")))
+    }
+
+    @Test("some notes failing and the rest empty is still not a failure of the run")
+    func mixedFailureAndEmpty() async throws {
+        let (db, deckId) = try await makeDeck(notes: 2)
+        let generator = Reporting()
+        generator.results = [.failed("The model didn't answer."), .cards([])]
+        #expect(await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: generator, database: db) == .nothingToAdd)
+    }
+
+    @Test("cards from the notes that worked are kept when another note failed")
+    func partialSuccessKeepsCards() async throws {
+        let (db, deckId) = try await makeDeck(notes: 2)
+        let generator = Reporting()
+        generator.results = [.failed("The model didn't answer."),
+                             .cards([GeneratedCard(front: "Stroma", back: "The fluid around the thylakoids")])]
+        let outcome = await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: generator, database: db)
+        #expect(outcome == .added(1))
+    }
+
+    @Test("a generator that only implements generateAdditional is read as .cards through the default")
+    func defaultWrapsOldFunction() async {
+        struct Old: CardGenerator {
+            var isAvailable: Bool { get async { true } }
+            var overviewContextWordBudget: Int { 1_800 }
+            func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] { [] }
+            func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] { [] }
+            func generateAdditional(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> [GeneratedCard] {
+                [GeneratedCard(front: "A", back: "B")]
+            }
+            func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] { [] }
+            func validateContext(front: String, back: String, noteContext: String, courseName: String) async -> ContextValidation {
+                ContextValidation(.valid)
+            }
+            func generateOverview(noteTitle: String, courseName: String, noteContext: String,
+                                  includeFormulas: Bool, partLabel: String?) async -> GeneratedOverview { .empty }
+            func generateFigures(noteTitle: String, courseName: String, noteContext: String,
+                                 sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
+        }
+        let generator: any CardGenerator = Old()
+        let result = await generator.generateAdditionalResult(existing: [], noteContext: "x", maxCount: 3, topic: nil)
+        guard case .cards(let cards) = result else { Issue.record("expected cards"); return }
+        #expect(cards.count == 1)
+    }
+}
+
+/// The real Ollama/Cloud pipeline, over a stub transport.
+@Suite("Additional cards, pipeline")
+struct AdditionalPipelineTests {
+    private struct Stub: ChatTransport {
+        var answer: String?
+        func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
+            guard let answer else { throw AIBackendError.unauthorized }
+            return answer
+        }
+    }
+
+    private func result(_ answer: String?) async -> AdditionalNoteResult {
+        let generator = OllamaGenerator(transport: Stub(answer: answer), model: "stub", wordBudget: 3_000)
+        return await generator.generateAdditionalResult(
+            existing: [CandidatePair(front: "A", back: "B", sourceLine: 0)], noteContext: "Some note text.",
+            maxCount: 3, topic: nil)
+    }
+
+    @Test("an empty list is the model finding nothing; garbage and errors are failures")
+    func classifies() async {
+        if case .cards(let cards) = await result(#"{"items": []}"#) { #expect(cards.isEmpty) } else { Issue.record("empty list should be .cards") }
+        if case .cards(let cards) = await result(#"{"items": [{"front": "Stroma", "back": "Fluid"}]}"#) {
+            #expect(cards.count == 1)
+        } else { Issue.record("a card list should be .cards") }
+        if case .failed = await result("I'm sorry, I can't help with that.") {} else { Issue.record("prose should be .failed") }
+        if case .failed = await result(nil) {} else { Issue.record("a transport error should be .failed") }
+    }
+
+    @Test("the Int-returning function treats a failed note as no cards")
+    func legacyFunctionStillWorks() async {
+        let generator = OllamaGenerator(transport: Stub(answer: "nonsense"), model: "stub", wordBudget: 3_000)
+        let cards = await generator.generateAdditional(
+            existing: [], noteContext: "Some note text.", maxCount: 3, topic: nil)
+        #expect(cards.isEmpty)
+    }
+}

@@ -106,6 +106,16 @@ public protocol CardGenerator: Sendable {
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> [GeneratedCard]
 
+    /// `generateAdditional`, saying how the one note went: `.cards([])` is
+    /// the model reading the note and finding nothing to add, `.failed` is
+    /// no usable answer at all (unreachable, an error, a reply that could
+    /// not be read). A requirement in the protocol body, so a generator
+    /// that overrides it is called through any `CardGenerator`; the default
+    /// below wraps `generateAdditional` and can't tell the two apart.
+    func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult
+
     /// Proposes up to `maxCount` fresh, written/free-response practice
     /// questions grounded in `noteContext`, for a test-only question that
     /// is never saved as a `Card` and never enters the draft review queue
@@ -241,7 +251,21 @@ public protocol CardGenerator: Sendable {
     var overviewContextWordBudget: Int { get }
 }
 
+/// How one note's "additional cards" request ended.
+public enum AdditionalNoteResult: Sendable {
+    /// The model answered. An empty list means it found nothing worth adding.
+    case cards([GeneratedCard])
+    /// The model gave no usable answer; `reason` is plain words for the student.
+    case failed(String)
+}
+
 public extension CardGenerator {
+    func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult {
+        .cards(await generateAdditional(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic))
+    }
+
     func generateProblems(
         deckName: String, courseName: String, noteContext: String, cardTerms: [String],
         subject: ProblemSubject, kinds: [ProblemKind], count: Int

@@ -442,6 +442,8 @@ final class AppStore {
             return "GRASP couldn't read this deck's cards. Try again."
         case .noSourceNotes:
             return "None of these cards came from a note, so there is nothing to read new questions from."
+        case .modelGaveNoAnswer(let reason):
+            return "The AI model didn't give a usable answer. \(reason) Try again, or check Settings → AI."
         case .writeFailed(let created, let reason):
             return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
                 + "Something went wrong saving: \(reason)"

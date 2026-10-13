@@ -111,16 +111,28 @@ public struct OllamaGenerator: CardGenerator {
     public func generateAdditional(
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> [GeneratedCard] {
-        guard maxCount > 0, !noteContext.isEmpty else { return [] }
+        let result = await generateAdditionalResult(
+            existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        if case .cards(let cards) = result { return cards }
+        return []
+    }
+
+    public func generateAdditionalResult(
+        existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
+    ) async -> AdditionalNoteResult {
+        guard maxCount > 0, !noteContext.isEmpty else { return .cards([]) }
         let prompt = Self.generateAdditionalPrompt(
             existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic
         )
-        guard let content = try? await chat(prompt: prompt),
-              let decoded = Self.decodeList(RefinedPairDTO.self, from: content)
-        else { return [] }
-        return Array(decoded.prefix(maxCount)).map {
-            GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back))
+        guard let content = try? await chat(prompt: prompt) else {
+            return .failed("The model didn't answer.")
         }
+        guard let decoded = Self.decodeList(RefinedPairDTO.self, from: content) else {
+            return .failed("The model's reply couldn't be read.")
+        }
+        return .cards(Array(decoded.prefix(maxCount)).map {
+            GeneratedCard(front: PlainMath.clean($0.front), back: PlainMath.clean($0.back))
+        })
     }
 
     public func generateTestQuestions(
