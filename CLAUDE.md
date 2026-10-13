@@ -20,6 +20,8 @@ Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
 
 ## Copy
 - No double hyphens or dashes in UI text. Use a period or a comma.
+- Name AI actions by what they produce: cards, overview, study guide, test questions.
+  Never "questions" for card generation ("Generate cards", not "Generate questions").
 
 ## Design
 - Tokens and components come from `Sources/GRASP/Shared/Theme.swift`,

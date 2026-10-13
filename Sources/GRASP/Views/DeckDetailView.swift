@@ -79,7 +79,7 @@ struct DeckDetailView: View {
         var id: String { rawValue }
     }
     @State private var fillGapsResult: Int?
-    /// Why the last "Generate questions" run failed, shown as a strip with
+    /// Why the last "Generate cards" run failed, shown as a strip with
     /// Retry -- a failure is never reported as "No Gaps Found". The request
     /// is kept for the retry.
     @State private var additionFailure: String?
@@ -465,10 +465,10 @@ struct DeckDetailView: View {
             if let fillGapsResult {
                 ResultSheet(
                     icon: "sparkles",
-                    title: fillGapsResult == 0 ? "No Gaps Found" : "Cards Added",
+                    title: fillGapsResult == 0 ? "No New Cards to Add" : "Cards Added",
                     leadText: fillGapsResult > 0
                         ? "Added \(fillGapsResult) new card\(fillGapsResult == 1 ? "" : "s"), marked as AI-generated and awaiting your review."
-                        : "The AI didn't find any concepts in these notes that aren't already covered by an existing card."
+                        : "No new cards to add. The AI didn't find any concepts in these notes that aren't already covered by a card."
                 )
             }
         }
@@ -647,7 +647,7 @@ struct DeckDetailView: View {
 
     /// AI is GRASP's headline feature, so it gets its own button: an
     /// outlined pill (never filled -- Study is the one yellow button) with
-    /// the yellow sparkle. Cards: write practice questions. Overview:
+    /// the yellow sparkle. Cards: generate cards. Overview:
     /// rewrite the overviews.
     private var aiButton: some View {
         let onCards = contentTab == .cards
@@ -659,18 +659,18 @@ struct DeckDetailView: View {
                     .font(.graspUI(size: 11, weight: .semibold))
                     .foregroundStyle(GRASPColor.accent)
                 if !isCompact {
-                    Text(onCards ? (isGeneratingCards ? "Generating…" : "Generate questions") : "Rewrite with AI")
+                    Text(onCards ? (isGeneratingCards ? "Generating…" : "Generate cards") : "Rewrite with AI")
                         .lineLimit(1).fixedSize()
                 }
             }
         }
-        .accessibilityLabel(onCards ? "Generate questions" : "Rewrite with AI")
+        .accessibilityLabel(onCards ? "Generate cards" : "Rewrite with AI")
         .buttonStyle(GRASPQuietButton())
         .disabled(onCards
                   ? (!isGeneratorAvailable || aiActivity != nil)
                   : (!isGeneratorAvailable || overviewNoteCount == 0))
         .help(onCards
-              ? (isGeneratorAvailable ? "Write new draft cards from this \(filesNoun.lowercased())'s notes, shown here as they arrive"
+              ? (isGeneratorAvailable ? "Generate cards: new drafts written from this \(filesNoun.lowercased())'s notes, shown here as they arrive"
                                       : "Set up an AI model in Settings first")
               : isGeneratorAvailable ? "Rewrite every overview in this \(filesNoun.lowercased()) with AI"
                                      : "Set up an AI model in Settings to write overviews")
@@ -747,11 +747,16 @@ struct DeckDetailView: View {
         ]
     }
 
-    /// Cards view: everything that puts cards or questions into the deck.
+    /// Cards view: everything that puts cards or practice problems into the deck.
     private var addMenuButton: some View {
         PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting, showsTitle: !isCompact) {
             let aiBusy = aiActivity != nil
             var items: [PillMenuItem] = [
+                .action("Generate cards with AI…", ai: true,
+                        disabled: !isGeneratorAvailable || aiBusy,
+                        help: "New draft cards for concepts this deck's notes mention that have no card yet") {
+                    showingGenerateSheet = true
+                },
                 .action("Practice problems with AI…", ai: true,
                         help: "Code, calculations and matrices from this deck's notes, checked before they're kept") {
                     showingCodeQuestions = true
@@ -768,7 +773,7 @@ struct DeckDetailView: View {
             items += addSourceItems
             return items
         }
-        .help("Generate questions, add cards, files or a study guide")
+        .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
     /// Overview view: rewriting the overviews, and adding sources.
@@ -1015,7 +1020,7 @@ struct DeckDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
     }
 
-    /// The "Generate questions" run failed: what went wrong, with Retry --
+    /// The "Generate cards" run failed: what went wrong, with Retry --
     /// the same look as the live strip, in place of it.
     private func additionFailureStrip(_ message: String) -> some View {
         HStack(spacing: 10) {
@@ -1075,7 +1080,7 @@ struct DeckDetailView: View {
                         HStack(spacing: 10) {
                             Image(systemName: AIGlyph.symbol)
                                 .font(.graspUI(size: 17, weight: .semibold))
-                            Text("Generate questions from your notes")
+                            Text("Generate cards from your notes")
                                 .font(.graspUI(size: 16, weight: .semibold))
                         }
                         .padding(.horizontal, 26)
@@ -1106,11 +1111,11 @@ struct DeckDetailView: View {
                     .buttonStyle(GRASPQuietButton())
                     HStack(spacing: 6) {
                         Image(systemName: AIGlyph.symbol).font(.graspUI(size: 10, weight: .semibold))
-                        Text("Generate questions")
+                        Text("Generate cards")
                     }
                     .font(.graspUI(size: 13.5, weight: .medium))
                     .foregroundStyle(GRASPColor.textTertiary.opacity(0.7))
-                    Text("Add this course's notes first. Questions are written from them.")
+                    Text("Add this course's notes first. Cards are written from them.")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
@@ -1151,7 +1156,7 @@ struct DeckDetailView: View {
     }
 
     /// Writes the deck's first cards from the course's notes. Same strip as
-    /// "Generate questions"; failures come back as a notice with Retry.
+    /// "Generate cards"; failures come back as a notice with Retry.
     private func generateFromCourse() {
         guard let courseId, let deckId = generationTargetDeckId else { return }
         let generation = scopeGeneration
@@ -1205,13 +1210,13 @@ struct DeckDetailView: View {
                 .font(.graspUI(size: 13, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
                 .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-            Text(liveSourceTitle.map { "Generating from \($0)…" } ?? "Generating from your notes…")
+            Text(liveSourceTitle.map { "Generating cards from \($0)…" } ?? "Generating cards from your notes…")
                 .graspType(.body)
                 .foregroundStyle(GRASPColor.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            Text("\(written) new")
+            Text("\(written) new card\(written == 1 ? "" : "s")")
                 .graspType(.meta)
                 .monospacedDigit()
                 .contentTransition(.numericText(value: Double(written)))
@@ -1736,7 +1741,7 @@ private struct GenerateCardsSheet: View {
 
     var body: some View {
         GRASPSheet(
-            eyebrow: "Generate with AI", title: "Generate questions",
+            eyebrow: "Generate with AI", title: "Generate cards",
             message: "The AI writes new draft cards for concepts your notes mention that don't have a card yet. They arrive in the list as they're written.",
             icon: AIGlyph.symbol, width: 440
         ) {
@@ -1775,7 +1780,7 @@ private struct GenerateCardsSheet: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: AIGlyph.symbol).font(.graspUI(size: 11, weight: .semibold))
-                    Text("Generate")
+                    Text("Generate cards")
                 }
             }
             .buttonStyle(GRASPProminentButton())

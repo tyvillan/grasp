@@ -39,7 +39,7 @@ struct DeckScreen: View {
     @State private var confirmingApproveAll = false
     /// Shown when Test is tapped on a deck with no approved cards yet.
     @State private var approveFirstNotice = false
-    /// Why the last "Generate Questions" run failed, shown with Retry
+    /// Why the last "Generate Cards" run failed, shown with Retry
     /// instead of the "no new cards" message.
     @State private var additionFailure: String?
 
@@ -249,7 +249,7 @@ struct DeckScreen: View {
             Section("AI") {
                 Button { refineDeck() } label: { Label("Refine Drafts with AI", systemImage: "checkmark.seal") }
                     .disabled(draftCount == 0)
-                Button { addCards() } label: { Label("Generate Questions", systemImage: "sparkles") }
+                Button { addCards() } label: { Label("Generate Cards with AI", systemImage: "sparkles") }
                 Button { writeOverviews() } label: { Label("Write Overviews", systemImage: "text.book.closed") }
             }
             .disabled(!store.isGeneratorAvailable || runningJob != nil)
@@ -287,7 +287,7 @@ struct DeckScreen: View {
             case .added(let count):
                 aiMessage = "Added \(count) new card\(count == 1 ? "" : "s") as drafts for you to review."
             case .nothingToAdd:
-                if !run.stopRequested { aiMessage = "The notes are already well covered. No new cards." }
+                if !run.stopRequested { aiMessage = "No new cards to add. The notes are already well covered." }
             case .failed(let failure):
                 additionFailure = AppStore.message(for: failure)
             }
@@ -572,12 +572,12 @@ struct DeckScreen: View {
                 .font(.graspUI(size: 13, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
                 .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-            Text(liveSourceTitle.map { "Generating from \($0)…" } ?? "Generating from your notes…")
+            Text(liveSourceTitle.map { "Generating cards from \($0)…" } ?? "Generating cards from your notes…")
                 .graspType(.body)
                 .foregroundStyle(GRASPColor.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 6)
-            Text("\(recentAIIds.count) new")
+            Text("\(recentAIIds.count) new card\(recentAIIds.count == 1 ? "" : "s")")
                 .graspType(.meta)
                 .monospacedDigit()
                 .foregroundStyle(GRASPColor.textSecondary)
@@ -595,7 +595,7 @@ struct DeckScreen: View {
                 Button { generateFromCourse() } label: {
                     HStack(spacing: 8) {
                         Image(systemName: AIGlyph.symbol).foregroundStyle(GRASPColor.accent)
-                        Text("Generate questions from your notes").font(.graspUI(size: 15, weight: .semibold))
+                        Text("Generate cards from your notes").font(.graspUI(size: 15, weight: .semibold))
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 48)
@@ -608,7 +608,7 @@ struct DeckScreen: View {
                 Label("Add this course's files on your Mac first", systemImage: "doc.badge.plus")
                     .font(.graspUI(size: 15, weight: .semibold))
                     .foregroundStyle(GRASPColor.textPrimary)
-                Text("Questions are written from a course's notes. Generate questions is waiting for them.")
+                Text("Cards are written from a course's notes. Generate cards is waiting for them.")
                     .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
                     .multilineTextAlignment(.center)
             }

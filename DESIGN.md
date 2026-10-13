@@ -35,7 +35,7 @@ is cream or muted. Segmented controls and filter pills select in `surfaceRaised`
 with a hairline, never yellow. The Home streak chip is outlined.
 
 **The sparkle (`AIGlyph.symbol`, "sparkles") means "AI acts here"** and is used
-for nothing else: Generate questions, Rewrite with AI, Refine, AI-made drafts,
+for nothing else: Generate cards, Rewrite with AI, Refine, AI-made drafts,
 Settings → AI. It is always `accent`.
 
 **Course colours** (`CoursePalette`, six slots, never yellow) appear on the
@@ -67,7 +67,7 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
 `Motion.fade`; no movement, scaling, pulsing or stagger remains.
 
 ## Patterns
-- **Deck toolbar.** Left: Study (yellow), Learn, Test. Right: Generate questions
+- **Deck toolbar.** Left: Study (yellow), Learn, Test. Right: Generate cards
   (outlined, sparkle), then Add (Cards) or Edit (Overview), then ⋯. Under about 640 pt
   of pane width every button becomes an icon with a tooltip. Under 1000 pt of window
   the deck list collapses.
@@ -87,7 +87,7 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
   Stop. New rows slide in at the top; counts everywhere come from `DeckCardCounts`
   and move together once a batch is on screen.
 - **Empty states.** One action, one quiet way out, no filters or counts. An empty
-  deck's single filled yellow button is "Generate questions from your notes".
+  deck's single filled yellow button is "Generate cards from your notes".
 - **Study finish.** "N cards done", the two tallies, one muted line of progress to
   the daily goal, then Done (the one filled yellow button) with at most one
   outlined follow-on beside it: "Learn the N you missed", else "Take a test".
@@ -97,6 +97,13 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
   green, 21 to 50 yellow, over 50 coral); the month's footer is the legend.
 - **Study sheets** (Learn, Test, flashcards) sit on a near-black scrim, one progress
   bar, answers never replace the question.
+
+**Naming AI actions.** Name an AI action by what it produces: cards, overview,
+study guide, test questions. Never "questions" for card generation. The deck
+toolbar button is "Generate cards", the empty deck's is "Generate cards from your
+notes", the strip says "Generating cards from <note>" and "N new cards". The Test
+setup toggle is "Include AI-written questions" (fresh questions for that test only,
+never saved as cards).
 
 ## Rules for new screens
 1. Reuse tokens and components; add no colour, font or radius without asking.
