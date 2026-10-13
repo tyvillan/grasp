@@ -332,7 +332,7 @@ struct RowReductionView: View {
             let verb = k < 0 ? "Subtract \(amount) from \(target)" : "Add \(amount) to \(target)"
             if let first = cleared.first {
                 let value = before[first.row, first.column]
-                return "\(verb). The \(value) in column \(first.column + 1) cancels out and becomes 0 -- that's the whole point of this step."
+                return "\(verb). The \(value) in column \(first.column + 1) cancels out and becomes 0. That's the whole point of this step."
             }
             return "\(verb). Replacing a row with itself plus a multiple of another never changes the solutions."
         }

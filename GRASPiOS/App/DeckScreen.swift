@@ -199,9 +199,10 @@ struct DeckScreen: View {
                         withAnimation { editMode = editMode == .active ? .inactive : .active }
                         selection.removeAll()
                     }
+                    .tint(GRASPColor.textPrimary)
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+            ToolbarItem(placement: .topBarTrailing) { actionsMenu.tint(GRASPColor.textPrimary) }
         }
         .sheet(isPresented: $approveFirstNotice) {
             ResultSheet(
@@ -258,7 +259,7 @@ struct DeckScreen: View {
             }
             if !(run.stopRequested && result.isEmpty) {
                 aiMessage = result.isEmpty
-                    ? "Every draft already looked right -- nothing to change."
+                    ? "Every draft already looked right. Nothing to change."
                     : "Rewrote \(result.context.refined.count), removed \(result.context.removed.count) off-topic, cleaned up wording on \(result.wordingRefinedCount)."
             }
         }
@@ -276,7 +277,7 @@ struct DeckScreen: View {
             case .added(let count):
                 aiMessage = "Added \(count) new card\(count == 1 ? "" : "s") as drafts for you to review."
             case .nothingToAdd:
-                if !run.stopRequested { aiMessage = "The notes are already well covered -- no new cards." }
+                if !run.stopRequested { aiMessage = "The notes are already well covered. No new cards." }
             case .failed(let failure):
                 additionFailure = AppStore.message(for: failure)
             }
@@ -304,8 +305,8 @@ struct DeckScreen: View {
             }
             if !run.stopRequested {
                 aiMessage = written == targets.count
-                    ? "Wrote \(written) overview\(written == 1 ? "" : "s") -- they're on the Overview tab."
-                    : "Wrote \(written) of \(targets.count). The rest couldn't be written -- try again later."
+                    ? "Wrote \(written) overview\(written == 1 ? "" : "s"). They're on the Overview tab."
+                    : "Wrote \(written) of \(targets.count). The rest couldn't be written. Try again later."
             }
         }
     }
@@ -396,12 +397,34 @@ struct DeckScreen: View {
             Section {
                 HStack {
                     Label("\(draftCount) awaiting review", systemImage: "rectangle.on.rectangle")
-                        .foregroundStyle(GRASPColor.accent)
-                    Spacer()
+                        .font(.graspSubheadline)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                    Spacer(minLength: 6)
                     Button("Review drafts") { withAnimation(Motion.snappy) { filter = .drafts } }
-                        .font(.graspSubheadline.weight(.semibold))
-                    Button("Approve All") { confirmingApproveAll = true }
-                    .font(.graspSubheadline.weight(.semibold))
+                        .buttonStyle(.plain)
+                        .font(.graspUI(size: 13, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textPrimary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .overlay(Capsule().strokeBorder(GRASPColor.textPrimary.opacity(0.4), lineWidth: 1))
+                    // With nothing to study yet, approving is the page's one
+                    // yellow primary. Otherwise it is yellow text, and Study
+                    // holds the fill.
+                    if activeCount == 0 {
+                        Button("Approve All") { confirmingApproveAll = true }
+                            .buttonStyle(.plain)
+                            .font(.graspUI(size: 13, weight: .semibold))
+                            .foregroundStyle(GRASPColor.ink)
+                            .padding(.horizontal, 14)
+                            .frame(height: 30)
+                            .background(Capsule().fill(GRASPColor.brand))
+                    } else {
+                        Button("Approve All") { confirmingApproveAll = true }
+                            .buttonStyle(.plain)
+                            .font(.graspUI(size: 13, weight: .semibold))
+                            .foregroundStyle(GRASPColor.accent)
+                            .padding(.horizontal, 4)
+                    }
                 }
             }
             .graspSection()
@@ -612,11 +635,11 @@ struct DeckScreen: View {
                 case .generatorUnavailable: notice = "No AI model is reachable. Check Settings → AI."
                 case .noReadableNotes: notice = "No readable text in this course's files."
                 case .deckMissing: notice = "This deck no longer exists."
-                case .writeFailed(let created, let reason):
-                    notice = (created > 0 ? "Stopped after \(created). " : "") + "Couldn't save: \(reason)"
+                case .writeFailed(let created, _):
+                    notice = (created > 0 ? "Stopped after \(created). " : "") + "Couldn't save the cards. Try again."
                 }
             } catch {
-                notice = error.localizedDescription
+                notice = PlainError.message(error, couldnt: "write cards")
             }
             load()
         }

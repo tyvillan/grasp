@@ -206,7 +206,7 @@ struct DeckOverviewView: View {
             ContentUnavailableView {
                 Label("Overviews need an AI model", systemImage: "sparkles")
             } description: {
-                Text("Writing an overview takes an AI model -- Ollama or Apple's on-device "
+                Text("Writing an overview takes an AI model, Ollama or Apple's on-device "
                      + "model on this Mac, or Google Gemini in the cloud. None is set up right "
                      + "now. Settings → AI has the setup, and everything else in GRASP works "
                      + "without it.")
@@ -222,7 +222,7 @@ struct DeckOverviewView: View {
                 Label("No overview yet", systemImage: "text.book.closed")
             } description: {
                 Text("GRASP can read the \(writable.count) note\(writable.count == 1 ? "" : "s") "
-                     + "behind this deck and write a study overview for each -- key takeaways, "
+                     + "behind this deck and write a study overview for each: key takeaways, "
                      + "the definitions worth knowing, worked examples, and an outline.")
             } actions: {
                 Button("Write Overview\(writable.count == 1 ? "" : "s")…") {
@@ -468,16 +468,18 @@ struct DeckOverviewView: View {
 
         if slept {
             return what + " Your Mac went to sleep during the run, which stops the model "
-                 + "mid-answer -- keep the lid open until it finishes."
+                 + "mid-answer. Keep the lid open until it finishes."
         }
         // In Cloud/Automatic the reason is usually Google's own message.
         if AIPreferences.mode.usesCloud, let reason = CloudUsage.shared.lastTransportError {
-            return what + " \(reason)"
+            // A transport error's own text can be a system dump.
+            let technical = reason.contains("Error Domain=") || reason.contains("(code ") || reason.contains("UserInfo=")
+            return what + (technical ? " Google couldn't be reached. Check your connection and try again." : " \(reason)")
         }
         if failed.allSatisfy({ $0.outcome == .empty }) {
             return what + " The model ran but came back with nothing usable."
         }
-        return what + " The model stopped responding partway -- Settings → AI shows "
+        return what + " The model stopped responding partway. Settings → AI shows "
              + "whether it's reachable."
     }
 }

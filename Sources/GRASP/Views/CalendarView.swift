@@ -124,7 +124,10 @@ struct CalendarView: View {
             case .failure(let error):
                 syncResult = SyncReport(
                     title: "Couldn't Read Your Calendar",
-                    lead: error.localizedDescription, isError: true
+                    lead: PlainError.isSystemError(error)
+                        ? "Allow GRASP to read your calendar in System Settings, Privacy and Security, Calendars, then try again."
+                        : error.localizedDescription,
+                    isError: true
                 )
             case .success(let summary):
                 var sections: [ResultSheet.Section] = []
@@ -156,7 +159,7 @@ struct CalendarView: View {
         }
         var text = "\(scanned) and found \(summary.changeCount) exam\(summary.changeCount == 1 ? "" : "s")."
         if !summary.unmatched.isEmpty {
-            text += " Ones with no matching course were still added -- open them to pick a course, "
+            text += " Ones with no matching course were still added. Open them to pick a course, "
                 + "or set that course's code so the next sync matches it automatically."
         }
         return text
@@ -430,7 +433,7 @@ private struct DayCell: View {
                     Circle()
                         .fill(color)
                         .frame(width: 5, height: 5)
-                        .help("\(workload.label) -- \(dueCount) card\(dueCount == 1 ? "" : "s") due")
+                        .help("\(workload.label), \(dueCount) card\(dueCount == 1 ? "" : "s") due")
                 }
                 Spacer(minLength: 0)
                 if isHovering {
@@ -876,16 +879,16 @@ struct CalendarEventEditSheet: View {
 
     private var planDescription: String {
         guard plannableCards > 0 else {
-            return "No active cards in this deck yet -- add or approve some first."
+            return "No active cards in this deck yet. Add or approve some first."
         }
         let days = edited.daysAway(from: Date())
         let plan = StudyPlanner.plan(cardCount: plannableCards, from: Date(), examDate: original.startsAt)
         let existing = hasPlan ? "Replaces the current plan. " : ""
         let ending = plan.last?.isFinalReview == true
             ? ", ending with a full review the day before"
-            : " -- the exam is too soon for a separate review day, so it's all one push"
-        return "\(existing)\(plannableCards) cards across \(days) day\(days == 1 ? "" : "s") "
-            + "-- \(plan.count) study block\(plan.count == 1 ? "" : "s")\(ending)."
+            : ". The exam is too soon for a separate review day, so it's all one push"
+        return "\(existing)\(plannableCards) cards across \(days) day\(days == 1 ? "" : "s"), "
+            + "in \(plan.count) study block\(plan.count == 1 ? "" : "s")\(ending)."
     }
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {

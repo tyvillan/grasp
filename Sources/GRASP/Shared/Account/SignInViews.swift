@@ -42,7 +42,7 @@ struct SignInButtons: View {
                 ProgressView().controlSize(.small)
             }
             if !accounts.isConfigured {
-                Text("Sign-in isn't set up in this copy of GRASP yet -- see SYNC_SETUP.md.")
+                Text("Sign-in isn't set up in this copy of GRASP yet. See SYNC_SETUP.md.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .multilineTextAlignment(.center)
@@ -73,7 +73,11 @@ struct SignInButtons: View {
             } catch {
                 // Closing the Google window is a choice, not an error.
                 let text = error.localizedDescription
-                if !text.localizedCaseInsensitiveContains("cancel") { self.error = text }
+                if !text.localizedCaseInsensitiveContains("cancel") {
+                    self.error = PlainError.isSystemError(error)
+                        ? PlainError.message(error, couldnt: "sign in")
+                        : text
+                }
             }
         }
     }
@@ -158,7 +162,9 @@ struct EmailSignInSheet: View {
                 message = "Sent. Open the link in that email on this Mac and GRASP will sign you in."
             } catch {
                 isError = true
-                message = error.localizedDescription
+                message = PlainError.isSystemError(error)
+                    ? PlainError.message(error, couldnt: "send the link")
+                    : error.localizedDescription
             }
         }
     }
@@ -175,7 +181,9 @@ struct EmailSignInSheet: View {
                 message = AccountError.confirmEmail(address).errorDescription
             } catch {
                 isError = true
-                message = error.localizedDescription
+                message = PlainError.isSystemError(error)
+                    ? PlainError.message(error, couldnt: "sign in")
+                    : error.localizedDescription
             }
         }
     }
@@ -221,7 +229,7 @@ struct AccountLinkSheet: View {
                             option(
                                 title: "Use a profile on this Mac",
                                 detail: accountHasData == true
-                                    ? "Its library is added to the one already in your account -- if both came from the same notes you'll get duplicates."
+                                    ? "Its library is added to the one already in your account. If both came from the same notes you'll get duplicates."
                                     : "Its library is uploaded, and your other devices download it when they sign in.",
                                 recommended: accountHasData == false
                             ) {
@@ -257,7 +265,7 @@ struct AccountLinkSheet: View {
     private var explanation: String {
         switch accountHasData {
         case .some(true): return "Your account already has a library from another device."
-        case .some(false): return "Your account is new -- nothing has synced to it yet."
+        case .some(false): return "Your account is new. Nothing has synced to it yet."
         case .none: return checked ? "GRASP couldn't reach your account to check what's in it." : ""
         }
     }
@@ -314,7 +322,7 @@ struct AccountLinkSheet: View {
             try ProfileStore.save(profiles, supportDirectory: support)
             onDone(profile)
         } catch {
-            self.error = "Couldn't set up sync: \(error.localizedDescription)"
+            self.error = PlainError.message(error, couldnt: "set up sync")
         }
     }
 }

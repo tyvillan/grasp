@@ -87,12 +87,14 @@ struct CalendarScreen: View {
                 if !summary.imported.isEmpty { parts.append("Added \(summary.imported.count).") }
                 if !summary.updated.isEmpty { parts.append("Updated \(summary.updated.count).") }
                 if !summary.unmatched.isEmpty {
-                    parts.append("\(summary.unmatched.count) couldn't be matched to a course -- open them to pick one.")
+                    parts.append("\(summary.unmatched.count) couldn't be matched to a course. Open them to pick one.")
                 }
                 importMessage = parts.isEmpty ? "No new exam or quiz dates found." : parts.joined(separator: " ")
                 load()
             case .failure(let error):
-                importMessage = error.localizedDescription
+                importMessage = PlainError.isSystemError(error)
+                    ? "Allow GRASP to read your calendar in Settings, then try again."
+                    : error.localizedDescription
             }
         }
     }

@@ -117,7 +117,7 @@ final class AccountService {
             completedFromLink = try await adopt(session, provider: "email")
             linkError = nil
         } catch {
-            linkError = "That sign-in link didn't work -- it may have expired. Ask for a new one."
+            linkError = "That sign-in link didn't work. It may have expired. Ask for a new one."
         }
     }
 

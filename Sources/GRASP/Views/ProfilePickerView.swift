@@ -143,7 +143,7 @@ struct ProfilePickerView: View {
         do {
             profiles = try ProfileStore.loadOrMigrate(supportDirectory: Self.supportDirectory())
         } catch {
-            loadError = "Couldn't load profiles: \(error.localizedDescription)"
+            loadError = PlainError.message(error, couldnt: "load the profiles")
         }
     }
 

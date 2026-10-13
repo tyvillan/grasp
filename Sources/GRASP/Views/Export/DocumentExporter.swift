@@ -52,7 +52,9 @@ enum DocumentExporter {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Couldn't save \(url.lastPathComponent)"
-            alert.informativeText = error.localizedDescription
+            alert.informativeText = PlainError.isSystemError(error)
+                ? "Check that the folder can be written to and that the disk has room, then try again."
+                : error.localizedDescription
             alert.runModal()
         }
     }

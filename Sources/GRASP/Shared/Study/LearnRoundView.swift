@@ -188,7 +188,7 @@ struct LearnRoundView: View {
     /// used as the section label above it.
     private var checkpointHeadline: String {
         if roundIncorrect == 0 { return "Clean round" }
-        if roundCorrect == 0 { return "Rough round -- worth another pass" }
+        if roundCorrect == 0 { return "Rough round. Worth another pass" }
         return "Round complete"
     }
 
@@ -466,7 +466,7 @@ struct LearnRoundView: View {
         case .correct:
             verdictLabel("Correct", "checkmark.circle.fill", GRASPColor.success)
         case .close:
-            verdictLabel("Close -- check your spelling", "checkmark.circle", GRASPColor.accent)
+            verdictLabel("Close. Check your spelling", "checkmark.circle", GRASPColor.accent)
         case .incorrect:
             verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.rejected)
         }

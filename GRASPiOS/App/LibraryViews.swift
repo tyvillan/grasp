@@ -15,7 +15,7 @@ struct CoursesView: View {
                     systemImage: "tray",
                     description: Text(store.sync.account == nil
                         ? "Sign in from Settings to bring your library over from your Mac."
-                        : "Your library is on its way -- it appears here as soon as it has synced.")
+                        : "Your library is on its way. It appears here as soon as it has synced.")
                 )
             }
             Section {
@@ -250,7 +250,7 @@ extension CourseView {
                     ? "That file didn't read as a study guide. Guides are recognized by name, like \"Exam 1 Study Guide\"."
                     : nil
             } catch {
-                guideMessage = "Couldn't add the guide: \(error.localizedDescription)"
+                guideMessage = PlainError.message(error, couldnt: "add the guide")
             }
         }
     }

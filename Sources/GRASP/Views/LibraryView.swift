@@ -64,7 +64,7 @@ struct LibraryView: View {
                     icon: "checkmark.shield",
                     title: "Off-topic check complete",
                     leadText: contextSweepResult.isEmpty
-                        ? "Every card checked out fine -- nothing looked like assignment text or an off-topic fragment. (If no AI model is set up, nothing was checked at all -- see Settings → AI.)"
+                        ? "Every card checked out fine. Nothing looked like assignment text or an off-topic fragment. (If no AI model is set up, nothing was checked at all. See Settings → AI.)"
                         : nil,
                     sections: contextSweepSections(contextSweepResult)
                 )

@@ -143,7 +143,7 @@ struct GenerateStudyGuideSheet: View {
                     Spacer()
                     GRASPPicker(
                         selection: $examId,
-                        options: [("", "None -- a practice set")] + exams.map {
+                        options: [("", "None, a practice set")] + exams.map {
                             ($0.id, "\($0.title) · \($0.startsAt.formatted(.dateTime.month(.abbreviated).day()))")
                         }
                     )

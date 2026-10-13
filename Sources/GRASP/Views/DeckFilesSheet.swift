@@ -122,7 +122,7 @@ struct DeckFilesSheet: View {
                     .truncationMode(.head)
                     .help(file.url.path)
                 if !exists {
-                    Text("Not found on disk -- moved or deleted since it was imported")
+                    Text("Not found on disk. Moved or deleted since it was imported")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.rejected)
                 }
