@@ -939,7 +939,7 @@ struct DeckDetailView: View {
             parts.append("\(duplicateGroups.count) possible duplicate\(duplicateGroups.count == 1 ? "" : "s")")
         }
         return HStack(spacing: 10) {
-            Image(systemName: "square.stack")
+            Image(systemName: "rectangle.on.rectangle")
                 .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.textTertiary)
             Text(parts.joined(separator: " · "))
@@ -1282,6 +1282,8 @@ struct DeckDetailView: View {
             ForEach(cards) { card in
                 CardRow(
                     card: card,
+                    isSelected: selectedCardIds.contains(card.id),
+                    selectionActive: !selectedCardIds.isEmpty,
                     sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
                     mastery: learnLevels[card.id] ?? .new,
                     siblingDecks: siblingDecks,
@@ -1312,15 +1314,6 @@ struct DeckDetailView: View {
                 .listRowBackground(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(selectedCardIds.contains(card.id) ? GRASPColor.surfaceRaised : .clear)
-                        .overlay(alignment: .bottomTrailing) {
-                            if selectedCardIds.contains(card.id) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.graspUI(size: 13))
-                                    .foregroundStyle(GRASPColor.accent)
-                                    .padding(8)
-                                    .transition(.opacity)
-                            }
-                        }
                         .padding(.horizontal, 4)
                 )
                 .background(TableHighlightRemover())
@@ -2047,6 +2040,10 @@ enum CardTermDisplay {
 
 private struct CardRow: View {
     let card: Card
+    /// While any row is selected every row keeps a slot at its left for a
+    /// round checkbox: yellow check when selected, an empty ring when not.
+    let isSelected: Bool
+    let selectionActive: Bool
     /// The note an AI-made card came from, when known.
     let sourceTitle: String?
     let mastery: LearnEngine.Level
@@ -2077,6 +2074,15 @@ private struct CardRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            if selectionActive {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.graspUI(size: 16))
+                    .foregroundStyle(isSelected ? GRASPColor.accent : GRASPColor.hairlineStrong)
+                    .frame(width: 18)
+                    .padding(.top, 1)
+                    .transition(.opacity)
+                    .accessibilityLabel(isSelected ? "Selected" : "Not selected")
+            }
             // A hairline rule down the left of each card, tinted by
             // mastery: understood teal, still-to-review amber, draft
             // grey. It's the one place a colored rail earns its keep --
@@ -2184,6 +2190,7 @@ private struct CardRow: View {
             .animation(Motion.fade, value: isActive)
         }
         .padding(.vertical, 7)
+        .animation(Motion.fade, value: selectionActive)
         .contentShape(Rectangle())
         .draggable(CardTransfer(cardIds: dragCardIds)) {
             Label(dragCardIds.count == 1 ? card.front : "\(dragCardIds.count) cards",

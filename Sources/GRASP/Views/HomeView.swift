@@ -1,5 +1,6 @@
 import SwiftUI
 import GRASPCore
+import GRDB
 
 /// Home: one obvious thing to do.
 ///
@@ -20,6 +21,8 @@ struct HomeView: View {
     @State private var plan = TodayPlan(steps: [])
     @State private var streak = AppStore.StudyStreak(days: 0, studiedToday: false, reviewsToday: 0)
     @State private var studying: StudyTarget?
+    /// Tests finished since midnight.
+    @State private var testsToday = 0
     /// "yyyy-MM-dd|id,id": which plan steps were ticked off, today only.
     @AppStorage("todayPlanChecked") private var checkedStore = ""
     @AppStorage("dailyCardGoal") private var dailyGoal = 20
@@ -53,7 +56,7 @@ struct HomeView: View {
                                 planCard
                                 todaySoFar
                             }
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                     } else {
@@ -97,6 +100,10 @@ struct HomeView: View {
         standings = byId
         plan = store.todayPlan(exams: upcoming, decks: decks)
         streak = store.studyStreak()
+        let midnight = Calendar.current.startOfDay(for: Date())
+        testsToday = (try? store.database.queue.read { db in
+            try TestAttempt.filter(Column("finishedAt") >= midnight).fetchCount(db)
+        }) ?? 0
     }
 
     // MARK: - Header
@@ -237,9 +244,7 @@ struct HomeView: View {
             SectionLabel("Today so far")
             HStack(alignment: .top, spacing: GRASPSpace.xl) {
                 soFarFigure("\(streak.reviewsToday)", streak.reviewsToday == 1 ? "card reviewed" : "cards reviewed")
-                if streak.days > 0 {
-                    soFarFigure("\(streak.days)", streak.days == 1 ? "day streak" : "day streak")
-                }
+                soFarFigure("\(testsToday)", testsToday == 1 ? "test finished" : "tests finished")
                 if !plan.steps.isEmpty {
                     soFarFigure("\(doneSteps) of \(plan.steps.count)", "plan steps done")
                 }
@@ -257,7 +262,7 @@ struct HomeView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .graspCard(padding: 24)
         .revealOnAppear(index: 2)
     }

@@ -190,11 +190,13 @@ struct DeckScreen: View {
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
         }
         .sheet(isPresented: $confirmingApproveAll) {
+            let aiDrafts = cards.filter { $0.status == .draft && $0.origin == .aiGenerated }.count
             ConfirmationSheet(
-                icon: "checkmark.circle", title: "Approve \(draftCount) Draft\(draftCount == 1 ? "" : "s")?",
-                message: "They become cards you can study. Drafts the AI wrote are worth a look first -- "
-                    + "Review drafts opens them one at a time.",
-                confirmTitle: "Approve All", isDestructive: false
+                icon: "checkmark.circle", title: "Approve \(draftCount) draft\(draftCount == 1 ? "" : "s")?",
+                message: aiDrafts > 0
+                    ? "\(aiDrafts == draftCount ? "All" : "\(aiDrafts) of them") written by the AI. They become cards you can study."
+                    : "They become cards you can study.",
+                confirmTitle: "Approve all", isDestructive: false, isCompact: true
             ) {
                 try? store.approveAllDrafts(inDecks: deckIds)
                 load()
@@ -352,7 +354,7 @@ struct DeckScreen: View {
         if draftCount > 0, query.isEmpty, !isGeneratingCards {
             Section {
                 HStack {
-                    Label("\(draftCount) awaiting review", systemImage: "square.stack")
+                    Label("\(draftCount) awaiting review", systemImage: "rectangle.on.rectangle")
                         .foregroundStyle(GRASPColor.accent)
                     Spacer()
                     Button("Review drafts") { withAnimation(Motion.snappy) { filter = .drafts } }

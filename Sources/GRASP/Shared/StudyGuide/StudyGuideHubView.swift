@@ -116,13 +116,16 @@ struct StudyGuideHubView<Destination: View>: View {
                         courseBlock(course).revealOnAppear(index: index)
                     }
                 }
-                .frame(maxWidth: 720, alignment: .leading)
                 #if os(macOS)
-                // Starts where Home and Library start, not centered.
+                // The same column as Home and Library: it starts and ends
+                // where they do, so the New study guide button sits at the
+                // right edge.
                 .padding(.horizontal, 40)
-                .padding(.vertical, 24)
+                .padding(.vertical, 32)
+                .frame(maxWidth: 1180, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 #else
+                .frame(maxWidth: 720, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)
                 .frame(maxWidth: .infinity)

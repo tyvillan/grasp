@@ -14,6 +14,9 @@ struct ConfirmationSheet: View {
     let confirmTitle: String
     var isDestructive: Bool = true
     var cancelTitle: String = "Cancel"
+    /// On iPhone, a short sheet sized to its content rather than the medium
+    /// detent.
+    var isCompact: Bool = false
     let onConfirm: () -> Void
 
     var body: some View {
@@ -32,7 +35,7 @@ struct ConfirmationSheet: View {
             .keyboardShortcut(.defaultAction)
         }
         #if os(iOS)
-        .presentationDetents([.medium])
+        .presentationDetents(isCompact ? [.height(280)] : [.medium])
         #endif
     }
 }

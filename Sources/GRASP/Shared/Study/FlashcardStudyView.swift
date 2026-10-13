@@ -227,23 +227,21 @@ struct FlashcardStudyView: View {
                     flip()
                 } label: {
                     HStack(spacing: 6) {
-                        Text("Reveal answer").graspType(.body)
+                        Text("Reveal answer").graspType(.body).fontWeight(.semibold)
                         if KeyHints.shown {
                             Text("Space")
                                 .graspType(.meta)
-                                .foregroundStyle(GRASPColor.textTertiary)
+                                .foregroundStyle(GRASPColor.ink)
                                 .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                .background(GRASPColor.ink.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                     }
-                    .foregroundStyle(GRASPColor.textPrimary)
+                    // The one yellow control on this screen: revealing is
+                    // the main action until the answer is up.
+                    .foregroundStyle(GRASPColor.ink)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
-                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
-                    )
+                    .background(GRASPColor.brand, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

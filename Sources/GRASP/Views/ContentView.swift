@@ -107,7 +107,7 @@ struct ContentView: View {
         // sheet; this takes it down to a shadow.
         .overlay {
             Color.black
-                .opacity(store.presentedStudySheets > 0 ? 0.72 : 0)
+                .opacity(store.presentedStudySheets > 0 ? 0.92 : 0)
                 .allowsHitTesting(false)
                 .animation(Motion.fade, value: store.presentedStudySheets > 0)
         }
