@@ -902,7 +902,7 @@ struct TestResultsView: View {
                         .foregroundStyle(GRASPColor.textTertiary)
                 }
                 .padding(.top, 14)
-                .animation(.default, value: correct)
+                .animation(Motion.base, value: correct)
 
                 ProgressBar(
                     value: correct, total: total,
@@ -910,7 +910,7 @@ struct TestResultsView: View {
                 )
                 .frame(maxWidth: 260)
                 .padding(.top, 14)
-                .animation(.default, value: correct)
+                .animation(Motion.base, value: correct)
 
                 Text("Cards you got right just earned a longer flashcard interval. A miss here doesn't "
                      + "change anything. It just tells you where to focus.")

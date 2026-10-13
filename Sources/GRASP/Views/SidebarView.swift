@@ -48,7 +48,7 @@ struct SidebarView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 16)
-                .animation(Motion.snappy, value: selectedCourseId)
+                .animation(Motion.thumb, value: selectedCourseId)
             }
             .scrollIndicators(.never)
 
@@ -160,7 +160,7 @@ struct SidebarView: View {
                     groupLabel(term.name)
                     ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(Motion.slide(from: .top, distance: 8))
             }
         }
     }

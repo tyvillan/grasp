@@ -374,40 +374,111 @@ enum GRASPRadius {
 
 // MARK: - Motion
 
-/// Every duration and curve in one place, so the feel can be tuned without
-/// hunting through views. Fast on purpose: motion must never delay input or
-/// slow down reviewing cards. Views that move things check Reduce Motion
-/// and use `Motion.fade` instead.
+/// Every duration and curve in one place. Three durations and two curves,
+/// nothing longer than `glideDuration`, nothing that overshoots, nothing
+/// that blocks input (every animation is state-driven and interruptible).
+///
+/// - `quick` 0.12 s: press, hover colour and fill, focus.
+/// - `base` 0.20 s: cross-fades, status words, flip halves, strips.
+/// - `glide` 0.32 s: entrances, slides, thumbs, expand and collapse, fills.
+/// - `out` (decelerate) for things that arrive or open; `inOut` for things
+///   that move between two places.
+///
+/// Reduce Motion (the system setting, or `-GRASPForceReduceMotion 1` at
+/// launch): positional motion becomes an opacity change at `quick`;
+/// opacity-only changes (cross-fades, count-ups) become instant. The tokens
+/// below already do that, so a view that uses them needs no check of its own.
 enum Motion {
-    /// The default UI spring: a hover, a press, a selection moving.
-    static let snappy = Animation.spring(response: 0.35, dampingFraction: 0.8)
-    /// Panels and cards arriving.
-    static let settle = Animation.spring(response: 0.5, dampingFraction: 0.82)
-    /// A playful overshoot for small things: an icon tilting, a check.
-    static let bouncy = Animation.spring(response: 0.38, dampingFraction: 0.62)
-    /// What everything becomes under Reduce Motion.
-    static let fade = Animation.easeInOut(duration: 0.18)
-    /// The pressed state of a button.
-    static let press = Animation.easeOut(duration: 0.1)
-    /// The fill sweeping across an outlined pill on hover.
-    static let sweep = Animation.easeOut(duration: 0.22)
-    /// A progress bar or ring filling.
-    static let fill = Animation.spring(response: 0.45, dampingFraction: 0.85)
-    /// Gap between items in a staggered reveal.
-    static let stagger: Double = 0.05
-    /// The card flip.
-    static let flip = Animation.easeInOut(duration: 0.22)
+    // MARK: Reduce Motion
 
-    /// `animation`, or a plain fade when Reduce Motion is on.
+    /// True under the system's Reduce Motion, or when the debug launch flag
+    /// `-GRASPForceReduceMotion 1` is set.
+    static var isReduced: Bool {
+        if UserDefaults.standard.bool(forKey: "GRASPForceReduceMotion") { return true }
+        #if os(macOS)
+        return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #else
+        return UIAccessibility.isReduceMotionEnabled
+        #endif
+    }
+
+    // MARK: Durations and curves
+
+    static let quickDuration = 0.12
+    static let baseDuration = 0.20
+    static let glideDuration = 0.32
+
+    /// Decelerates into place: arrivals, openings.
+    static func out(_ duration: Double) -> Animation {
+        .timingCurve(0.2, 0.0, 0.0, 1.0, duration: duration)
+    }
+    /// Eases both ends: moving between two places, state swaps.
+    static func inOut(_ duration: Double) -> Animation {
+        .timingCurve(0.4, 0.0, 0.2, 1.0, duration: duration)
+    }
+    /// No animation at all.
+    static let instant = Animation.linear(duration: 0)
+
+    // MARK: Tokens
+
+    /// 0.12 s: a press, a hover, focus. Already as short as Reduce Motion asks.
+    static var quick: Animation { out(quickDuration) }
+    /// 0.20 s cross-fade; instant under Reduce Motion (opacity-only).
+    static var base: Animation { isReduced ? instant : out(baseDuration) }
+    /// 0.32 s arrival; a plain `quick` fade under Reduce Motion.
+    static var glide: Animation { isReduced ? quick : out(glideDuration) }
+    /// 0.32 s move between two places; `quick` under Reduce Motion.
+    static var glideInOut: Animation { isReduced ? quick : inOut(glideDuration) }
+
+    // MARK: Names used across the app (all map to the tokens above)
+
+    /// A thumb or bar that travels between two places (matched geometry):
+    /// `glideInOut`, and no travel at all under Reduce Motion.
+    static var thumb: Animation { isReduced ? instant : inOut(glideDuration) }
+
+    /// A selection moving, a thumb, a hover: `glideInOut`.
+    static var snappy: Animation { glideInOut }
+    /// Panels and cards arriving: `glide`.
+    static var settle: Animation { glide }
+    /// Small icons: `glide`, without the overshoot it used to have.
+    static var bouncy: Animation { glide }
+    /// Cross-fade: `base`.
+    static var fade: Animation { base }
+    /// The pressed state of a button: `quick`.
+    static var press: Animation { quick }
+    /// The fill sweeping across an outlined pill on hover: `base`.
+    static var sweep: Animation { isReduced ? quick : out(baseDuration) }
+    /// A progress bar filling: `glide`.
+    static var fill: Animation { glide }
+    /// The card flip's two halves are `baseDuration / 2` each.
+    static var flip: Animation { base }
+    /// Gap between items in a staggered reveal (capped by callers).
+    static let stagger: Double = 0.05
+
+    /// `animation`, or a `quick` change when Reduce Motion is on.
     static func choose(_ animation: Animation, reduceMotion: Bool) -> Animation {
-        reduceMotion ? fade : animation
+        (reduceMotion || isReduced) ? quick : animation
+    }
+
+    // MARK: Transitions
+
+    /// Arrives from `edge` by a short offset while fading in; just a fade
+    /// under Reduce Motion.
+    static func slide(from edge: Edge, distance: CGFloat = 12) -> AnyTransition {
+        guard !isReduced else { return .opacity }
+        switch edge {
+        case .top: return .opacity.combined(with: .offset(y: -distance))
+        case .bottom: return .opacity.combined(with: .offset(y: distance))
+        case .leading: return .opacity.combined(with: .offset(x: -distance))
+        case .trailing: return .opacity.combined(with: .offset(x: distance))
+        }
     }
 }
 
 extension View {
     /// A reveal on first appearance: slides up a few points and fades in,
     /// `index` steps after the first. Just a fade under Reduce Motion.
-    func revealOnAppear(index: Int = 0, distance: CGFloat = 10) -> some View {
+    func revealOnAppear(index: Int = 0, distance: CGFloat = 8) -> some View {
         modifier(RevealOnAppear(index: index, distance: distance))
     }
 }
@@ -415,16 +486,18 @@ extension View {
 private struct RevealOnAppear: ViewModifier {
     let index: Int
     let distance: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
 
     func body(content: Content) -> some View {
+        let reduced = Motion.isReduced
         content
             .opacity(shown ? 1 : 0)
-            .offset(y: shown || reduceMotion ? 0 : distance)
+            .offset(y: shown || reduced ? 0 : distance)
             .onAppear {
-                withAnimation(Motion.choose(Motion.settle, reduceMotion: reduceMotion)
-                    .delay(Double(index) * Motion.stagger)) { shown = true }
+                // The stagger is capped so a long page never waits on its
+                // last row.
+                let delay = min(Double(index) * Motion.stagger, 0.25)
+                withAnimation(Motion.glide.delay(reduced ? 0 : delay)) { shown = true }
             }
     }
 }

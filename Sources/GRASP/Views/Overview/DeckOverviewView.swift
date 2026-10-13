@@ -146,7 +146,7 @@ struct DeckOverviewView: View {
                         // scrolls away is only useful at the top of the page.
                         if showsContents {
                             LessonContents(entries: overview.entries) { anchor in
-                                withAnimation(.easeInOut(duration: 0.35)) {
+                                withAnimation(Motion.glideInOut) {
                                     reader.scrollTo(anchor, anchor: .top)
                                 }
                             }

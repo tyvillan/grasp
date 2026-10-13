@@ -86,7 +86,7 @@ struct ContentView: View {
                 if showsSidebar {
                     SidebarView(selectedCourseId: $selectedCourseId)
                         .frame(width: Self.sidebarWidth)
-                        .transition(.move(edge: .leading))
+                        .transition(Motion.slide(from: .leading, distance: 24))
                     Rectangle().fill(GRASPColor.hairline).frame(width: 1)
                 }
                 detail
@@ -219,7 +219,7 @@ struct ContentView: View {
                         )
                         .frame(width: 260)
                         .background(GRASPColor.surface)
-                        .transition(.move(edge: .leading))
+                        .transition(Motion.slide(from: .leading, distance: 24))
                         Rectangle()
                             .fill(GRASPColor.hairlineStrong)
                             .frame(width: 1)

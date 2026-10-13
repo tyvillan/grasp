@@ -9,7 +9,7 @@ import AppKit
 /// screen is what keeps it loud.
 struct GRASPProminentButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     /// Defaults to the brand yellow -- pass `.success` (or any other tint)
     /// for a same-shape button that needs to read as a different verdict.
     var tint: Color = GRASPColor.brand
@@ -38,7 +38,7 @@ struct GRASPProminentButton: ButtonStyle {
 /// hover a raised fill sweeps in from the left.
 struct GRASPQuietButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -94,7 +94,7 @@ struct GRASPVerdictButton: ButtonStyle {
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
             .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.1), value: isHovering)
+            .animation(Motion.quick, value: isHovering)
     }
 }
 
@@ -468,7 +468,7 @@ private final class GRASPMenuModel {
 private struct GRASPMenuList: View {
     @Bindable var model: GRASPMenuModel
     let minWidth: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var appeared = false
 
     /// Taller than this, the list scrolls -- a course picker can hold a

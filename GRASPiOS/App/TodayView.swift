@@ -6,7 +6,7 @@ import GRASPCore
 /// exams, what the due count means, and the deck you were last in.
 struct TodayView: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     @State private var decks: [AppStore.DeckSummary] = []
     @State private var exams: [AppStore.UpcomingEvent] = []
@@ -95,7 +95,7 @@ struct TodayView: View {
                 }
             }
             if showsAcronym {
-                acronym.transition(.opacity.combined(with: .move(edge: .top)))
+                acronym.transition(Motion.slide(from: .top, distance: 8))
             }
             VStack(alignment: .leading, spacing: 4) {
                 SectionLabel("Today")

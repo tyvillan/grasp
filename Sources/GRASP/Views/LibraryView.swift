@@ -320,7 +320,7 @@ private struct LibraryHiddenTile: View {
     let detail: String
     let action: () -> Void
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         Button(action: action) {

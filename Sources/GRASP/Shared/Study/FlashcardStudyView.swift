@@ -34,7 +34,7 @@ struct FlashcardStudyView: View {
     /// Cards marked Needs Review this session, for "Learn the N you missed".
     @State private var missedIds: Set<String> = []
     @FocusState private var isFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     /// The card's turn during a flip: it rotates edge-on, the answer
     /// appears, and it turns back -- the question stays on the same face.
     @State private var flipAngle: Double = 0
@@ -234,10 +234,10 @@ struct FlashcardStudyView: View {
             withAnimation(Motion.fade) { isFlipped = true }
             return
         }
-        withAnimation(.easeIn(duration: 0.11)) { flipAngle = 90 } completion: {
+        withAnimation(Motion.inOut(Motion.baseDuration / 2)) { flipAngle = 90 } completion: {
             isFlipped = true
             flipAngle = -90
-            withAnimation(.easeOut(duration: 0.11)) { flipAngle = 0 }
+            withAnimation(Motion.inOut(Motion.baseDuration / 2)) { flipAngle = 0 }
         }
     }
 
@@ -251,7 +251,7 @@ struct FlashcardStudyView: View {
                     markButton("Needs Review", "1", GRASPColor.rejected, understood: false)
                     markButton("I Know This", "2", GRASPColor.success, understood: true)
                 }
-                .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
+                .transition(Motion.slide(from: .bottom, distance: 8))
             } else {
                 Button {
                     flip()
@@ -425,7 +425,7 @@ struct SessionCompleteView: View {
     @State private var shownUnderstood = 0
     @State private var shownReview = 0
     @State private var drift = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         ZStack {
@@ -482,7 +482,7 @@ struct SessionCompleteView: View {
         .onTapGesture { skip() }
         .onAppear {
             if reduceMotion { skip(); return }
-            withAnimation(.easeOut(duration: 1.2)) { drift = true }
+            withAnimation(Motion.glide) { drift = true }
             withAnimation(Motion.settle.delay(0.15)) {
                 shownUnderstood = understood
                 shownReview = toReview
