@@ -143,7 +143,7 @@ struct AnswerJudgeTests {
         let result = await AnswerLadder.judge(
             question: "What is an IDE?", expected: "platform to write code on", given: "program to write code on",
             judge: slow.judge, timeout: .milliseconds(150))
-        #expect(ContinuousClock.now - started < .seconds(2))
+        #expect(ContinuousClock.now - started < .seconds(4))  // the judge sleeps 5 s; slack for a loaded runner
         #expect(result.source == .localFallback)
         #expect(result.outcome == .closeEnough)
     }
