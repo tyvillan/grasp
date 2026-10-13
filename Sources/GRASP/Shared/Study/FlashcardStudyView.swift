@@ -16,6 +16,10 @@ struct FlashcardStudyView: View {
     @Environment(\.dismiss) private var dismiss
     let deckIds: [String]
     let deckName: String
+    /// Set by a deck page: the finish screen offers one follow-on (Learn
+    /// the cards you missed, or a test) and hands the choice back here
+    /// after the session has closed. Nil elsewhere, which shows no button.
+    var onNextStep: ((StudyNextStep) -> Void)? = nil
 
     @State private var queue: [Card] = []
     @State private var index = 0
@@ -27,6 +31,8 @@ struct FlashcardStudyView: View {
     /// again but doesn't grade it a second time -- that was a second FSRS
     /// review and a second history row for one look at the card.
     @State private var markedIds: Set<String> = []
+    /// Cards marked Needs Review this session, for "Learn the N you missed".
+    @State private var missedIds: Set<String> = []
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The card's turn during a flip: it rotates edge-on, the answer
@@ -144,7 +150,31 @@ struct FlashcardStudyView: View {
     }
 
     private var completionView: some View {
-        SessionCompleteView(understood: understoodCount, toReview: reviewCount) { dismiss() }
+        SessionCompleteView(
+            understood: understoodCount, toReview: reviewCount,
+            goalLine: goalLine, nextStep: nextStep,
+            onNextStep: { step in
+                onNextStep?(step)
+                dismiss()
+            }
+        ) { dismiss() }
+    }
+
+    /// Progress to today's goal from the Settings daily goal, counted from
+    /// the reviews already saved. Nothing when no goal is set.
+    private var goalLine: String? {
+        let goal = UserDefaults.standard.object(forKey: "dailyCardGoal") as? Int ?? 20
+        guard goal > 0 else { return nil }
+        let done = store.studyStreak().reviewsToday
+        return done >= goal ? "Daily goal reached" : "\(goal - done) more to reach today's goal of \(goal)"
+    }
+
+    /// One follow-on, only where the deck page can act on it.
+    private var nextStep: StudyNextStep? {
+        guard onNextStep != nil else { return nil }
+        if !missedIds.isEmpty { return .learnMissed(missedIds) }
+        if (try? store.deckMastery(deckIds: deckIds))?.total ?? 0 > 0 { return .test }
+        return nil
     }
 
     /// The card gets the whole canvas. Front and back share one surface --
@@ -325,7 +355,7 @@ struct FlashcardStudyView: View {
         let cardId = queue[index].id
         if markedIds.insert(cardId).inserted {
             try? store.markCard(cardId, understood: understood, source: "flashcards")
-            if understood { understoodCount += 1 } else { reviewCount += 1 }
+            if understood { understoodCount += 1 } else { reviewCount += 1; missedIds.insert(cardId) }
             focusTimer.countCard()
         }
         if understood {
@@ -369,12 +399,28 @@ private struct CardQuickEditSheet: View {
     }
 }
 
+/// What the study finish screen can lead to next.
+enum StudyNextStep: Equatable {
+    case learnMissed(Set<String>)
+    case test
+
+    var title: String {
+        switch self {
+        case .learnMissed(let ids): return ids.count == 1 ? "Learn the 1 you missed" : "Learn the \(ids.count) you missed"
+        case .test: return "Take a test"
+        }
+    }
+}
+
 /// The end of a session: the two tallies count up from zero and a few
 /// yellow squares drift in. Under 1.5s; a click skips straight to the
 /// final numbers, and Reduce Motion shows them at once.
 struct SessionCompleteView: View {
     let understood: Int
     let toReview: Int
+    var goalLine: String? = nil
+    var nextStep: StudyNextStep? = nil
+    var onNextStep: ((StudyNextStep) -> Void)? = nil
     let onDone: () -> Void
     @State private var shownUnderstood = 0
     @State private var shownReview = 0
@@ -410,10 +456,25 @@ struct SessionCompleteView: View {
                 }
                 .padding(.top, 26)
 
-                Button("Done", action: onDone)
-                    .buttonStyle(GRASPProminentButton())
-                    .keyboardShortcut(.defaultAction)
-                    .padding(.top, 32)
+                if let goalLine {
+                    Text(goalLine)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .padding(.top, 20)
+                }
+
+                // Done is the screen's one filled button; the follow-on is
+                // outlined beside it.
+                HStack(spacing: 12) {
+                    if let nextStep, let onNextStep {
+                        Button(nextStep.title) { onNextStep(nextStep) }
+                            .buttonStyle(GRASPQuietButton())
+                    }
+                    Button("Done", action: onDone)
+                        .buttonStyle(GRASPProminentButton())
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(.top, goalLine == nil ? 32 : 20)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

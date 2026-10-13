@@ -335,6 +335,16 @@ enum WorkloadLevel {
         }
     }
 
+    /// The card counts the band covers, for the month's legend.
+    var rangeText: String {
+        switch self {
+        case .none: return "0"
+        case .light: return "1 to 20"
+        case .moderate: return "21 to 50"
+        case .heavy: return "Over 50"
+        }
+    }
+
     var label: String {
         switch self {
         case .none: return "Nothing due"
@@ -396,7 +406,33 @@ private struct MonthGrid: View {
                     .background(GRASPColor.hairline)
                 }
             }
+            workloadLegend
         }
+    }
+
+    /// What the small dot beside a day number means, once, where it is
+    /// used: the day's reviews as a traffic light.
+    private var workloadLegend: some View {
+        HStack(spacing: 16) {
+            Text("Dot = cards due that day")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+            ForEach([WorkloadLevel.light, .moderate, .heavy], id: \.label) { level in
+                HStack(spacing: 6) {
+                    Circle().fill(level.color ?? .clear).frame(width: 6, height: 6)
+                    Text("\(level.rangeText) cards")
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(GRASPColor.surface)
+        .overlay(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Dots show cards due that day: up to 20 light, 21 to 50 moderate, over 50 heavy")
     }
 }
 

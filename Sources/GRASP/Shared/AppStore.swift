@@ -862,6 +862,26 @@ final class AppStore {
         }
     }
 
+    /// A round over just `focusCardIds`, with wrong answers for multiple
+    /// choice still drawn from the whole deck so a short list isn't asked
+    /// as two-way questions. An empty set is the ordinary round.
+    func learnRound(deckIds: [String], focusCardIds: Set<String>) throws -> [LearnEngine.RoundQuestion] {
+        guard !focusCardIds.isEmpty else { return try learnRound(deckIds: deckIds) }
+        return try database.queue.read { db in
+            var rng = SystemRandomNumberGenerator()
+            let all = try Study.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
+            let focus = all.filter { focusCardIds.contains($0.cardId) }
+            var round = LearnEngine.buildRound(from: focus, using: &rng)
+            for index in round.indices where round[index].type == .multipleChoice && (round[index].choices?.count ?? 0) < 4 {
+                guard let card = focus.first(where: { $0.cardId == round[index].cardId }) else { continue }
+                var choices = LearnEngine.distractors(for: card, in: all, count: 3, using: &rng)
+                choices.append(card.back)
+                round[index].choices = choices.shuffled(using: &rng)
+            }
+            return round
+        }
+    }
+
     /// Records one Learn-mode answer: advances the card's ladder level and
     /// streak, independent of FSRS scheduling.
     func recordLearnAnswer(cardId: String, wasCorrect: Bool, now: Date = Date()) throws {

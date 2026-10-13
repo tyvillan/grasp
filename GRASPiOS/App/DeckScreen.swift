@@ -15,6 +15,8 @@ struct DeckScreen: View {
     @State private var studying = false
     @State private var learning = false
     @State private var testPhase: TestPhase?
+    @State private var pendingNextStep: StudyNextStep?
+    @State private var learnFocus: Set<String> = []
     @State private var unfinishedTest: Study.UnfinishedTest?
     @State private var editing: Card?
     @State private var query = ""
@@ -171,11 +173,19 @@ struct DeckScreen: View {
             default: break
             }
         }
-        .fullScreenCover(isPresented: $studying, onDismiss: load) {
-            FlashcardStudyView(deckIds: deckIds, deckName: route.name)
+        .fullScreenCover(isPresented: $studying, onDismiss: {
+            load()
+            guard let step = pendingNextStep else { return }
+            pendingNextStep = nil
+            switch step {
+            case .learnMissed(let ids): learnFocus = ids; learning = true
+            case .test: testPhase = .setup
+            }
+        }) {
+            FlashcardStudyView(deckIds: deckIds, deckName: route.name) { pendingNextStep = $0 }
         }
-        .fullScreenCover(isPresented: $learning, onDismiss: load) {
-            LearnRoundView(deckIds: deckIds, deckName: route.name)
+        .fullScreenCover(isPresented: $learning, onDismiss: { learnFocus = []; load() }) {
+            LearnRoundView(deckIds: deckIds, deckName: route.name, focusCardIds: learnFocus)
         }
         .testFlow($testPhase, onDismiss: load) {
             TestSetupSheet(deckIds: deckIds, deckName: route.name, onResume: { id in

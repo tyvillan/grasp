@@ -61,6 +61,9 @@ struct DeckDetailView: View {
     @State private var deckName = "Deck"
     @State private var isStudying = false
     @State private var isLearning = false
+    /// Chosen on the Study finish screen; run once that sheet has closed.
+    @State private var pendingNextStep: StudyNextStep?
+    @State private var learnFocus: Set<String> = []
     @State private var testPhase: TestPhase?
     @State private var isGeneratorAvailable = false
     @State private var showingDeckFiles = false
@@ -389,11 +392,19 @@ struct DeckDetailView: View {
             isGeneratorAvailable = store.isGeneratorAvailable
         }
         .task(id: isGeneratingCards) { await watchGeneration() }
-        .sheet(isPresented: $isStudying, onDismiss: load) {
-            FlashcardStudyView(deckIds: scopeDeckIds, deckName: deckName)
+        .sheet(isPresented: $isStudying, onDismiss: {
+            load()
+            guard let step = pendingNextStep else { return }
+            pendingNextStep = nil
+            switch step {
+            case .learnMissed(let ids): learnFocus = ids; isLearning = true
+            case .test: testPhase = .setup
+            }
+        }) {
+            FlashcardStudyView(deckIds: scopeDeckIds, deckName: deckName) { pendingNextStep = $0 }
         }
-        .sheet(isPresented: $isLearning, onDismiss: load) {
-            LearnRoundView(deckIds: scopeDeckIds, deckName: deckName)
+        .sheet(isPresented: $isLearning, onDismiss: { learnFocus = []; load() }) {
+            LearnRoundView(deckIds: scopeDeckIds, deckName: deckName, focusCardIds: learnFocus)
         }
         .sheet(item: $testPhase, onDismiss: load) { phase in
             switch phase {
@@ -561,6 +572,12 @@ struct DeckDetailView: View {
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true)
             }
+            if let why = studyUnavailableNote {
+                Text(why)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -570,6 +587,24 @@ struct DeckDetailView: View {
             Rectangle().fill(GRASPColor.hairline).frame(height: 1)
         }
     }
+
+    /// One short line for why Study or Learn is dimmed, when it is. Reads
+    /// the same as the iPhone's, plus the empty deck.
+    private var studyUnavailableNote: String? {
+        guard hasLoaded, contentTab == .cards, !isGeneratingCards else { return nil }
+        let c = counts
+        if c.all == 0 { return "No cards yet. Write some from your notes to start studying." }
+        if c.active == 0 {
+            // A deck of only drafts says it in the drafts strip instead.
+            return c.drafts > 0 ? nil : "Nothing active to study. Reactivate suspended cards."
+        }
+        if dueCount == 0 { return "Nothing due right now. Learn or Test any time." }
+        return nil
+    }
+
+    /// Only drafts, nothing approved: Study and Learn are dimmed because
+    /// there is nothing to study yet, and approving is the one next step.
+    private var isDraftsOnly: Bool { draftCount > 0 && activeCount == 0 }
 
     @ViewBuilder
     private var studyModeButtons: some View {
@@ -944,7 +979,11 @@ struct DeckDetailView: View {
     /// (The Overview has its own strip, for overviews out of date.)
     private var statusStrip: some View {
         var parts: [String] = []
-        if draftCount > 0 { parts.append("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review") }
+        if isDraftsOnly {
+            parts.append("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review. Approve them to start studying.")
+        } else if draftCount > 0 {
+            parts.append("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review")
+        }
         if !duplicateGroups.isEmpty {
             parts.append("\(duplicateGroups.count) possible duplicate\(duplicateGroups.count == 1 ? "" : "s")")
         }
@@ -960,6 +999,14 @@ struct DeckDetailView: View {
             if draftCount > 0 {
                 Button("Review drafts") { startReviewingDrafts() }
                     .buttonStyle(GRASPQuietButton())
+            }
+            if isDraftsOnly {
+                // The page's one filled button: Study and Learn are dimmed.
+                Button("Approve all") {
+                    try? store.approveAllDrafts(inDecks: scopeDeckIds)
+                    load()
+                }
+                .buttonStyle(GRASPProminentButton())
             }
         }
         .padding(.horizontal, 14)
