@@ -10,6 +10,11 @@ struct GenerateStudyGuideSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
+    /// Opened from an exam row: that course is ticked and the guide is
+    /// attached to that exam.
+    var presetCourseId: String? = nil
+    var presetExamId: String? = nil
+
     @State private var courses: [Course] = []
     @State private var decksByCourse: [String: [Deck]] = [:]
     @State private var kickers: [String: String] = [:]
@@ -185,7 +190,12 @@ struct GenerateStudyGuideSheet: View {
             decksByCourse[course.id] = decks
             kickers.merge(store.deckKickers(for: decks)) { first, _ in first }
         }
-        if courses.count == 1, let only = courses.first { toggle(only) }
+        if let presetCourseId, let preset = courses.first(where: { $0.id == presetCourseId }) {
+            toggle(preset)
+            if let presetExamId, exams.contains(where: { $0.id == presetExamId }) { examId = presetExamId }
+        } else if courses.count == 1, let only = courses.first {
+            toggle(only)
+        }
     }
 
     private func toggle(_ course: Course) {

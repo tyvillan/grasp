@@ -18,6 +18,9 @@ struct LearnRoundView: View {
     @Environment(\.dismiss) private var dismiss
     let deckIds: [String]
     let deckName: String
+    /// When set, rounds are built from just these cards: "Learn the N you
+    /// missed" from the end of a Study session.
+    var focusCardIds: Set<String> = []
 
     @State private var queue: [LearnEngine.RoundQuestion] = []
     /// Missed during the main pass; asked again, once each, once `queue`
@@ -200,7 +203,7 @@ struct LearnRoundView: View {
     }
 
     private func startRound() {
-        queue = (try? store.learnRound(deckIds: deckIds)) ?? []
+        queue = (try? store.learnRound(deckIds: deckIds, focusCardIds: focusCardIds)) ?? []
         missedQueue = []
         isReviewingMisses = false
         roundTotal = queue.count
@@ -223,42 +226,49 @@ struct LearnRoundView: View {
         deckMastery = (try? store.deckMastery(deckIds: deckIds)) ?? (0, 0)
     }
 
-    /// The prompt gets the top third of the canvas to itself and the
-    /// answer controls group tightly beneath it, rather than everything
-    /// sharing one evenly-spaced stack -- the question is what's being
-    /// read, the choices are what's being operated.
+    /// One centred column that starts at the top: the question, the answer
+    /// controls directly under it, and Submit / Next just below those. It
+    /// scrolls as a whole, so a long question or a short window or the
+    /// keyboard never pushes the button away or off screen.
     @ViewBuilder
     private func questionView(_ question: LearnEngine.RoundQuestion) -> some View {
-        VStack(spacing: 0) {
-            Text(question.prompt)
-                .graspType(.studyPrompt)
-                .foregroundStyle(GRASPColor.textPrimary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .frame(maxWidth: 560)
-                .padding(.top, 42)
+        ScrollView {
+            VStack(spacing: 0) {
+                Text(question.prompt)
+                    .graspType(.studyPrompt)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity)
 
-            Spacer(minLength: 28)
+                VStack(spacing: 14) {
+                    switch question.type {
+                    case .multipleChoice:
+                        multipleChoiceBody(question)
+                    case .trueFalse:
+                        trueFalseBody(question)
+                    case .written:
+                        writtenBody(question)
+                    }
 
-            VStack(spacing: 14) {
-                switch question.type {
-                case .multipleChoice:
-                    multipleChoiceBody(question)
-                case .trueFalse:
-                    trueFalseBody(question)
-                case .written:
-                    writtenBody(question)
+                    if let verdict {
+                        verdictBanner(verdict)
+                    }
+
+                    actionButton(question)
+                        .padding(.top, 6)
                 }
-
-                if let verdict {
-                    verdictBanner(verdict)
-                }
-
-                actionButton(question)
+                .padding(.top, 28)
             }
-            .padding(.bottom, 28)
+            .frame(maxWidth: 560)
+            .padding(.horizontal, 32)
+            .padding(.top, 44)
+            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 32)
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        #endif
     }
 
     @State private var lastAnswerCorrect = false
