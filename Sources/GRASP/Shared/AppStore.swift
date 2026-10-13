@@ -1061,11 +1061,12 @@ final class AppStore {
            Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed > 0 {
             let budget = Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed
             let database = database
+            let flagged = flaggedQuestionKeys
             let skipped = aiTestQuestionsSkipped
             let task = Task {
                 await CardAI.generateTestQuestions(
                     inDecks: deckIds, maxCount: budget, using: await CardGenerators.select(),
-                    database: database, skipped: { skipped.value }
+                    database: database, flagged: flagged, skipped: { skipped.value }
                 )
             }
             aiTestQuestionTask = task
@@ -1187,6 +1188,80 @@ final class AppStore {
 
     func weakSpotCount(forDecks deckIds: [String]) -> Int {
         (try? database.queue.read { db in try Study.weakCardIds(forDecks: deckIds, db: db).count }) ?? 0
+    }
+
+    // MARK: - Explain this, and flagged questions
+
+    /// Explanations written this session, so asking again for the same
+    /// answer costs nothing. Keyed by question, right answer and the
+    /// student's answer.
+    private var explanationCache: [String: String] = [:]
+
+    /// A short personal explanation of why `given` was wrong. Never called
+    /// on its own: only when the student asks. Throws a plain sentence.
+    func explainWrongAnswer(for question: LearnEngine.RoundQuestion, given: String) async throws -> String {
+        let key = QuestionFlags.key(prompt: question.prompt + "\u{1F}" + question.correctAnswer + "\u{1F}" + given,
+                                    code: question.code?.code)
+        if let cached = explanationCache[key] { return cached }
+        // A canned reply for screenshots and demos when no model is
+        // reachable: set GRASP_STUB_EXPLAIN=1 in the launch environment.
+        if ProcessInfo.processInfo.environment["GRASP_STUB_EXPLAIN"] == "1" {
+            try? await Task.sleep(for: .milliseconds(1400))
+            let text = "The correct answer is \(question.correctAnswer.replacingOccurrences(of: "\n", with: ", ")). "
+                + "Your answer went a different way because it left out the part the code actually needs. "
+                + "Compare the two and look at what each line does."
+            explanationCache[key] = text
+            return text
+        }
+        let generator = await CardGenerators.select()
+        guard await generator.isAvailable else {
+            throw ExplainThisError.message("No AI model is reachable. Check Settings, then try again.")
+        }
+        var context = question.code?.code ?? ""
+        if let output = question.code?.expectedOutput, !output.isEmpty { context += "\n\nIt prints:\n" + output }
+        if let problem = question.problem, let choices = problem.choices, question.type == .multipleChoice {
+            context += choices.enumerated().map { "\(["A", "B", "C", "D"][min($0.offset, 3)])) \($0.element)" }.joined(separator: "\n")
+        }
+        let shownGiven = question.code.map { $0.givenText(given) } ?? given
+        let shownCorrect = question.code != nil ? question.correctAnswer : question.correctAnswer
+        guard let text = await generator.explainWrongAnswer(
+            prompt: question.prompt, correctAnswer: shownCorrect, givenAnswer: shownGiven, context: context)
+        else {
+            throw ExplainThisError.message("Couldn't explain this. Try again in a moment.")
+        }
+        explanationCache[key] = text
+        return text
+    }
+
+    enum ExplainThisError: Error { case message(String) }
+
+    private static let flaggedKey = "flaggedAIQuestionKeys"
+
+    /// Hashes of AI-written questions the student flagged, kept on this
+    /// device only (they are hashes, never the question text). A saved
+    /// question is retired in the bank instead, which is where saved
+    /// questions already live.
+    var flaggedQuestionKeys: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.flaggedKey) ?? [])
+    }
+
+    /// Flags a question: it is not asked again. A saved question is retired
+    /// from the bank; a one-line AI question's key is remembered. Returns
+    /// what was done, for the confirmation line.
+    @discardableResult
+    func flagQuestion(_ question: LearnEngine.RoundQuestion) -> Bool {
+        let key = QuestionFlags.key(prompt: question.prompt, code: question.code?.code)
+        var keys = flaggedQuestionKeys
+        keys.insert(key)
+        // Bounded: the newest few hundred are plenty.
+        UserDefaults.standard.set(Array(keys.prefix(500)), forKey: Self.flaggedKey)
+        _ = try? database.queue.write { db in try QuestionFlags.retireSaved(key: key, db: db) }
+        return true
+    }
+
+    /// Takes a flagged AI question out of its attempt, so it stops counting.
+    func discardTestItem(attemptId: String, ordinal: Int) {
+        _ = try? database.queue.write { db in try Study.discardTestItem(attemptId: attemptId, ordinal: ordinal, db: db) }
     }
 
     /// Records one answer to a test item. Keyed by `ordinal` rather than

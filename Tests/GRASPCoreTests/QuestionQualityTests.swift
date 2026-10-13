@@ -219,3 +219,67 @@ struct QuestionQualityTests {
         #expect(text.contains("print(1 + 2)"))
     }
 }
+
+/// The model calls, against a stand-in transport (no local model needed).
+@Suite("Question quality, model calls")
+struct QuestionQualityModelTests {
+    private struct Canned: ChatTransport {
+        var reply: String?
+        func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
+            guard let reply else { throw URLError(.cannotConnectToHost) }
+            return reply
+        }
+    }
+
+    @Test("test questions come back with their explanation, and a model that omits it still gives a question")
+    func testQuestionsWithExplanation() async {
+        let json = """
+        {"items": [
+          {"prompt": "What does a destructor do?", "answer": "Cleans up the object",
+           "explanation": "It runs when the object is destroyed. People often confuse it with the constructor."},
+          {"prompt": "Name a smart pointer", "answer": "unique_ptr"}
+        ]}
+        """
+        let generator = OllamaGenerator(transport: Canned(reply: json), model: "stub", wordBudget: 1000)
+        let questions = await generator.generateTestQuestions(
+            existing: [], noteContext: "Destructors run when an object dies.", maxCount: 3)
+        #expect(questions.count == 2)
+        #expect(questions[0].explanation?.contains("destroyed") == true)
+        #expect(questions[1].explanation == nil)
+    }
+
+    @Test("Explain this returns the model's short explanation, and nil when the model can't be reached")
+    func explainThis() async {
+        let ok = OllamaGenerator(transport: Canned(reply: "Sure!\nThe loop runs three times. You counted four."),
+                                 model: "stub", wordBudget: 1000)
+        let text = await ok.explainWrongAnswer(prompt: "How many times?", correctAnswer: "3", givenAnswer: "4", context: "")
+        #expect(text == "The loop runs three times. You counted four.")
+        let down = OllamaGenerator(transport: Canned(reply: nil), model: "stub", wordBudget: 1000)
+        #expect(await down.explainWrongAnswer(prompt: "p", correctAnswer: "a", givenAnswer: "b", context: "") == nil)
+    }
+
+    @Test("a saved question that predates the checks is skipped when a test picks from the bank")
+    func bankSkipsLeakedQuestions() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let leaked = CodeQuestion(kind: .codeBlanks, language: .python, prompt: "Fill in the blank.",
+                                  code: QuestionQualityTests.employee, blanks: [["self.__name = name"]],
+                                  expectedOutput: "Ana")
+        let good = CodeQuestion(kind: .codeBlanks, language: .python, prompt: "Fill in the blank.",
+                                code: "total = [[1]]\nprint(total)", blanks: [["2 + 3"]], expectedOutput: "5")
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "C"); try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "D"); try deck.insert(conn)
+            for question in [leaked, good] {
+                try TestQuestion(courseId: course.id, deckId: deck.id, kind: .codeBlanks, language: .python,
+                                 bodyJSON: question.encoded()!, verifiedBy: "test").insert(conn)
+            }
+            return deck.id
+        }
+        let picked = try await db.queue.read { db -> [LearnEngine.RoundQuestion] in
+            var rng = SystemRandomNumberGenerator()
+            return try CodeQuestionBank.pickRound(count: 5, inDecks: [deckId], allowWritten: true, using: &rng, db: db)
+        }
+        #expect(picked.count == 1)
+        #expect(picked.first?.code?.code.contains("total") == true)
+    }
+}

@@ -518,11 +518,21 @@ struct TestRunView: View {
                     questionPrompt(question)
                     answerArea(question)
                     if isAnswered, question.type == .multipleChoice, let explanation = question.problem?.explanation {
-                        Text(explanation)
-                            .graspType(.body)
-                            .foregroundStyle(GRASPColor.textSecondary)
+                        WhyBlock(text: explanation)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    // A one-line AI question carries its own explanation.
+                    if isAnswered, question.code == nil, question.problem == nil, question.cardId == nil {
+                        WhyBlock(text: question.explanation)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if isAnswered, !lastCorrect {
+                        ExplainThisBlock(question: question, given: graded.last?.givenAnswer ?? "")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if isAnswered, question.cardId == nil {
+                        FlagQuestionButton { flagCurrent(question) }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .frame(maxWidth: columnWidth)
@@ -791,6 +801,15 @@ struct TestRunView: View {
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: index, cardId: question.cardId)
     }
 
+    /// The student flagged this AI-written question while looking at it:
+    /// it stops counting here, and it won't be asked again.
+    private func flagCurrent(_ question: LearnEngine.RoundQuestion) {
+        store.flagQuestion(question)
+        store.discardTestItem(attemptId: attemptId, ordinal: index)
+        graded.removeAll { $0.ordinal == index }
+        advance()
+    }
+
     private func advance() {
         index += 1
         selectedChoice = nil
@@ -893,7 +912,13 @@ struct TestResultsView: View {
                                 .help("AI-generated for this test. Not saved as a card, worth double-checking")
                         }
                     }
-                    if !item.isCorrect {
+                    if !item.isCorrect, let code = item.question.code, code.kind == .codeBlanks,
+                       item.question.type != .multipleChoice {
+                        // The code with the right text filled in beside what
+                        // was typed, rather than two lists of numbers.
+                        FilledBlankComparison(question: code, given: item.givenAnswer)
+                            .padding(.top, 2)
+                    } else if !item.isCorrect {
                         Text("You answered: \(item.question.type == .multipleChoice ? item.givenAnswer : (item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer))")
                             .font(item.question.code == nil ? nil : .system(size: 12, design: .monospaced))
                             .graspType(.meta)
@@ -911,6 +936,9 @@ struct TestResultsView: View {
                             .graspType(.body)
                             .foregroundStyle(GRASPColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else if item.question.code?.kind == .codeBlanks, item.question.type != .multipleChoice {
+                        // The comparison above already shows the right text.
+                        EmptyView()
                     } else {
                         // A missed row always says which answer was right.
                         VStack(alignment: .leading, spacing: 1) {
@@ -922,6 +950,21 @@ struct TestResultsView: View {
                                 .graspType(.body)
                                 .foregroundStyle(GRASPColor.textPrimary)
                                 .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 2)
+                    }
+
+                    WhyBlock(text: item.question.whyText)
+                        .padding(.top, 2)
+                    if !item.isCorrect {
+                        ExplainThisBlock(question: item.question, given: item.givenAnswer)
+                            .padding(.top, 4)
+                    }
+                    if item.question.cardId == nil {
+                        FlagQuestionButton {
+                            store.flagQuestion(item.question)
+                            store.discardTestItem(attemptId: attemptId, ordinal: item.ordinal)
+                            withAnimation(Motion.fade) { graded.removeAll { $0.id == item.id } }
                         }
                         .padding(.top, 2)
                     }

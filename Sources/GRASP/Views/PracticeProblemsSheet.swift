@@ -161,9 +161,7 @@ struct PracticeProblemsSheet: View {
                     answerLine(problem.answerText)
                 }
                 if revealed {
-                    if let explanation = problem.explanation {
-                        Text(explanation).graspType(.body).foregroundStyle(GRASPColor.textSecondary)
-                    }
+                    WhyBlock(text: problem.explanation)
                     footer(record)
                 }
             } else {

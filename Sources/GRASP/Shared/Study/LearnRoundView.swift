@@ -263,6 +263,11 @@ struct LearnRoundView: View {
                     if let verdict {
                         verdictBanner(verdict)
                     }
+                    if isAnswered, !lastAnswerCorrect {
+                        // On request only: one AI call about this answer.
+                        ExplainThisBlock(question: question, given: selectedChoice ?? writtenAnswer)
+                            .frame(maxWidth: 420, alignment: .leading)
+                    }
 
                     actionButton(question)
                         .padding(.top, 6)
