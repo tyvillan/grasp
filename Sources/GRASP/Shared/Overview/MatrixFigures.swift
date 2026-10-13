@@ -216,7 +216,7 @@ struct RowReductionView: View {
             header
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeOut(duration: 0.2), value: stop)
+                .animation(Motion.base, value: stop)
             Text(narration)
                 .graspType(.body)
                 .foregroundStyle(GRASPColor.textSecondary)
@@ -443,14 +443,14 @@ struct WorkedExampleView: View {
                 labels: example.steps.map { StepMapView.label(for: $0, isMath: isMath) },
                 current: revealed - 1, tint: tint
             ) { index in
-                withAnimation(.easeOut(duration: 0.18)) { revealed = index + 1 }
+                withAnimation(Motion.glide) { revealed = index + 1 }
             }
             .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(example.steps.prefix(revealed).enumerated()), id: \.offset) { index, step in
                     stepRow(index: index, step: step)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(Motion.slide(from: .top, distance: 8))
                 }
             }
             .padding(.top, 4)
@@ -470,12 +470,12 @@ struct WorkedExampleView: View {
             if revealed < example.steps.count {
                 HStack(spacing: 16) {
                     Button {
-                        withAnimation(.easeOut(duration: 0.18)) { revealed += 1 }
+                        withAnimation(Motion.glide) { revealed += 1 }
                     } label: {
                         Label("Next step", systemImage: "chevron.down")
                     }
                     Button("Show all") {
-                        withAnimation(.easeOut(duration: 0.18)) { revealed = example.steps.count }
+                        withAnimation(Motion.glide) { revealed = example.steps.count }
                     }
                     .foregroundStyle(GRASPColor.textTertiary)
                 }

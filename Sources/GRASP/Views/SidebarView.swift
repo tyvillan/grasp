@@ -48,7 +48,10 @@ struct SidebarView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 16)
-                .animation(Motion.snappy, value: selectedCourseId)
+                .animation(Motion.thumb, value: selectedCourseId)
+                // `pastTermsOpen` is stored in defaults, which drops the
+                // surrounding `withAnimation`, so the list animates here.
+                .animation(Motion.glideInOut, value: pastTermsOpen)
             }
             .scrollIndicators(.never)
 
@@ -87,7 +90,7 @@ struct SidebarView: View {
     private func courseRow(_ course: Course) -> some View {
         SidebarRow(isSelected: isSelected(course.id), namespace: selection) { hovering in
             CourseDot(color: store.courseColor(course), size: 8)
-                .scaleEffect(hovering ? 1.3 : 1)
+                .scaleEffect(hovering && !Motion.isReduced ? 1.3 : 1)
                 .animation(Motion.bouncy, value: hovering)
                 .frame(width: 20)
             Text(course.name)
@@ -156,11 +159,15 @@ struct SidebarView: View {
             .accessibilityLabel(open ? "Hide past terms" : "Show past terms, \(count) courses")
 
             if open {
-                ForEach(terms) { term in
-                    groupLabel(term.name)
-                    ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
+                // One container, so the whole list arrives as a single
+                // fade-and-rise rather than row by row.
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(terms) { term in
+                        groupLabel(term.name)
+                        ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
+                    }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(Motion.slide(from: .top, distance: 8))
             }
         }
     }

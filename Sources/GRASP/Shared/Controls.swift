@@ -9,14 +9,16 @@ import AppKit
 /// screen is what keeps it loud.
 struct GRASPProminentButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     /// Defaults to the brand yellow -- pass `.success` (or any other tint)
     /// for a same-shape button that needs to read as a different verdict.
     var tint: Color = GRASPColor.brand
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
-        let lifted = isHovering && isEnabled && !configuration.isPressed && !reduceMotion
+        let lifted = isHovering && isEnabled && !configuration.isPressed
+        // Reduce Motion: a hover is a brightness change and a press is an
+        // opacity change; nothing moves or scales.
         configuration.label
             .font(.graspUI(size: 13.5, weight: .semibold))
             .foregroundStyle(isEnabled ? GRASPColor.ink : GRASPColor.textTertiary)
@@ -25,8 +27,9 @@ struct GRASPProminentButton: ButtonStyle {
             .background(Capsule().fill(isEnabled ? tint : GRASPColor.surface))
             .overlay(Capsule().strokeBorder(isEnabled ? .clear : GRASPColor.hairline, lineWidth: 1))
             .brightness(lifted ? 0.05 : 0)
-            .offset(y: lifted ? -2 : 0)
+            .offset(y: lifted && !reduceMotion ? -2 : 0)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed && reduceMotion ? 0.8 : 1)
             .contentShape(Capsule())
             .onHover { isHovering = $0 }
             .animation(Motion.snappy, value: isHovering)
@@ -38,7 +41,7 @@ struct GRASPProminentButton: ButtonStyle {
 /// hover a raised fill sweeps in from the left.
 struct GRASPQuietButton: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -94,7 +97,7 @@ struct GRASPVerdictButton: ButtonStyle {
             )
             .opacity(configuration.isPressed ? 0.75 : 1)
             .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.1), value: isHovering)
+            .animation(Motion.quick, value: isHovering)
     }
 }
 
@@ -209,6 +212,7 @@ struct BackBar: View {
     let title: String
     let action: () -> Void
     @State private var hovering = false
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         HStack {
@@ -216,7 +220,7 @@ struct BackBar: View {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
                         .font(.graspUI(size: 11, weight: .semibold))
-                        .offset(x: hovering ? -3 : 0)
+                        .offset(x: hovering && !reduceMotion ? -3 : 0)
                     Text(title)
                 }
                 .font(.graspUI(size: 13, weight: .medium))
@@ -468,7 +472,7 @@ private final class GRASPMenuModel {
 private struct GRASPMenuList: View {
     @Bindable var model: GRASPMenuModel
     let minWidth: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var appeared = false
 
     /// Taller than this, the list scrolls -- a course picker can hold a

@@ -389,11 +389,11 @@ private struct CheckCallout: View {
                     .foregroundStyle(GRASPColor.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Motion.slide(from: .top, distance: 8))
             }
 
             Button {
-                withAnimation(.easeOut(duration: 0.18)) { isRevealed.toggle() }
+                withAnimation(Motion.glide) { isRevealed.toggle() }
             } label: {
                 Label(isRevealed ? "Hide answer" : "Show answer",
                       systemImage: isRevealed ? "chevron.up" : "chevron.down")

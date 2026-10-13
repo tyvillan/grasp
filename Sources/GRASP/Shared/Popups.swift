@@ -295,7 +295,7 @@ struct GRASPCheckboxStyle: ToggleStyle {
                         Image(systemName: "checkmark")
                             .font(.system(size: 9, weight: .heavy))
                             .foregroundStyle(GRASPColor.ink)
-                            .transition(.scale.combined(with: .opacity))
+                            .transition(.opacity)
                     }
                 }
                 .frame(width: 16, height: 16)
@@ -312,7 +312,7 @@ struct GRASPCheckboxStyle: ToggleStyle {
 
 /// A switch in GRASP's colors, for settings that turn a behavior on.
 struct GRASPSwitchStyle: ToggleStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     func makeBody(configuration: Configuration) -> some View {
         HStack {
@@ -342,14 +342,14 @@ struct GRASPSegmented<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     var fillsWidth = false
     @Namespace private var namespace
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 let isOn = option.value == selection
                 Button {
-                    withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) { selection = option.value }
+                    withAnimation(Motion.thumb) { selection = option.value }
                 } label: {
                     Text(option.label)
                         .font(.graspUI(size: 12.5, weight: isOn ? .semibold : .medium))

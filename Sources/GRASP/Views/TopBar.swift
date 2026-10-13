@@ -56,7 +56,7 @@ private struct Wordmark: View {
     let action: () -> Void
     @FocusState private var focused: Bool
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         Button(action: action) {
@@ -66,6 +66,7 @@ private struct Wordmark: View {
                     .frame(width: 16, height: 16)
                     .rotationEffect(.degrees(isActive && !reduceMotion ? 90 : 0))
                     .scaleEffect(isActive && !reduceMotion ? 1.12 : 1)
+                    .opacity(isActive && reduceMotion ? 0.75 : 1)
                 Text("GRASP")
                     .font(.graspDisplay(22))
                     .tracking(isActive ? 22 * 0.07 : 0)
@@ -99,7 +100,7 @@ private struct Wordmark: View {
 /// display initial and the word, sliding in from the left 50ms apart.
 private struct AcronymReveal: View {
     let isShown: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     private static let words = ["Gather", "Resources", "Apply", "Study", "Perform"]
 

@@ -111,7 +111,7 @@ struct DeckDetailView: View {
     /// Why the last empty-deck generation didn't produce cards.
     @State private var generationNotice: GenerationNotice?
     private struct GenerationNotice { let message: String; let isError: Bool }
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var showingGenerateSheet = false
     @State private var showingCodeQuestions = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
@@ -329,14 +329,18 @@ struct DeckDetailView: View {
         VStack(spacing: 0) {
             deckHeader
             // Card generation has its own strip, at the top of the list.
-            if let aiActivity, !isGeneratingCards {
-                AIProgressStrip(
-                    activity: aiActivity,
-                    onStop: { store.stopAIJob(cardJobKey) },
-                    stopHelp: "Stops now. Cards already finished keep their changes; "
-                        + "the one in progress is left as it was."
-                )
+            Group {
+                if let aiActivity, !isGeneratingCards {
+                    AIProgressStrip(
+                        activity: aiActivity,
+                        onStop: { store.stopAIJob(cardJobKey) },
+                        stopHelp: "Stops now. Cards already finished keep their changes; "
+                            + "the one in progress is left as it was."
+                    )
+                    .transition(.opacity)
+                }
             }
+            .animation(Motion.base, value: aiActivity != nil && !isGeneratingCards)
             switch contentTab {
             case .cards:
                 if showsEmptyDeck {
@@ -819,7 +823,7 @@ struct DeckDetailView: View {
             ForEach(ContentTab.allCases) { tab in
                 let selected = contentTab == tab
                 Button {
-                    withAnimation(Motion.snappy) { contentTab = tab }
+                    withAnimation(Motion.thumb) { contentTab = tab }
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
@@ -1272,7 +1276,7 @@ struct DeckDetailView: View {
                 if reduceMotion {
                     hiddenNewIds.remove(card.id)
                 } else {
-                    withAnimation(.easeOut(duration: 0.24)) { _ = hiddenNewIds.remove(card.id) }
+                    withAnimation(Motion.glide) { _ = hiddenNewIds.remove(card.id) }
                     try? await Task.sleep(for: .seconds(step))
                 }
             }
@@ -1379,7 +1383,7 @@ struct DeckDetailView: View {
                         .padding(.horizontal, 4)
                 )
                 .background(TableHighlightRemover())
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(Motion.slide(from: .top))
             }
         }
         .listStyle(.inset)
@@ -1387,6 +1391,7 @@ struct DeckDetailView: View {
         // The last rows scroll clear of the floating bar.
         .contentMargins(.bottom, selectedCardIds.isEmpty ? 0 : 76, for: .scrollContent)
         .overlay(alignment: .bottom) { floatingApproveBar }
+        .animation(Motion.glide, value: selectedCardIds.isEmpty)
         .contextMenu(forSelectionType: Card.ID.self) { ids in
             if ids.isEmpty {
                 Button("Approve All Drafts") {
@@ -1542,7 +1547,7 @@ struct DeckDetailView: View {
             .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
             .padding(.bottom, 16)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(Motion.slide(from: .bottom))
         }
     }
 
@@ -2019,14 +2024,14 @@ private struct FilterPills: View {
     @Binding var selection: DeckDetailView.MasteryFilter
     let counts: [DeckDetailView.MasteryFilter: Int]
     @Namespace private var pill
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(DeckDetailView.MasteryFilter.allCases) { filter in
                 let selected = selection == filter
                 Button {
-                    withAnimation(Motion.choose(Motion.snappy, reduceMotion: reduceMotion)) { selection = filter }
+                    withAnimation(Motion.thumb) { selection = filter }
                 } label: {
                     Text("\(filter.rawValue) \(counts[filter] ?? 0)")
                         .font(.graspUI(size: 12.5, weight: selected ? .semibold : .medium))
@@ -2208,6 +2213,7 @@ private struct CardRow: View {
                     .foregroundStyle(GRASPColor.textTertiary)
                     .lineLimit(1)
                     .opacity(isActive ? 0 : 1)
+                    .animation(isActive ? Motion.swapOut : Motion.swapIn, value: isActive)
                 HStack(spacing: 6) {
                     previewButton
                     approveButton
@@ -2246,10 +2252,10 @@ private struct CardRow: View {
                 .help("Card actions")
                 }
                 .opacity(isActive ? 1 : 0)
+                .animation(isActive ? Motion.swapIn : Motion.swapOut, value: isActive)
                 .allowsHitTesting(isActive)
             }
             .frame(width: 104, alignment: .trailing)
-            .animation(Motion.fade, value: isActive)
         }
         .padding(.vertical, 7)
         .animation(Motion.fade, value: selectionActive)

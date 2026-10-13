@@ -59,12 +59,36 @@ one deliberate shadow is the floating selection bar. 4 pt grid
 with 40 pt side padding (Home, Library, Study guides).
 
 ## Motion
-Everything is in `Motion` and is fast: `snappy` spring (hover, selection),
-`settle` (cards arriving), `bouncy` (small icons), `press` 0.1 s, `fill` (progress),
-`flip` 0.22 s, `fade` 0.18 s, `stagger` 0.05 s. Rows arriving during generation
-slide in about 60 ms apart (1.5 s cap). **Reduce Motion is always respected:**
-read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
-`Motion.fade`; no movement, scaling, pulsing or stagger remains.
+Everything is in `Motion` (`Theme.swift`): three durations and two curves, and
+nothing longer than 0.32 s, with no overshoot, no repeating animation except the
+AI sparkle pulse, and nothing that blocks or delays input. Every animation is
+state-driven, so a new tap interrupts it.
+
+| Token | Value | Use |
+|---|---|---|
+| `quick` | 0.12 s | press, hover colour and fill, focus |
+| `base` | 0.20 s | cross-fades, row status word (out then in, 0.10 each), card reveal (scale to 0.96 and back, 0.10 each, the answer fades in), strips appearing |
+| `glide` | 0.32 s | entrances, slides, expand and collapse, selection bar, progress fill, count-ups |
+| `out` | `timingCurve(0.2, 0, 0, 1)` | things that arrive or open |
+| `inOut` | `timingCurve(0.4, 0, 0.2, 1)` | things that move between two places (thumbs, card reveal) |
+
+Names used in views map to those: `snappy` is `glide` in-out, `settle`, `fill`
+and `bouncy` are `glide`, `fade` is `base`, `press` is `quick`, `thumb` is
+`glide` in-out (instant under Reduce Motion), `countUp` is `glide` (instant
+under Reduce Motion). The 190 pt Home numeral (`numeral`) rolls at `base`: its
+digit morph blurs, and it must be sharp inside `glide`. Transitions use `Motion.slide(from:)` (a 12 pt offset and
+a fade, just a fade under Reduce Motion). Do not write `.easeOut(duration:)`,
+`.spring(`, or `withAnimation {` in a view; a test fails if you do.
+
+**Reduce Motion rule.** Positional motion (rise, slide, scale, rotation) becomes an
+opacity change at `quick`; opacity-only changes (cross-fades, count-ups) become
+instant. There is no exception for hover or press: a hover or press scale, lift
+or nudge applies only when motion is not reduced, and under Reduce Motion the same
+state is shown with opacity or colour only (a pressed button dims to 0.8, a
+hovered one brightens). The tokens already do this, using `Motion.isReduced`, which is the system
+setting or the launch flag `-GRASPForceReduceMotion 1` (Mac: `open -a GRASP --args
+-GRASPForceReduceMotion 1`; iPhone simulator: `simctl launch ... -GRASPForceReduceMotion 1`).
+A view that uses the tokens needs no check of its own.
 
 ## Patterns
 - **Deck toolbar.** Left: Study (yellow), Learn, Test. Right: Generate cards

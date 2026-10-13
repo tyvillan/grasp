@@ -27,7 +27,7 @@ struct LibraryView: View {
                 header
                     .padding(.bottom, GRASPSpace.s)
                 vaultCard
-                    .revealOnAppear(index: 0, distance: 14)
+                    .revealOnAppear(index: 0)
                 HStack(alignment: .top, spacing: GRASPSpace.l) {
                     LibraryHiddenTile(
                         icon: "archivebox", title: "Archived courses", count: store.archivedCourses.count,
@@ -320,7 +320,7 @@ private struct LibraryHiddenTile: View {
     let detail: String
     let action: () -> Void
     @State private var hovering = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         Button(action: action) {

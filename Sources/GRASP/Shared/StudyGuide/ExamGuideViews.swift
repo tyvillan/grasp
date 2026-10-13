@@ -251,7 +251,7 @@ private struct PartSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Button { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } } label: {
+            Button { withAnimation(Motion.glide) { isOpen.toggle() } } label: {
                 HStack(alignment: .center, spacing: 10) {
                     Image(systemName: isOpen ? "chevron.down" : "chevron.right")
                         .font(.graspUI(size: 10, weight: .semibold))

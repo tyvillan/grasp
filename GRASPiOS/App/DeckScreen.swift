@@ -22,7 +22,7 @@ struct DeckScreen: View {
     @State private var query = ""
     @State private var creatingCard = false
     @State private var aiMessage: String?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
     @State private var filter: CardFilter = .all
     @State private var editMode: EditMode = .inactive
@@ -146,6 +146,7 @@ struct DeckScreen: View {
         .environment(\.editMode, $editMode)
         .listSectionSpacing(6)
         .overlay(alignment: .bottom) { floatingApproveBar }
+        .animation(Motion.glide, value: editMode == .active && !selectedDrafts.isEmpty)
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
@@ -173,6 +174,7 @@ struct DeckScreen: View {
             default: break
             }
         }
+        .animation(Motion.base, value: runningJob != nil && !isGeneratingCards)
         .fullScreenCover(isPresented: $studying, onDismiss: {
             load()
             guard let step = pendingNextStep else { return }
@@ -206,7 +208,7 @@ struct DeckScreen: View {
             if tab == .cards, !cards.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editMode == .active ? "Done" : "Select") {
-                        withAnimation { editMode = editMode == .active ? .inactive : .active }
+                        withAnimation(Motion.glideInOut) { editMode = editMode == .active ? .inactive : .active }
                         selection.removeAll()
                     }
                     .tint(GRASPColor.textPrimary)
@@ -556,7 +558,7 @@ struct DeckScreen: View {
                 liveSourceTitle = material.title
             }
             recentAIIds = arrivals.map(\.id) + recentAIIds
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+            withAnimation(Motion.glide) {
                 cards = fresh
                 loadSourceTitles()
             }
@@ -671,7 +673,7 @@ struct DeckScreen: View {
             .buttonStyle(GRASPQuietButton())
             .background(GRASPColor.surfaceRaised, in: Capsule())
             .padding(.bottom, 14)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .transition(Motion.slide(from: .bottom))
         }
     }
 }

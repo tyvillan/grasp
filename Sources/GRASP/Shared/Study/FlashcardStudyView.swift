@@ -34,10 +34,11 @@ struct FlashcardStudyView: View {
     /// Cards marked Needs Review this session, for "Learn the N you missed".
     @State private var missedIds: Set<String> = []
     @FocusState private var isFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     /// The card's turn during a flip: it rotates edge-on, the answer
     /// appears, and it turns back -- the question stays on the same face.
-    @State private var flipAngle: Double = 0
+    /// 1 at rest; dips to 0.96 for a moment while the answer is revealed.
+    @State private var flipScale: Double = 1
     /// A brief yellow flash of the progress bar after "I Know This".
     @State private var progressFlash = false
 
@@ -196,6 +197,7 @@ struct FlashcardStudyView: View {
                     .fill(GRASPColor.hairlineStrong)
                     .frame(width: 40, height: 1)
                     .padding(.vertical, 24)
+                    .transition(.opacity)
 
                 Text(card.back)
                     .graspType(.studyAnswer)
@@ -203,6 +205,7 @@ struct FlashcardStudyView: View {
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
                     .frame(maxWidth: 560)
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 44)
@@ -218,26 +221,26 @@ struct FlashcardStudyView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 22)
         )
-        .rotation3DEffect(.degrees(flipAngle), axis: (x: 0, y: 1, z: 0), perspective: 0.4)
+        .scaleEffect(flipScale)
         .contentShape(Rectangle())
         .onTapGesture { flip() }
     }
 
-    /// Reveal (or hide) the answer. Revealing is a quick half-turn of the
-    /// card, about 220ms in all; under Reduce Motion it's a plain fade.
+    /// Reveal (or hide) the answer: the card eases to 0.96 and back while the
+    /// answer fades in, 0.20 s in all. It never rotates, so it can't grow past
+    /// its frame or cross the toolbar. Under Reduce Motion it's a plain fade.
     private func flip() {
         guard !isFlipped else {
-            isFlipped = false
+            withAnimation(Motion.base) { isFlipped = false }
             return
         }
         if reduceMotion {
             withAnimation(Motion.fade) { isFlipped = true }
             return
         }
-        withAnimation(.easeIn(duration: 0.11)) { flipAngle = 90 } completion: {
-            isFlipped = true
-            flipAngle = -90
-            withAnimation(.easeOut(duration: 0.11)) { flipAngle = 0 }
+        withAnimation(Motion.inOut(Motion.baseDuration / 2)) { flipScale = 0.96 } completion: {
+            withAnimation(Motion.base) { isFlipped = true }
+            withAnimation(Motion.inOut(Motion.baseDuration / 2)) { flipScale = 1 }
         }
     }
 
@@ -251,7 +254,7 @@ struct FlashcardStudyView: View {
                     markButton("Needs Review", "1", GRASPColor.rejected, understood: false)
                     markButton("I Know This", "2", GRASPColor.success, understood: true)
                 }
-                .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
+                .transition(Motion.slide(from: .bottom, distance: 8))
             } else {
                 Button {
                     flip()
@@ -364,7 +367,7 @@ struct FlashcardStudyView: View {
         }
         index += 1
         isFlipped = false
-        flipAngle = 0
+        flipScale = 1
     }
 }
 
@@ -425,7 +428,7 @@ struct SessionCompleteView: View {
     @State private var shownUnderstood = 0
     @State private var shownReview = 0
     @State private var drift = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         ZStack {
@@ -482,8 +485,8 @@ struct SessionCompleteView: View {
         .onTapGesture { skip() }
         .onAppear {
             if reduceMotion { skip(); return }
-            withAnimation(.easeOut(duration: 1.2)) { drift = true }
-            withAnimation(Motion.settle.delay(0.15)) {
+            withAnimation(Motion.glide) { drift = true }
+            withAnimation(Motion.countUp) {
                 shownUnderstood = understood
                 shownReview = toReview
             }

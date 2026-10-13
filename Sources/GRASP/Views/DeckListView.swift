@@ -129,7 +129,7 @@ struct DeckListView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 12)
-                .animation(Motion.snappy, value: selectedDeckId)
+                .animation(Motion.thumb, value: selectedDeckId)
             }
             .scrollIndicators(.automatic)
         }

@@ -77,7 +77,7 @@ struct SidebarIcon: View {
     let glyph: SidebarGlyph
     var isHovering: Bool
     var size: CGFloat = 20
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         glyph.shape

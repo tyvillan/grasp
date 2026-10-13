@@ -28,7 +28,7 @@ struct CountdownHero: View {
     var standing: ExamPlan.Standing? = nil
     var numeralSize: CGFloat = 190
     @State private var shown = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     private var title: String { item.event.title.isEmpty ? item.event.kind.label : item.event.title }
 
@@ -73,9 +73,9 @@ struct CountdownHero: View {
         .onAppear {
             guard shown != days else { return }
             if reduceMotion { shown = days; return }
-            withAnimation(Motion.settle.delay(0.12)) { shown = days }
+            withAnimation(Motion.numeral) { shown = days }
         }
-        .onChange(of: days) { withAnimation(Motion.settle) { shown = days } }
+        .onChange(of: days) { withAnimation(Motion.numeral) { shown = days } }
     }
 
     /// Three figures and a sentence on where this exam stands: what is due,
@@ -168,6 +168,7 @@ struct PlanStepRow: View {
     let onToggle: () -> Void
     let onOpen: () -> Void
     @State private var hovering = false
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -200,7 +201,7 @@ struct PlanStepRow: View {
                         .font(.graspUI(size: 11, weight: .semibold))
                         .foregroundStyle(GRASPColor.textSecondary)
                         .opacity(hovering ? 1 : 0)
-                        .offset(x: hovering ? 0 : -3)
+                        .offset(x: hovering || reduceMotion ? 0 : -3)
                 }
                 .contentShape(Rectangle())
             }
@@ -217,7 +218,7 @@ struct PlanStepRow: View {
 struct CheckRing: View {
     let isOn: Bool
     var size: CGFloat = 26
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         ZStack {
@@ -225,7 +226,7 @@ struct CheckRing: View {
                 .strokeBorder(GRASPColor.textPrimary.opacity(0.4), lineWidth: 1.5)
             Circle()
                 .fill(GRASPColor.brand)
-                .scaleEffect(isOn ? 1 : 0.2)
+                .scaleEffect(isOn || reduceMotion ? 1 : 0.2)
                 .opacity(isOn ? 1 : 0)
             CheckMark()
                 .trim(from: 0, to: isOn ? 1 : 0)
@@ -249,11 +250,11 @@ struct CheckMark: Shape {
 }
 
 /// A short yellow burst around the primary button when the whole plan is
-/// done. Under 1s; nothing under Reduce Motion.
+/// done. One 0.32 s fan-out; nothing under Reduce Motion.
 struct CelebrationBurst: View {
     let trigger: Bool
     @State private var fired = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
 
     var body: some View {
         ZStack {
@@ -270,18 +271,15 @@ struct CelebrationBurst: View {
         .onChange(of: trigger) { _, now in
             guard now, !reduceMotion else { fired = false; return }
             fired = false
-            withAnimation(.easeOut(duration: 0.8)) { fired = true }
+            withAnimation(Motion.glide) { fired = true }
         }
     }
 }
 
-/// The streak: an outlined pill that pulses once when it appears and rolls
-/// its number when it grows.
+/// The streak: an outlined pill that rolls its number when it grows.
 struct StreakPill: View {
     let days: Int
     let studiedToday: Bool
-    @State private var pulse = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -296,14 +294,8 @@ struct StreakPill: View {
         .frame(height: 30)
         .background(Capsule().fill(GRASPColor.surface))
         .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
-        .scaleEffect(pulse ? 1.08 : 1)
         .help(studiedToday ? "You've studied today" : "Study today to keep your streak")
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(Motion.bouncy.delay(0.35)) { pulse = true }
-            withAnimation(Motion.snappy.delay(0.6)) { pulse = false }
-        }
-        .animation(Motion.snappy, value: days)
+        .animation(Motion.countUp, value: days)
     }
 }
 

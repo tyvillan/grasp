@@ -85,6 +85,7 @@ struct CalendarView: View {
             }
         }
         .background(GRASPColor.canvas)
+        .revealOnAppear(index: 0)
         .navigationTitle("Calendar")
         .task { load() }
         .onChange(of: anchor) { load() }

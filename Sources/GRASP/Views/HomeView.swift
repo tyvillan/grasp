@@ -11,7 +11,7 @@ import GRDB
 /// last in. No course colors here: courses are named in muted text only.
 struct HomeView: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var reduceMotion: Bool { Motion.isReduced }
     @Binding var selectedCourseId: String?
     @Binding var selectedDeckId: String?
 
@@ -148,7 +148,7 @@ struct HomeView: View {
         .graspCard(padding: 28)
         .contentShape(RoundedRectangle(cornerRadius: GRASPRadius.card))
         .onTapGesture { if let exam = nextExam { study(exam) } }
-        .revealOnAppear(index: 0, distance: 14)
+        .revealOnAppear(index: 0)
     }
 
     // MARK: - Plan
