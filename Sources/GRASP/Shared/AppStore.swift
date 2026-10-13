@@ -1200,8 +1200,8 @@ final class AppStore {
     func judgeTypedAnswer(question: LearnEngine.RoundQuestion, given: String) async -> JudgedAnswer {
         let accepted = question.cardId.map { acceptedAnswers(forCard: $0) } ?? []
         // A canned judge for screenshots and demos when no model is
-        // reachable: GRASP_STUB_JUDGE=1 at launch.
-        let stub = ProcessInfo.processInfo.environment["GRASP_STUB_JUDGE"] == "1"
+        // reachable: GRASP_STUB_JUDGE=1 with -GRASPAllowStubs 1, debug builds only.
+        let stub = StubHooks.enabled("GRASP_STUB_JUDGE")
         let judge: AnswerLadder.Judge = { prompt, expected, given in
             if stub {
                 try? await Task.sleep(for: .milliseconds(1500))
@@ -1251,8 +1251,8 @@ final class AppStore {
                                     code: question.code?.code)
         if let cached = explanationCache[key] { return cached }
         // A canned reply for screenshots and demos when no model is
-        // reachable: set GRASP_STUB_EXPLAIN=1 in the launch environment.
-        if ProcessInfo.processInfo.environment["GRASP_STUB_EXPLAIN"] == "1" {
+        // reachable: GRASP_STUB_EXPLAIN=1 with -GRASPAllowStubs 1, debug builds only.
+        if StubHooks.enabled("GRASP_STUB_EXPLAIN") {
             try? await Task.sleep(for: .milliseconds(1400))
             let right = question.code?.plainAnswer ?? question.correctAnswer
             let text = "`\(right)` is what the code needs here, because it is the name the rest of the program uses. "

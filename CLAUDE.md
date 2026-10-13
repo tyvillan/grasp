@@ -28,3 +28,4 @@ Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
   `Controls.swift` and `Popups.swift`. No new colours or fonts without asking.
 - One filled yellow primary per screen. The sparkle means AI.
 - Every animation uses a `Motion` token (0.12 / 0.20 / 0.32 s, no overshoot), which carries the Reduce Motion rule; see DESIGN.md "Motion".
+- Canned AI hooks for screenshots (`GRASP_STUB_JUDGE`, `GRASP_STUB_EXPLAIN`) go through `StubHooks`: debug builds only, and they also need the launch flag `-GRASPAllowStubs 1`. A release build ignores them.
