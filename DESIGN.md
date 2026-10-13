@@ -99,3 +99,11 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
 5. Use `GRASPSheet` for popups and `PillMenu` for menus; no system alerts or menus.
 6. Text on muted never goes lighter than `textTertiary`.
 7. The screen must work at 800 pt wide on the Mac and on an iPhone SE.
+
+## Known deviations
+- **Mac Settings window** keeps the native title bar and tab strip. A transparent
+  title bar over the canvas made the tabs vanish, so the window content uses
+  brand tokens but the chrome stays system.
+- **iPhone tab bar is a custom bar** (`GRASPiOS/App/MainTabView.swift`), because
+  the system Liquid Glass bar cannot be made opaque. The system tab bar is hidden.
+  New tabs must be added in `MainTabView`, not only in the `TabView`.
