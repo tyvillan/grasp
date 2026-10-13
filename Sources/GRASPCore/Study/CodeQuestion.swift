@@ -85,7 +85,9 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
     public static func decode(_ json: String?) -> CodeQuestion? {
         guard let data = json?.data(using: .utf8),
               var question = try? JSONDecoder().decode(CodeQuestion.self, from: data) else { return nil }
-        question.explanation = question.explanation.map(PlainMath.clean)
+        // Older questions may carry an explanation in the wrong voice or with
+        // an internal "1: House"; those are dropped rather than shown.
+        question.explanation = QuestionExplanation.clean(question.explanation.map(PlainMath.clean))
         return question
     }
 
@@ -152,6 +154,27 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
             return CodeAnswers.decode(given).enumerated().map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
         default:
             return given
+        }
+    }
+
+    /// What a student typed, as plain words with no numbering: the fills in
+    /// order, separated by commas. For prompts and explanations.
+    public func plainGiven(_ given: String) -> String {
+        switch kind {
+        case .codeBlanks:
+            return CodeAnswers.decode(given).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: ", ")
+        default:
+            return given
+        }
+    }
+
+    /// The right answer as plain words with no numbering.
+    public var plainAnswer: String {
+        switch kind {
+        case .codeBlanks:
+            return (blanks ?? []).map { $0.first ?? "" }.joined(separator: ", ")
+        default:
+            return answerText
         }
     }
 

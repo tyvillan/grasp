@@ -79,7 +79,7 @@ extension OllamaGenerator {
         UNIT: unit, or leave out
         SCRIPT:
         python lines (number and matrix only)
-        EXPLANATION: one to three sentences: why the answer is right, then the most common mistake. No praise, no filler.
+        EXPLANATION: \(QuestionExplanation.styleRules)
         ### END
 
         Terms the student already has cards for: \(terms.isEmpty ? "(none)" : terms)
@@ -202,13 +202,24 @@ extension OllamaGenerator {
         return text.isEmpty || text.count > 900 ? nil : text
     }
 
-    /// Why this student's answer was wrong, written for this answer
-    /// rather than for the question in general.
+    /// Why this answer was wrong, written for this answer rather than for
+    /// the question in general. Asked again once if the first reply breaks
+    /// the style rules; nil when neither does.
     public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
-        let text = Self.explainWrongAnswerPrompt(prompt: prompt, correctAnswer: correctAnswer,
-                                                 givenAnswer: givenAnswer, context: context)
-        guard let reply = try? await chatText(prompt: text, maxTokens: 400) else { return nil }
-        return QuestionExplanation.cleanLong(reply)
+        var note = ""
+        for attempt in 0..<2 {
+            let text = Self.explainWrongAnswerPrompt(prompt: prompt, correctAnswer: correctAnswer,
+                                                     givenAnswer: givenAnswer, context: context) + note
+            if let reply = try? await chatText(prompt: text, maxTokens: 400),
+               let cleaned = QuestionExplanation.cleanLong(reply) {
+                return cleaned
+            }
+            if attempt == 0 {
+                note = "\n\nYour last reply broke the rules. Write to \"you\", never \"the student\", and never show "
+                    + "an option number or a format like \"1: House\"."
+            }
+        }
+        return nil
     }
 
     /// Judges a typed answer by meaning. The prompt carries the question,
@@ -253,7 +264,7 @@ extension OllamaGenerator {
 
     static func explainWrongAnswerPrompt(prompt: String, correctAnswer: String, givenAnswer: String, context: String) -> String {
         """
-        A student got this question wrong.
+        Someone answered a question wrong. Explain it to them.
 
         Question:
         \(prompt.prefix(1500))
@@ -261,12 +272,11 @@ extension OllamaGenerator {
         Correct answer:
         \(correctAnswer.prefix(600))
 
-        The student answered:
+        What they chose or typed:
         \(givenAnswer.isEmpty ? "(nothing)" : String(givenAnswer.prefix(600)))
         \(context.isEmpty ? "" : "\nCode or notes the question refers to:\n\(context.prefix(1200))\n")
-        In at most four short sentences, tell the student why the correct answer is right and exactly where \
-        their answer went wrong. Speak to them directly. You may include one very small code snippet if it \
-        helps. No praise, no apology, no preamble, no headings, no bullet points.
+        \(QuestionExplanation.styleRules)
+        Reply with the explanation only.
         """
     }
 

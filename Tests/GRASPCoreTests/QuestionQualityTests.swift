@@ -132,11 +132,10 @@ struct QuestionQualityTests {
         #expect(question.explanation?.hasPrefix("Great") == false)
     }
 
-    @Test("an explanation is cut to three sentences and drops praise")
+    @Test("praise is dropped and a short explanation is kept as written")
     func explanationClean() {
-        let long = "Great job! The loop stops at n. A common mistake is using <=. That runs once too often. Extra sentence here."
-        let cleaned = QuestionExplanation.clean(long)
-        #expect(cleaned == "The loop stops at n. A common mistake is using <=. That runs once too often.")
+        let text = "Great job! The loop stops at n. A common mistake is using <=. That runs once too often."
+        #expect(QuestionExplanation.clean(text) == "The loop stops at n. A common mistake is using <=. That runs once too often.")
         #expect(QuestionExplanation.clean("   ") == nil)
         #expect(QuestionExplanation.clean("Nice!") == nil)
         #expect(QuestionExplanation.clean("self.x stays 1.5 here. Done.") == "self.x stays 1.5 here. Done.")
@@ -215,7 +214,7 @@ struct QuestionQualityTests {
             prompt: "What prints?", correctAnswer: "3", givenAnswer: "4", context: "print(1 + 2)")
         #expect(text.contains("What prints?"))
         #expect(text.contains("3"))
-        #expect(text.contains("The student answered:\n4"))
+        #expect(text.contains("What they chose or typed:\n4"))
         #expect(text.contains("print(1 + 2)"))
     }
 }
@@ -281,5 +280,129 @@ struct QuestionQualityModelTests {
         }
         #expect(picked.count == 1)
         #expect(picked.first?.code?.code.contains("total") == true)
+    }
+}
+
+// MARK: - The House / Room example
+
+/// A "Which code fills the blank" question: class Room takes a name and
+/// stores it, class House takes no argument. The answer is Room; the
+/// student chose House.
+@Suite("Explanation style")
+struct ExplanationStyleTests {
+    static let bad = "The student's response \"1: House\" does not match the string printed. Your answer provided a class name and an index instead."
+    static let good = "`House.__init__` takes no arguments, so `House(\"bedroom\")` raises a TypeError, and a House has no name attribute anyway. Room.__init__ takes name and stores it, so Room(\"bedroom\").name prints bedroom."
+    static let goodTwoSpans = "House.__init__ takes no arguments, so `House(\"bedroom\")` raises a TypeError, and a House has no name attribute anyway. Room.__init__ takes name and stores it, so `Room(\"bedroom\").name` prints bedroom."
+
+    @Test("the bad House explanation is rejected, with the reason")
+    func badRejected() {
+        #expect(QuestionExplanation.problem(in: Self.bad) != nil)
+        #expect(QuestionExplanation.clean(Self.bad) == nil)
+        #expect(QuestionExplanation.cleanLong(Self.bad) == nil)
+    }
+
+    @Test("each rule on its own")
+    func rules() {
+        #expect(QuestionExplanation.problem(in: "The student chose House, which has no name.")?.contains("student") == true)
+        #expect(QuestionExplanation.problem(in: "The student's choice has no name attribute.") != nil)
+        #expect(QuestionExplanation.problem(in: "You picked 1: House, which takes no argument.")?.contains("1: House") == true)
+        #expect(QuestionExplanation.problem(in: "The user picked House.") != nil)
+        #expect(QuestionExplanation.problem(in: "One. Two. Three. Four. Five. Six.")?.contains("five") == true)
+        #expect(QuestionExplanation.problem(in: "One. Two. Three. Four. Five.") == nil)
+        #expect(QuestionExplanation.problem(in: "") != nil)
+        #expect(QuestionExplanation.problem(in: "   ") != nil)
+        #expect(QuestionExplanation.problem(in: nil) != nil)
+        // A time or a count with a colon is not an answer format.
+        #expect(QuestionExplanation.problem(in: "At 12:30 the call returns.") == nil)
+    }
+
+    @Test("a good explanation passes untouched")
+    func goodPasses() {
+        #expect(QuestionExplanation.problem(in: Self.good) == nil)
+        #expect(QuestionExplanation.clean(Self.good) == Self.good)
+        #expect(QuestionExplanation.cleanLong(Self.good) == Self.good)
+    }
+
+    @Test("inline code renders as code spans with the backticks removed")
+    func spans() {
+        let segments = QuestionExplanation.segments(in: Self.goodTwoSpans)
+        #expect(segments.filter(\.isCode).count == 2)
+        #expect(segments.filter(\.isCode).map(\.text) == ["House(\"bedroom\")", "Room(\"bedroom\").name"])
+        #expect(!segments.contains { $0.text.contains("`") })
+        // A lone backtick is dropped, not shown.
+        #expect(QuestionExplanation.segments(in: "stray ` tick").allSatisfy { !$0.text.contains("`") })
+        // Plain text is one plain segment.
+        #expect(QuestionExplanation.segments(in: "no code here") == [.init("no code here", isCode: false)])
+    }
+
+    @Test("the plain answer for a fill-in-the-blank never has the numbering")
+    func plainAnswers() {
+        let question = CodeQuestion(kind: .codeBlanks, language: .python, prompt: "Which code fills the blank?",
+                                    code: "class Room:\n    def __init__(self, name):\n        self.name = name\n\nx = [[1]](\"bedroom\")\nprint(x.name)",
+                                    blanks: [["Room"]], expectedOutput: "bedroom")
+        #expect(question.plainAnswer == "Room")
+        #expect(question.plainGiven(CodeAnswers.encode(["House"])) == "House")
+        #expect(question.answerText == "1: Room")   // the results screen keeps its own format
+    }
+
+    // MARK: With a stubbed model
+
+    private final class Sequence: ChatTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var replies: [String]
+        private var seen: [String] = []
+        init(_ replies: [String]) { self.replies = replies }
+        var prompts: [String] { lock.withLock { seen } }
+        func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
+            lock.withLock {
+                seen.append(prompt)
+                return replies.isEmpty ? "" : replies.removeFirst()
+            }
+        }
+    }
+
+    @Test("a bad reply is asked for again once, and the good one is used")
+    func regeneratesOnce() async {
+        let transport = Sequence([Self.bad, Self.good])
+        let generator = OllamaGenerator(transport: transport, model: "stub", wordBudget: 1000)
+        let text = await generator.explainWrongAnswer(
+            prompt: "Which code fills the blank?", correctAnswer: "Room", givenAnswer: "House", context: "class Room: ...")
+        #expect(text == Self.good)
+        #expect(transport.prompts.count == 2)
+        #expect(transport.prompts[1].contains("broke the rules"))
+    }
+
+    @Test("two bad replies give no explanation rather than a wrong one")
+    func givesUp() async {
+        let transport = Sequence([Self.bad, Self.bad])
+        let generator = OllamaGenerator(transport: transport, model: "stub", wordBudget: 1000)
+        let text = await generator.explainWrongAnswer(
+            prompt: "Which code fills the blank?", correctAnswer: "Room", givenAnswer: "House", context: "")
+        #expect(text == nil)
+        #expect(transport.prompts.count == 2)
+    }
+
+    @Test("the prompt says you, forbids the internal format and gives the plain answers")
+    func promptText() {
+        let prompt = OllamaGenerator.explainWrongAnswerPrompt(
+            prompt: "Which code fills the blank?", correctAnswer: "Room", givenAnswer: "House", context: "class House: ...")
+        #expect(prompt.contains("\"you\""))
+        #expect(prompt.contains("the student"))   // named only to forbid it
+        #expect(prompt.contains("1: House"))      // named only to forbid it
+        #expect(prompt.contains("2 to 4 short sentences"))
+        #expect(prompt.contains("backticks"))
+        #expect(prompt.contains("Correct answer:\nRoom"))
+        #expect(prompt.contains("What they chose or typed:\nHouse"))
+    }
+
+    @Test("an old stored question with a bad explanation shows none")
+    func storedBadExplanationDropped() {
+        let question = CodeQuestion(kind: .codeBlanks, language: .python, prompt: "p", code: "x = [[1]]",
+                                    blanks: [["Room"]], explanation: Self.bad)
+        let decoded = CodeQuestion.decode(question.encoded())
+        #expect(decoded?.explanation == nil)
+        let good = CodeQuestion(kind: .codeBlanks, language: .python, prompt: "p", code: "x = [[1]]",
+                                blanks: [["Room"]], explanation: Self.good)
+        #expect(CodeQuestion.decode(good.encoded())?.explanation == Self.good)
     }
 }

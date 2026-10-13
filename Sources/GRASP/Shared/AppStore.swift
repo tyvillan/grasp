@@ -1254,9 +1254,10 @@ final class AppStore {
         // reachable: set GRASP_STUB_EXPLAIN=1 in the launch environment.
         if ProcessInfo.processInfo.environment["GRASP_STUB_EXPLAIN"] == "1" {
             try? await Task.sleep(for: .milliseconds(1400))
-            let text = "The correct answer is \(question.correctAnswer.replacingOccurrences(of: "\n", with: ", ")). "
-                + "Your answer went a different way because it left out the part the code actually needs. "
-                + "Compare the two and look at what each line does."
+            let right = question.code?.plainAnswer ?? question.correctAnswer
+            let text = "`\(right)` is what the code needs here, because it is the name the rest of the program uses. "
+                + "Your choice goes a different way and leaves that name undefined. "
+                + "Remember: read what each name refers to before picking."
             explanationCache[key] = text
             return text
         }
@@ -1269,8 +1270,9 @@ final class AppStore {
         if let problem = question.problem, let choices = problem.choices, question.type == .multipleChoice {
             context += choices.enumerated().map { "\(["A", "B", "C", "D"][min($0.offset, 3)])) \($0.element)" }.joined(separator: "\n")
         }
-        let shownGiven = question.code.map { $0.givenText(given) } ?? given
-        let shownCorrect = question.code != nil ? question.correctAnswer : question.correctAnswer
+        // Plain words, never the numbered "1: House" the results screen uses.
+        let shownGiven = question.code.map { $0.plainGiven(given) } ?? given
+        let shownCorrect = question.code?.plainAnswer ?? question.correctAnswer
         guard let text = await generator.explainWrongAnswer(
             prompt: question.prompt, correctAnswer: shownCorrect, givenAnswer: shownGiven, context: context)
         else {

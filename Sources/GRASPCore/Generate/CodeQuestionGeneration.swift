@@ -54,7 +54,7 @@ extension OllamaGenerator {
         1: answer
         BUGGY_LINE: number (findBug only)
         FIXED_LINE: corrected line (findBug only)
-        EXPLANATION: one to three sentences: why the answer is right, then the most common mistake. No praise, no filler.
+        EXPLANATION: \(QuestionExplanation.styleRules)
         ### END
 
         Rules for blanks: a blank replaces the code that was removed, in the same place, and the removed text must not \
