@@ -97,7 +97,9 @@ public enum LearnEngine {
             // Recognition-level cards alternate in true/false "as filler";
             // brand-new cards always start multiple choice, the gentlest
             // introduction to an unfamiliar term.
-            if candidate.level == .recognition && ordinal % 3 == 2 {
+            // A prompt that is itself a question ("Which tool…?") can't be
+            // called true or false, so it stays multiple choice.
+            if candidate.level == .recognition && ordinal % 3 == 2 && !isQuestionPrompt(candidate.front) {
                 return trueFalseQuestion(for: candidate, allCandidates: allCandidates, using: &rng)
             }
             return multipleChoiceQuestion(for: candidate, allCandidates: allCandidates, using: &rng)
@@ -105,6 +107,24 @@ public enum LearnEngine {
             return RoundQuestion(cardId: candidate.cardId, prompt: candidate.front,
                                   correctAnswer: candidate.back, type: .written)
         }
+    }
+
+    /// True when a card's front reads as a question or an instruction rather
+    /// than a term or a statement: it ends in "?", opens with a question
+    /// word (Which, What, How, Why, Who, Whom, Whose, When, Where) or with
+    /// "According to…", opens with an instruction (Name, Identify, Describe,
+    /// Explain, Define, List), or has a question clause after a comma
+    /// ("According to the notes, which tool…"). A true/false question needs
+    /// a statement to judge, so these are never asked that way.
+    public static func isQuestionPrompt(_ prompt: String) -> Bool {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty else { return false }
+        if text.hasSuffix("?") { return true }
+        let openers = ["which ", "what ", "what's ", "how ", "why ", "who ", "whom ", "whose ", "when ", "where ",
+                       "according to", "name ", "identify ", "describe ", "explain ", "define ", "list "]
+        if openers.contains(where: { text.hasPrefix($0) }) { return true }
+        let clauses = [", which ", ", what ", ", how ", ", why ", ", who ", ", when ", ", where "]
+        return clauses.contains { text.contains($0) }
     }
 
     private static func multipleChoiceQuestion<R: RandomNumberGenerator>(

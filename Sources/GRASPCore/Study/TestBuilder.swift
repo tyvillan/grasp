@@ -59,10 +59,28 @@ public enum TestBuilder {
         let pool = cards.map { LearnEngine.Candidate(cardId: $0.cardId, front: $0.front, back: $0.back, level: .new) }
         var selected = pool
         if config.shuffle { selected.shuffle(using: &rng) }
+
+        // A true/false question needs a statement to judge, so a card whose
+        // prompt is itself a question ("Which tool…?") is never asked that
+        // way. When True/False is the only type allowed there is nothing
+        // else to ask it as, so such cards are left out of the test.
+        let nonTrueFalse = types.filter { $0 != .trueFalse }
+        if nonTrueFalse.isEmpty {
+            selected = selected.filter { !LearnEngine.isQuestionPrompt($0.front) }
+        }
         selected = Array(selected.prefix(config.questionCount))
 
+        // Types cycle round-robin; a True/False slot that lands on a question
+        // prompt goes to whichever other enabled type has been asked least,
+        // so the mix stays even.
+        var asked: [LearnEngine.QuestionType: Int] = [:]
         return selected.enumerated().map { index, candidate in
-            switch types[index % types.count] {
+            var type = types[index % types.count]
+            if type == .trueFalse, LearnEngine.isQuestionPrompt(candidate.front), !nonTrueFalse.isEmpty {
+                type = nonTrueFalse.min { (asked[$0] ?? 0) < (asked[$1] ?? 0) } ?? nonTrueFalse[0]
+            }
+            asked[type, default: 0] += 1
+            switch type {
             case .multipleChoice:
                 var choices = LearnEngine.distractors(for: candidate, in: pool, count: 3, using: &rng)
                 choices.append(candidate.back)

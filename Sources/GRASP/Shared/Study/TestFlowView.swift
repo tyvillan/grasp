@@ -539,10 +539,6 @@ struct TestRunView: View {
             choiceList(question)
         case .trueFalse:
             VStack(spacing: 18) {
-                Text(TrueFalseLeadIn.text(forPrompt: question.prompt))
-                    .graspType(.eyebrow)
-                    .textCase(.uppercase)
-                    .foregroundStyle(GRASPColor.textTertiary)
                 Text(question.statement ?? "")
                     .graspType(.studyAnswer)
                     .foregroundStyle(GRASPColor.textSecondary)

@@ -104,4 +104,27 @@ struct LearnEngineTests {
         let picked = LearnEngine.distractors(for: target, in: pool, count: 3, using: &rng)
         #expect(!picked.contains(target.back))
     }
+
+    @Test("a question-style card at the true/false slot stays multiple choice; a term there can still be true/false")
+    func learnRoundSkipsTrueFalseForQuestions() {
+        // Recognition-level cards: every third question is the true/false filler.
+        let questionCards = (0..<7).map {
+            LearnEngine.Candidate(cardId: "q-\($0)", front: "What is term \($0)?", back: "Definition \($0)", level: .recognition)
+        }
+        let termCards = (0..<7).map {
+            LearnEngine.Candidate(cardId: "t-\($0)", front: "Term \($0)", back: "Definition \($0)", level: .recognition)
+        }
+        for _ in 0..<40 {
+            var rng = SystemRandomNumberGenerator()
+            #expect(LearnEngine.buildRound(from: questionCards, using: &rng).allSatisfy { $0.type != .trueFalse })
+        }
+        var sawTrueFalse = false
+        for _ in 0..<40 {
+            var rng = SystemRandomNumberGenerator()
+            if LearnEngine.buildRound(from: termCards, using: &rng).contains(where: { $0.type == .trueFalse }) {
+                sawTrueFalse = true
+            }
+        }
+        #expect(sawTrueFalse)
+    }
 }
