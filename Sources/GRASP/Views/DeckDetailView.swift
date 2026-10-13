@@ -1442,6 +1442,7 @@ struct DeckDetailView: View {
                         load()
                     }
                     .buttonStyle(GRASPQuietButton())
+                    .fixedSize()
                     .keyboardShortcut(.return, modifiers: [.command])
                     .help("Approve the \(drafts.count) selected draft\(drafts.count == 1 ? "" : "s") (⌘↩)")
                 }
@@ -1451,6 +1452,7 @@ struct DeckDetailView: View {
                     load()
                 }
                 .buttonStyle(GRASPQuietButton())
+                .fixedSize()
                 if !siblingDecks.isEmpty {
                     PillMenu(title: "Move to…") {
                         siblingDecks.map { deck in
@@ -1465,6 +1467,7 @@ struct DeckDetailView: View {
                 }
                 Button("Delete", role: .destructive) { pendingBulkDelete = selected }
                     .buttonStyle(GRASPQuietButton())
+                    .fixedSize()
                 Button {
                     selectedCardIds.removeAll()
                 } label: {
