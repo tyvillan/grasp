@@ -194,3 +194,69 @@ struct FlagQuestionButton: View {
         }
     }
 }
+
+/// What a typed answer's verdict adds under the answer field: for a close
+/// enough answer, that it works and what the card says; for a miss, the
+/// student's answer and the card's on separate lines.
+struct TypedAnswerFeedback: View {
+    let judged: JudgedAnswer
+    let given: String
+    let expected: String
+
+    var body: some View {
+        switch judged.outcome {
+        case .correct:
+            EmptyView()
+        case .closeEnough:
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your answer works. The card says: \(expected)")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if let reason = judged.reason, !reason.isEmpty {
+                    Text(reason)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        case .notQuite:
+            VStack(alignment: .leading, spacing: 4) {
+                line("Your answer", given, tint: GRASPColor.textSecondary)
+                line("Card says", expected, tint: GRASPColor.textPrimary)
+                if let reason = judged.reason, !reason.isEmpty {
+                    Text(reason)
+                        .graspType(.meta)
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func line(_ label: String, _ text: String, tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label + ":")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+            Text(text)
+                .graspType(.body)
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+/// The few seconds while the AI judge looks at a borderline answer.
+struct CheckingAnswerLabel: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Checking…")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textSecondary)
+        }
+    }
+}

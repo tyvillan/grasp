@@ -239,6 +239,11 @@ public protocol CardGenerator: Sendable {
     /// generator can't say.
     func explainSkill(_ skill: String, subject: String, context: String) async -> String?
 
+    /// Whether a typed answer means what the card says: lenient about
+    /// wording, strict about facts. Sees only the question, the expected
+    /// answer and the student's answer. nil when this generator can't say.
+    func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict?
+
     /// Why a student's answer was wrong, in a few sentences: what the
     /// correct answer is and why, where their answer went off, and a small
     /// code snippet when it helps. nil when this generator can't say.
@@ -285,6 +290,8 @@ public extension CardGenerator {
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
 
     func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? { nil }
+
+    func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? { nil }
 
     func rewritePart(title: String, subject: String, text: String) async -> [RewrittenBlock] { [] }
 

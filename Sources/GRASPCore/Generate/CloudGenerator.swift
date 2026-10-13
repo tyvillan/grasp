@@ -134,6 +134,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.explainWrongAnswer(prompt: prompt, correctAnswer: correctAnswer, givenAnswer: givenAnswer, context: context)
     }
 
+    public func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? {
+        await pipeline.judgeAnswer(question: question, expected: expected, given: given)
+    }
+
     public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
         await pipeline.explainSkills(skills, subject: subject, context: context)
     }
@@ -447,6 +451,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { $0 != nil },
                   cloud: { await cloud.explainSkill(skill, subject: subject, context: context) },
                   local: { await local.explainSkill(skill, subject: subject, context: context) })
+    }
+
+    public func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? {
+        await run(keep: { $0 != nil },
+                  cloud: { await cloud.judgeAnswer(question: question, expected: expected, given: given) },
+                  local: { await local.judgeAnswer(question: question, expected: expected, given: given) })
     }
 
     public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {

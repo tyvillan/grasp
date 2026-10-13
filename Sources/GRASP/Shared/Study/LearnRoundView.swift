@@ -39,6 +39,10 @@ struct LearnRoundView: View {
     @State private var selectedChoice: String?
     @State private var writtenAnswer = ""
     @State private var verdict: AnswerGrading.Verdict?
+    /// A typed answer's verdict by meaning, and whether the AI judge is
+    /// still looking at it.
+    @State private var judged: JudgedAnswer?
+    @State private var isChecking = false
     @State private var isAnswered = false
     @State private var isAtCheckpoint = false
     @State private var isEmpty = false
@@ -260,8 +264,21 @@ struct LearnRoundView: View {
                         writtenBody(question)
                     }
 
-                    if let verdict {
+                    if let judged {
+                        judgedBanner(judged)
+                    } else if let verdict {
                         verdictBanner(verdict)
+                    }
+                    if isAnswered, let judged, judged.outcome == .notQuite, question.type == .written,
+                       let cardId = question.cardId {
+                        // The judge can be wrong about a loaded answer. Say
+                        // so once and the card remembers this wording.
+                        Button("I actually got this right") {
+                            store.rememberAcceptedAnswer(writtenAnswer, forCard: cardId)
+                            lastAnswerCorrect = true
+                            self.judged = JudgedAnswer(outcome: .correct, source: .remembered)
+                        }
+                        .buttonStyle(GRASPQuietButton())
                     }
                     if isAnswered, !lastAnswerCorrect {
                         // On request only: one AI call about this answer.
@@ -309,7 +326,7 @@ struct LearnRoundView: View {
         case .multipleChoice, .trueFalse:
             return selectedChoice != nil
         case .written:
-            return !writtenAnswer.trimmingCharacters(in: .whitespaces).isEmpty
+            return !isChecking && !writtenAnswer.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
 
@@ -320,9 +337,16 @@ struct LearnRoundView: View {
             guard let selectedChoice else { return }
             submit(selectedChoice == question.correctAnswer, question: question)
         case .written:
-            let result = AnswerGrading.grade(given: writtenAnswer, correct: question.correctAnswer)
-            verdict = result
-            submit(result != .incorrect, question: question)
+            guard !isChecking else { return }
+            isChecking = true
+            let given = writtenAnswer
+            Task {
+                let result = await store.judgeTypedAnswer(question: question, given: given)
+                isChecking = false
+                judged = result
+                verdict = result.outcome.countsAsCorrect ? .correct : .incorrect
+                submit(result.outcome.countsAsCorrect, question: question)
+            }
         }
     }
 
@@ -468,17 +492,16 @@ struct LearnRoundView: View {
                         )
                 )
                 .focused($writtenFieldFocused)
-                .disabled(isAnswered)
+                .disabled(isAnswered || isChecking)
                 .onSubmit { trySubmit(question) }
                 .frame(maxWidth: 420)
-            if isAnswered, verdict != .correct {
-                HStack(spacing: 5) {
-                    Text("Answer").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-                    Text(question.correctAnswer)
-                        .graspType(.body)
-                        .foregroundStyle(GRASPColor.textPrimary)
-                        .textSelection(.enabled)
-                }
+            if isChecking {
+                CheckingAnswerLabel()
+                    .frame(maxWidth: 420, alignment: .leading)
+            }
+            if isAnswered, let judged, judged.outcome != .correct {
+                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer)
+                    .frame(maxWidth: 420, alignment: .leading)
             }
         }
         .task { writtenFieldFocused = true }
@@ -492,6 +515,19 @@ struct LearnRoundView: View {
         case .close:
             verdictLabel("Close. Check your spelling", "checkmark.circle", GRASPColor.accent)
         case .incorrect:
+            verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.rejected)
+        }
+    }
+
+    @ViewBuilder
+    private func judgedBanner(_ judged: JudgedAnswer) -> some View {
+        switch judged.outcome {
+        case .correct:
+            verdictLabel(judged.source == .remembered ? "Marked correct" : "Correct",
+                         "checkmark.circle.fill", GRASPColor.success)
+        case .closeEnough:
+            verdictLabel("Close enough", "checkmark.circle", GRASPColor.success)
+        case .notQuite:
             verdictLabel("Not quite", "xmark.circle.fill", GRASPColor.rejected)
         }
     }
@@ -514,6 +550,8 @@ struct LearnRoundView: View {
         selectedChoice = nil
         writtenAnswer = ""
         verdict = nil
+        judged = nil
+        isChecking = false
         isAnswered = false
     }
 

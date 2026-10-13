@@ -52,6 +52,11 @@ public struct FoundationModelsGenerator: CardGenerator {
         return await pipeline.explainSkill(skill, subject: subject, context: context)
     }
 
+    public func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? {
+        guard await isAvailable else { return nil }
+        return await pipeline.judgeAnswer(question: question, expected: expected, given: given)
+    }
+
     public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
         guard await isAvailable else { return nil }
         return await pipeline.explainWrongAnswer(prompt: prompt, correctAnswer: correctAnswer, givenAnswer: givenAnswer, context: context)
