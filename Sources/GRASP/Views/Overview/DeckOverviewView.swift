@@ -324,13 +324,12 @@ struct DeckOverviewView: View {
     /// "Written by AI from 4 notes", plus how many are out of date.
     private func creditLine(_ overview: DeckOverview) -> some View {
         let notes = overview.entries.count
-        let stale = overview.staleEntries.count
         return HStack(spacing: 6) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 10, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
-            Text("Written by AI from \(notes) note\(notes == 1 ? "" : "s")"
-                 + (stale > 0 ? " · \(stale) out of date" : ""))
+            // How many are out of date is the strip's to say, once.
+            Text("Written by AI from \(notes) note\(notes == 1 ? "" : "s")")
                 .graspType(.meta)
                 .foregroundStyle(GRASPColor.textTertiary)
         }

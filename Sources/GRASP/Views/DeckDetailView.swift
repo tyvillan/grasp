@@ -84,6 +84,13 @@ struct DeckDetailView: View {
     @State private var hiddenNewIds: Set<String> = []
     /// Every card id the live view has seen, so only arrivals animate.
     @State private var seenIds: Set<String> = []
+    /// The batch of arrivals still sliding in. Left out of every count until
+    /// the whole batch is on screen (`DeckCardCounts`).
+    @State private var countHeldIds: Set<String> = []
+    /// The deck pane's width, to switch the toolbar to icons when it is tight.
+    /// Worked out from the window, not measured from this view: a pane whose
+    /// contents won't shrink would only ever measure as wide as they are.
+    @Environment(\.deckPaneWidth) private var paneWidth
     /// Title of the note the newest card came from.
     @State private var liveSourceTitle: String?
     /// Note titles for AI-made cards' "from <note>" line.
@@ -147,8 +154,17 @@ struct DeckDetailView: View {
     /// affordance rather than showing a disabled one.
     private var hasSourceNotes: Bool { cards.contains { $0.materialId != nil } }
 
-    private var draftCount: Int { cards.filter { $0.status == .draft }.count }
-    private var activeCount: Int { cards.filter { $0.status == .active }.count }
+    /// One source for every number on the page.
+    private var counts: DeckCardCounts {
+        DeckCardCounts.make(cards: cards, levels: learnLevels, held: countHeldIds)
+    }
+    /// A deck with no cards, and nothing being written into it.
+    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards && contentTab == .cards }
+    private var draftCount: Int { counts.drafts }
+    private var activeCount: Int { counts.active }
+    /// A tight pane (the window narrowed, or the deck list open beside it)
+    /// puts the toolbar's buttons in icons.
+    private var isCompact: Bool { paneWidth < 640 }
 
     /// This course's running deck-wide AI job, which the store owns so it
     /// survives this view being swapped out mid-run.
@@ -200,12 +216,8 @@ struct DeckDetailView: View {
     /// The numbers on the filter pills. Over every loaded card, so a pill
     /// says what it will show.
     private var filterCounts: [MasteryFilter: Int] {
-        let now = Date()
-        var counts: [MasteryFilter: Int] = [.all: cards.count]
-        counts[.drafts] = draftCount
-        counts[.due] = cards.filter { $0.status == .active && $0.due <= now }.count
-        counts[.understood] = cards.filter { $0.status == .active && learnLevels[$0.id] == .mastered }.count
-        return counts
+        let c = counts
+        return [.all: c.all, .drafts: c.drafts, .due: c.due, .understood: c.understood]
     }
 
     private var cardSortMenu: some View {
@@ -281,7 +293,6 @@ struct DeckDetailView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 10)
             }
-            if selectedCardIds.count > 1 { selectionActionBar }
             HStack(spacing: 0) {
                 // The list keeps a usable width and the preview gives way,
                 // down to a floor. A fixed 360pt preview took the whole pane
@@ -320,7 +331,7 @@ struct DeckDetailView: View {
             }
             switch contentTab {
             case .cards:
-                if hasLoaded && cards.isEmpty && !isGeneratingCards {
+                if showsEmptyDeck {
                     emptyDeckState
                 } else {
                     cardsTab
@@ -383,19 +394,19 @@ struct DeckDetailView: View {
             switch phase {
             case .setup:
                 TestSetupSheet(deckIds: scopeDeckIds, deckName: deckName, onResume: { id in
-                    testPhase = TestPhase.resuming(id, store: store)
+                    $testPhase.advance(to: TestPhase.resuming(id, store: store), store: store)
                 }) { attemptId, questions, aiWarning in
-                    testPhase = .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning)
+                    $testPhase.advance(to: .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning), store: store)
                 }
             case .running(let attemptId, let questions, let aiWarning, let answered):
                 TestRunView(attemptId: attemptId, deckName: deckName, questions: questions, aiWarning: aiWarning,
                         answered: answered) { graded in
                     _ = try? store.finishTest(attemptId: attemptId)
-                    testPhase = .results(attemptId: attemptId, graded: graded)
+                    $testPhase.advance(to: .results(attemptId: attemptId, graded: graded), store: store)
                 }
             case .results(let attemptId, let graded):
                 TestResultsView(deckName: deckName, attemptId: attemptId, graded: graded, deckIds: scopeDeckIds) { id, questions in
-                    testPhase = .running(attemptId: id, questions: questions, aiWarning: nil)
+                    $testPhase.advance(to: .running(attemptId: id, questions: questions, aiWarning: nil), store: store)
                 }
             }
         }
@@ -500,14 +511,16 @@ struct DeckDetailView: View {
     private var deckHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(deckName)
-                        .font(.graspDisplay(30))
-                        .tracking(-0.6)
-                        .foregroundStyle(GRASPColor.textPrimary)
-                        .lineLimit(2)
-                    compositionLine
-                }
+                // The counts that used to sit under the name live in the
+                // filter pills and the strips below; saying them again here
+                // is three places for one number.
+                Text(deckName)
+                    .font(.graspDisplay(30))
+                    .tracking(-0.6)
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
                 // In the pane header rather than the filter row below it:
                 // this picker changes what the whole pane *is*, which is
@@ -534,6 +547,7 @@ struct DeckDetailView: View {
                     HStack(spacing: 8) { viewActions; Spacer(minLength: 0) }
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .background {
                 // ⇧⌘N for New card, also while the Add menu is closed.
                 Button("New card") { isCreatingCard = true }
@@ -575,7 +589,8 @@ struct DeckDetailView: View {
     /// switch: the AI button, then Add or Edit, then ⋯.
     @ViewBuilder
     private var viewActions: some View {
-        aiButton
+        // The empty deck's own button is the one way to generate there.
+        if !showsEmptyDeck { aiButton }
         if contentTab == .cards { addMenuButton } else { editMenuButton }
         overflowMenu
     }
@@ -593,9 +608,13 @@ struct DeckDetailView: View {
                 Image(systemName: AIGlyph.symbol)
                     .font(.graspUI(size: 11, weight: .semibold))
                     .foregroundStyle(GRASPColor.accent)
-                Text(onCards ? (isGeneratingCards ? "Generating…" : "Generate questions") : "Rewrite with AI")
+                if !isCompact {
+                    Text(onCards ? (isGeneratingCards ? "Generating…" : "Generate questions") : "Rewrite with AI")
+                        .lineLimit(1).fixedSize()
+                }
             }
         }
+        .accessibilityLabel(onCards ? "Generate questions" : "Rewrite with AI")
         .buttonStyle(GRASPQuietButton())
         .disabled(onCards
                   ? (!isGeneratorAvailable || aiActivity != nil)
@@ -680,7 +699,7 @@ struct DeckDetailView: View {
 
     /// Cards view: everything that puts cards or questions into the deck.
     private var addMenuButton: some View {
-        PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting) {
+        PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting, showsTitle: !isCompact) {
             let aiBusy = aiActivity != nil
             var items: [PillMenuItem] = [
                 .action("Practice problems with AI…", ai: true,
@@ -704,7 +723,7 @@ struct DeckDetailView: View {
 
     /// Overview view: rewriting the overviews, and adding sources.
     private var editMenuButton: some View {
-        PillMenu(title: "Edit", systemImage: "pencil", isBusy: store.isImporting) {
+        PillMenu(title: "Edit", systemImage: "pencil", isBusy: store.isImporting, showsTitle: !isCompact) {
             var items: [PillMenuItem] = [
                 .action("Rewrite with AI", ai: true,
                         disabled: !isGeneratorAvailable || overviewNoteCount == 0,
@@ -750,11 +769,15 @@ struct DeckDetailView: View {
                     HStack(spacing: 7) {
                         Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
                             .font(.graspUI(size: 13))
-                        Text(tab.rawValue)
-                            .font(.graspUI(size: 14, weight: .semibold))
+                        if !isCompact {
+                            Text(tab.rawValue)
+                                .font(.graspUI(size: 14, weight: .semibold))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
                     .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, isCompact ? 12 : 18)
                     .frame(height: 32)
                     .background {
                         if selected {
@@ -766,6 +789,8 @@ struct DeckDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab.rawValue)
+                .help(tab.rawValue)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
@@ -774,47 +799,20 @@ struct DeckDetailView: View {
         .overlay(Capsule().strokeBorder(GRASPColor.hairline))
     }
 
-    /// Reads as a sentence -- "231 cards · 12 due · 40 understood" -- with
-    /// only the figure that needs attention carrying the accent.
-    private var compositionLine: some View {
-        HStack(spacing: 5) {
-            // Approved cards and drafts counted separately: "0 cards" over a
-            // list of 11 drafts waiting for review read as a contradiction.
-            if activeCount > 0 || draftCount == 0 {
-                Text("\(activeCount) card\(activeCount == 1 ? "" : "s")")
-                    .foregroundStyle(GRASPColor.textSecondary)
-            }
-            if draftCount > 0 {
-                if activeCount > 0 { Text("·").foregroundStyle(GRASPColor.textTertiary) }
-                Text("\(draftCount) draft\(draftCount == 1 ? "" : "s") to review")
-                    .foregroundStyle(GRASPColor.textSecondary)
-            }
-            if dueCount > 0 {
-                Text("·").foregroundStyle(GRASPColor.textTertiary)
-                Text("\(dueCount) due").foregroundStyle(GRASPColor.textPrimary)
-            }
-            let understood = learnLevels.values.filter { $0 == .mastered }.count
-            if understood > 0 {
-                Text("·").foregroundStyle(GRASPColor.textTertiary)
-                Text("\(understood) understood").foregroundStyle(GRASPColor.success)
-            }
-        }
-        .graspType(.meta)
-        .monospacedDigit()
-    }
-
     @ViewBuilder
     private func modeButton(
         _ title: String, _ symbol: String, prominent: Bool, action: @escaping () -> Void
     ) -> some View {
         let label = HStack(spacing: 5) {
             Image(systemName: symbol).font(.graspUI(size: 11))
-            Text(title)
+            if !isCompact { Text(title).lineLimit(1).fixedSize() }
         }
         if prominent {
             Button(action: action) { label }.buttonStyle(GRASPProminentButton())
+                .accessibilityLabel(title).help(isCompact ? title : "")
         } else {
             Button(action: action) { label }.buttonStyle(GRASPQuietButton())
+                .accessibilityLabel(title).help(isCompact ? title : "")
         }
     }
 
@@ -924,7 +922,7 @@ struct DeckDetailView: View {
             parts.append("\(duplicateGroups.count) possible duplicate\(duplicateGroups.count == 1 ? "" : "s")")
         }
         return HStack(spacing: 10) {
-            Image(systemName: "circle.dashed")
+            Image(systemName: "square.stack")
                 .font(.graspUI(size: 12))
                 .foregroundStyle(GRASPColor.textTertiary)
             Text(parts.joined(separator: " · "))
@@ -960,13 +958,14 @@ struct DeckDetailView: View {
             Spacer(minLength: 0)
             VStack(spacing: 14) {
                 if hasFiles {
+                    // The one filled button on an empty deck: Study is
+                    // disabled here, so this is the page's yellow.
                     Button {
                         generateFromCourse()
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: AIGlyph.symbol)
                                 .font(.graspUI(size: 17, weight: .semibold))
-                                .foregroundStyle(GRASPColor.accent)
                             Text("Generate questions from your notes")
                                 .font(.graspUI(size: 16, weight: .semibold))
                         }
@@ -974,7 +973,7 @@ struct DeckDetailView: View {
                         .padding(.vertical, 6)
                         .frame(minHeight: 48)
                     }
-                    .buttonStyle(GRASPQuietButton())
+                    .buttonStyle(GRASPProminentButton())
                     .disabled(!canGenerate)
                     Text(isGeneratorAvailable
                          ? "Uses the files in this course"
@@ -1091,7 +1090,7 @@ struct DeckDetailView: View {
     /// many so far, and Stop. Replaces the drafts strip until the run ends,
     /// when the drafts strip returns with the final count.
     private var generatingStrip: some View {
-        let written = recentAIIds.count
+        let written = DeckCardCounts.newCount(recent: recentAIIds, held: countHeldIds)
         return HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
@@ -1103,7 +1102,7 @@ struct DeckDetailView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            Text("\(written) card\(written == 1 ? "" : "s")")
+            Text("\(written) new")
                 .graspType(.meta)
                 .monospacedDigit()
                 .contentTransition(.numericText(value: Double(written)))
@@ -1130,6 +1129,7 @@ struct DeckDetailView: View {
         guard isGeneratingCards else {
             // Run over: anything still waiting appears now.
             withAnimation(nil) { hiddenNewIds.removeAll() }
+            countHeldIds.removeAll()
             return
         }
         seenIds = Set(cards.map(\.id))
@@ -1149,6 +1149,7 @@ struct DeckDetailView: View {
                 liveSourceTitle = title.title
             }
             hiddenNewIds.formUnion(ordered.map(\.id))
+            countHeldIds.formUnion(ordered.map(\.id))
             recentAIIds = ordered.map(\.id) + recentAIIds
             cards = fresh
             loadSourceTitles()
@@ -1161,7 +1162,12 @@ struct DeckDetailView: View {
                     try? await Task.sleep(for: .seconds(step))
                 }
             }
+            // The whole batch is on screen: the counts move together -- the
+            // strip, the filter pills and the deck list.
+            countHeldIds.subtract(ordered.map(\.id))
+            store.refreshDeckCounts()
         }
+        countHeldIds.removeAll()
     }
 
     /// Opens the first draft in the preview; approving it there moves on to
@@ -1240,14 +1246,24 @@ struct DeckDetailView: View {
                     },
                     onRefine: { refineCard(card) }
                 )
-                // GRASP draws the selection itself -- a soft yellow wash --
-                // because the table's own highlight is the system accent
-                // (blue) and ignores `.tint`. Selection behaviour (shift- and
-                // cmd-click, the context menu's selection) is still the
-                // table's; only the drawing changes.
+                // GRASP draws the selection itself -- a raised neutral
+                // surface with a yellow check -- because the table's own
+                // highlight is the system accent (blue) and ignores
+                // `.tint`. Selection behaviour (shift- and cmd-click, the
+                // context menu's selection) is still the table's; only the
+                // drawing changes.
                 .listRowBackground(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(selectedCardIds.contains(card.id) ? GRASPColor.accentSoft : .clear)
+                        .fill(selectedCardIds.contains(card.id) ? GRASPColor.surfaceRaised : .clear)
+                        .overlay(alignment: .bottomTrailing) {
+                            if selectedCardIds.contains(card.id) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.graspUI(size: 13))
+                                    .foregroundStyle(GRASPColor.accent)
+                                    .padding(8)
+                                    .transition(.opacity)
+                            }
+                        }
                         .padding(.horizontal, 4)
                 )
                 .background(TableHighlightRemover())
@@ -1256,6 +1272,8 @@ struct DeckDetailView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+        // The last rows scroll clear of the floating bar.
+        .contentMargins(.bottom, selectedCardIds.isEmpty ? 0 : 76, for: .scrollContent)
         .overlay(alignment: .bottom) { floatingApproveBar }
         .contextMenu(forSelectionType: Card.ID.self) { ids in
             if ids.isEmpty {
@@ -1347,73 +1365,69 @@ struct DeckDetailView: View {
         visibleCards.filter { selectedCardIds.contains($0.id) && $0.status == .draft }.map(\.id)
     }
 
-    /// Floats over the foot of the list while a selection holds drafts:
-    /// shift-click a range, then approve it in one go.
+    /// Floats over the foot of the list while any rows are selected: the
+    /// batch actions in one place -- Approve (when drafts are among them),
+    /// Suspend, Move to…, Delete -- drawn in the app's own controls.
     @ViewBuilder private var floatingApproveBar: some View {
+        let selected = orderedSelection
         let drafts = selectedDraftIds
-        if !drafts.isEmpty {
-            HStack(spacing: 12) {
-                Text("\(selectedCardIds.count) selected")
+        if !selected.isEmpty {
+            HStack(spacing: 8) {
+                Text("\(selected.count) selected")
                     .graspType(.meta)
+                    .monospacedDigit()
                     .foregroundStyle(GRASPColor.textSecondary)
-                Button("Approve \(drafts.count) selected") {
-                    try? store.bulkSetStatus(drafts, status: .active)
+                    .padding(.trailing, 4)
+                if !drafts.isEmpty {
+                    Button("Approve \(drafts.count)") {
+                        try? store.bulkSetStatus(drafts, status: .active)
+                        selectedCardIds.removeAll()
+                        load()
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .help("Approve the \(drafts.count) selected draft\(drafts.count == 1 ? "" : "s") (⌘↩)")
+                }
+                Button("Suspend") {
+                    try? store.bulkSetStatus(selected, status: .suspended)
                     selectedCardIds.removeAll()
                     load()
                 }
                 .buttonStyle(GRASPQuietButton())
-                .keyboardShortcut(.return, modifiers: [.command])
+                if !siblingDecks.isEmpty {
+                    PillMenu(title: "Move to…") {
+                        siblingDecks.map { deck in
+                            PillMenuItem.action(deck.name) {
+                                try? store.bulkMoveCards(selected, toDeck: deck.id)
+                                selectedCardIds.removeAll()
+                                load()
+                            }
+                        }
+                    }
+                    .fixedSize()
+                }
+                Button("Delete", role: .destructive) { pendingBulkDelete = selected }
+                    .buttonStyle(GRASPQuietButton())
+                Button {
+                    selectedCardIds.removeAll()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the selection")
+                .accessibilityLabel("Clear selection")
             }
             .padding(.leading, 16)
             .padding(.trailing, 8)
             .padding(.vertical, 8)
             .background(GRASPColor.surfaceRaised, in: Capsule())
             .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
             .padding(.bottom, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
-        }
-    }
-
-    private var selectionActionBar: some View {
-        HStack(spacing: 10) {
-            Text("\(selectedCardIds.count) selected")
-                .graspType(.body)
-                .foregroundStyle(GRASPColor.textSecondary)
-            Spacer(minLength: 8)
-            Button("Approve") {
-                try? store.bulkSetStatus(orderedSelection, status: .active)
-                load()
-            }
-            .buttonStyle(.link)
-            Button("Suspend") {
-                try? store.bulkSetStatus(orderedSelection, status: .suspended)
-                load()
-            }
-            .buttonStyle(.link)
-            if !siblingDecks.isEmpty {
-                Menu("Move to…") {
-                    ForEach(siblingDecks) { deck in
-                        Button(deck.name) {
-                            try? store.bulkMoveCards(orderedSelection, toDeck: deck.id)
-                            selectedCardIds.removeAll()
-                            load()
-                        }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
-            Button("Delete") { pendingBulkDelete = orderedSelection }
-                .buttonStyle(.link)
-                .foregroundStyle(.red)
-            Button("Deselect All") { selectedCardIds.removeAll() }
-                .buttonStyle(.link)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(GRASPColor.inset)
-        .background(alignment: .bottom) {
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
         }
     }
 
@@ -1426,6 +1440,7 @@ struct DeckDetailView: View {
         masteryFilter = .all
         recentAIIds = []
         hiddenNewIds = []
+        countHeldIds = []
         switch scope {
         case .deck(let id):
             let deck = (try? store.deck(id)) ?? nil
@@ -1900,6 +1915,8 @@ private struct FilterPills: View {
                     Text("\(filter.rawValue) \(counts[filter] ?? 0)")
                         .font(.graspUI(size: 12.5, weight: selected ? .semibold : .medium))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()
                         .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textTertiary)
                         .padding(.horizontal, 12)
                         .frame(height: 26)
@@ -2227,7 +2244,8 @@ private struct CardRow: View {
                     .labelStyle(.iconOnly).foregroundStyle(GRASPColor.textTertiary)
             }
             .buttonStyle(.plain)
-            .help("This definition was rewritten by the context checker -- click to compare with the original")
+            .help("AI refined: this definition was checked against its note and rewritten. Click to compare with the original.")
+            .accessibilityLabel("AI refined definition. Compare with the original.")
             .popover(isPresented: $showingContextRefinementDetail, arrowEdge: .bottom) {
                 contextRefinementDetail
             }

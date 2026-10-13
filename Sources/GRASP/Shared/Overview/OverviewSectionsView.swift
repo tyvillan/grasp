@@ -107,12 +107,12 @@ struct OverviewSectionsView: View {
                 if let kicker = overview.kicker {
                     Text(kicker)
                         .graspType(.eyebrow)
-                        .foregroundStyle(GRASPColor.accent)
+                        .foregroundStyle(GRASPColor.textTertiary)
                 }
                 if overview.isStale {
                     PreviewChip(
-                        text: "Out of date", tint: GRASPColor.accent,
-                        tintSoft: GRASPColor.accentSoft, icon: "clock"
+                        text: "Out of date", tint: GRASPColor.textTertiary,
+                        tintSoft: GRASPColor.inset, icon: "clock"
                     )
                 }
                 Spacer(minLength: 8)

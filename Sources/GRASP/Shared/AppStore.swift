@@ -40,6 +40,9 @@ final class AppStore {
     /// that proxy misses exactly the mutations this batch of features
     /// introduces.
     private(set) var revision = 0
+    /// Full-size study sheets (flashcards, Learn, Test) currently open. The
+    /// Mac window dims the page behind them while this is above zero.
+    var presentedStudySheets = 0
 
 
     /// Parsed and laid-out diagrams, keyed on material id plus the
@@ -432,6 +435,38 @@ final class AppStore {
         )
     }
 
+    /// Cards and due cards per deck, in one grouped query. Suspended cards
+    /// are not counted; drafts are.
+    nonisolated static func deckCounts(for decks: [Deck], _ db: Database) throws -> [String: (cardCount: Int, dueCount: Int)] {
+        var counts = Dictionary(uniqueKeysWithValues: decks.map { ($0.id, (0, 0)) })
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT deckCard.deckId AS deckId,
+                   COUNT(*) AS cards,
+                   SUM(CASE WHEN card.status = ? AND card.due <= ? THEN 1 ELSE 0 END) AS due
+            FROM deckCard
+            JOIN card ON card.id = deckCard.cardId
+            WHERE card.deletedAt IS NULL AND card.status != ?
+            GROUP BY deckCard.deckId
+            """, arguments: [CardStatus.active.rawValue, Date(), CardStatus.suspended.rawValue])
+        for row in rows {
+            let deckId: String = row["deckId"]
+            guard counts[deckId] != nil else { continue }
+            counts[deckId] = (row["cards"], row["due"])
+        }
+        return counts
+    }
+
+    /// Re-reads only the per-deck card counts. A generation run calls this as
+    /// each batch lands, so the deck list keeps pace without the full
+    /// `reload()` (which also re-reads courses and wakes sync).
+    func refreshDeckCounts() {
+        let fresh = try? database.queue.read { db -> [String: (cardCount: Int, dueCount: Int)] in
+            let decks = try Deck.filter(Column("deletedAt") == nil).fetchAll(db)
+            return try Self.deckCounts(for: decks, db)
+        }
+        if let fresh { deckCounts = fresh }
+    }
+
     func reload() {
         do {
             try database.queue.read { db in
@@ -455,22 +490,7 @@ final class AppStore {
                 // One grouped query. This runs after every card graded or
                 // edited, and it used to be two queries per deck -- over a
                 // hundred for this vault -- loading full card rows each time.
-                var counts = Dictionary(uniqueKeysWithValues: decks.map { ($0.id, (0, 0)) })
-                let rows = try Row.fetchAll(db, sql: """
-                    SELECT deckCard.deckId AS deckId,
-                           COUNT(*) AS cards,
-                           SUM(CASE WHEN card.status = ? AND card.due <= ? THEN 1 ELSE 0 END) AS due
-                    FROM deckCard
-                    JOIN card ON card.id = deckCard.cardId
-                    WHERE card.deletedAt IS NULL AND card.status != ?
-                    GROUP BY deckCard.deckId
-                    """, arguments: [CardStatus.active.rawValue, Date(), CardStatus.suspended.rawValue])
-                for row in rows {
-                    let deckId: String = row["deckId"]
-                    guard counts[deckId] != nil else { continue }
-                    counts[deckId] = (row["cards"], row["due"])
-                }
-                deckCounts = counts
+                deckCounts = try Self.deckCounts(for: decks, db)
             }
         } catch {
             importError = "Failed to read database: \(error)"

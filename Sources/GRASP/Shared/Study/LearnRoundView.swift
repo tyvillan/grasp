@@ -58,15 +58,15 @@ struct LearnRoundView: View {
             }
         }
         .background(GRASPColor.canvas)
-        .macWindowFrame(minWidth: 620, minHeight: 540)
+        .adaptiveStudySheet()
+        .dimsWindowBehind()
         .task { startRound() }
     }
 
-    /// Two progress readings sit in the chrome, and they answer different
-    /// questions -- "how far through this round" (immediate, segmented by
-    /// question) and "how much of the deck is understood" (the long arc).
-    /// They're deliberately drawn at different weights and tints so they
-    /// aren't mistaken for the same measurement stacked twice.
+    /// One progress bar: how much of the deck is understood (the long
+    /// arc). Where this round is -- "Question 2 of 7" -- is the text beside
+    /// the title; a second, segmented bar for it read as the same thing
+    /// drawn twice.
     ///
     /// The main pass and the review pass each have their own fixed total
     /// and their own answered count, so a card missed during the main pass
@@ -119,15 +119,10 @@ struct LearnRoundView: View {
                             .foregroundStyle(GRASPColor.accent)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ProgressBar(
-                        value: isReviewingMisses ? reviewAnswered : mainAnswered,
-                        total: isReviewingMisses ? reviewTotal : roundTotal,
-                        checkpoints: isReviewingMisses ? reviewTotal : roundTotal, height: 7
-                    )
                     HStack(spacing: 8) {
                         ProgressBar(
                             value: deckMastery.mastered, total: deckMastery.total,
-                            tint: GRASPColor.success, height: 3
+                            tint: GRASPColor.success, height: 5
                         )
                         Text("\(deckMastery.mastered)/\(deckMastery.total) understood")
                             .graspType(.meta)
@@ -406,6 +401,10 @@ struct LearnRoundView: View {
 
     private func trueFalseBody(_ question: LearnEngine.RoundQuestion) -> some View {
         VStack(spacing: 18) {
+            Text(TrueFalseLeadIn.text(forPrompt: question.prompt))
+                .graspType(.eyebrow)
+                .textCase(.uppercase)
+                .foregroundStyle(GRASPColor.textTertiary)
             Text(question.statement ?? "")
                 .graspType(.studyAnswer)
                 .foregroundStyle(GRASPColor.textSecondary)

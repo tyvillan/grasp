@@ -123,7 +123,8 @@ struct HomeView: View {
     private var hero: some View {
         Group {
             if let exam = nextExam {
-                CountdownHero(item: exam, days: store.daysUntil(exam.event))
+                CountdownHero(item: exam, days: store.daysUntil(exam.event),
+                              standing: standings[exam.event.id])
             } else {
                 DueHero(totalDue: totalDue)
             }
@@ -196,9 +197,8 @@ struct HomeView: View {
                 }
             }
 
-            Spacer(minLength: GRASPSpace.xl)
-
             if !plan.steps.isEmpty {
+                // Right under the last step, not pinned to the card's foot.
                 Button {
                     if let next = plan.steps.first(where: { !checked.contains($0.id) }) { run(next) }
                 } label: {
@@ -209,9 +209,11 @@ struct HomeView: View {
                 .buttonStyle(GRASPProminentButton())
                 .disabled(allDone)
                 .overlay { CelebrationBurst(trigger: allDone) }
+                .padding(.top, GRASPSpace.l)
             }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .graspCard(padding: 28)
     }
 

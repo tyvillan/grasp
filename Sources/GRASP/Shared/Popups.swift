@@ -335,13 +335,16 @@ struct GRASPSegmented<Value: Hashable>: View {
                 } label: {
                     Text(option.label)
                         .font(.graspUI(size: 12.5, weight: isOn ? .semibold : .medium))
-                        .foregroundStyle(isOn ? GRASPColor.ink : GRASPColor.textSecondary)
+                        .foregroundStyle(isOn ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                         .lineLimit(1)
                         .padding(.horizontal, 12)
                         .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 26)
                         .background {
+                            // Cream, like the Cards / Overview switch: yellow
+                            // is for Study and the sparkle.
                             if isOn {
-                                Capsule().fill(GRASPColor.brand)
+                                Capsule().fill(GRASPColor.surfaceRaised)
+                                    .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
                                     .matchedGeometryEffect(id: "pill", in: namespace)
                             }
                         }
@@ -352,7 +355,7 @@ struct GRASPSegmented<Value: Hashable>: View {
             }
         }
         .padding(2)
-        .background(GRASPColor.surfaceRaised, in: Capsule())
+        .background(GRASPColor.surface, in: Capsule())
         .overlay(Capsule().strokeBorder(GRASPColor.hairline, lineWidth: 1))
         .fixedSize(horizontal: !fillsWidth, vertical: true)
     }

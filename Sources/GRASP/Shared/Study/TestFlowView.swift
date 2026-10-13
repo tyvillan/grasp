@@ -33,6 +33,31 @@ extension TestPhase {
     }
 }
 
+extension Binding where Value == TestPhase? {
+    /// Moves a Test sheet on to its next phase. On the Mac the sheet is sized
+    /// when it opens (`presentationSizing(.page)`), so swapping the content of
+    /// the open Setup sheet for the question screen left the window at its
+    /// 680-point floor with the content laid out for the page-sized ideal --
+    /// the first question came up shifted and clipped. Closing the sheet and
+    /// opening the next phase as a fresh one gives it its real size, the same
+    /// one Learn opens at.
+    @MainActor
+    func advance(to phase: TestPhase?, store: AppStore) {
+        #if os(macOS)
+        // The dimmed backdrop is held through the gap so it doesn't flash.
+        store.presentedStudySheets += 1
+        wrappedValue = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            wrappedValue = phase
+            store.presentedStudySheets = Swift.max(0, store.presentedStudySheets - 1)
+        }
+        #else
+        wrappedValue = phase
+        #endif
+    }
+}
+
 /// One answered question, carrying enough state for the results screen to
 /// render it and, for a written question, let the user override a wrong
 /// fuzzy-match verdict -- `LearnEngine.RoundQuestion` alone doesn't carry
@@ -332,6 +357,7 @@ struct TestRunView: View {
         }
         .background(GRASPColor.canvas)
         .adaptiveStudySheet()
+        .dimsWindowBehind()
         .onAppear {
             // Picking an unfinished test up where it was left.
             guard !resumed else { return }
@@ -513,6 +539,10 @@ struct TestRunView: View {
             choiceList(question)
         case .trueFalse:
             VStack(spacing: 18) {
+                Text(TrueFalseLeadIn.text(forPrompt: question.prompt))
+                    .graspType(.eyebrow)
+                    .textCase(.uppercase)
+                    .foregroundStyle(GRASPColor.textTertiary)
                 Text(question.statement ?? "")
                     .graspType(.studyAnswer)
                     .foregroundStyle(GRASPColor.textSecondary)
@@ -820,10 +850,31 @@ struct TestResultsView: View {
                             .foregroundStyle(GRASPColor.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(item.question.correctAnswer)
-                        .graspType(.body)
-                        .foregroundStyle(GRASPColor.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if item.question.type == .trueFalse, let statement = item.question.statement {
+                        Text("Statement shown: \(statement)")
+                            .graspType(.meta)
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if item.isCorrect {
+                        Text(item.question.correctAnswer)
+                            .graspType(.body)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // A missed row always says which answer was right.
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Correct answer")
+                                .graspType(.eyebrow)
+                                .textCase(.uppercase)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                            Text(item.question.correctAnswer)
+                                .graspType(.body)
+                                .foregroundStyle(GRASPColor.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 2)
+                    }
 
                     // Exact/fuzzy text matching is a poor judge of a long or
                     // loaded free-response answer -- offered only for
@@ -864,6 +915,7 @@ struct TestResultsView: View {
         }
         .background(GRASPColor.canvas)
         .adaptiveStudySheet(minWidth: 560, minHeight: 520)
+        .dimsWindowBehind()
     }
 
     /// Flips this one item locally (so the score/progress bar above update

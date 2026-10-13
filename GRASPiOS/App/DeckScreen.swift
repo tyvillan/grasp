@@ -34,6 +34,7 @@ struct DeckScreen: View {
     @State private var courseFileCount = 0
     @State private var notice: String?
     @State private var generationFinished = 0
+    @State private var confirmingApproveAll = false
 
     private enum CardFilter: String, CaseIterable, Identifiable {
         case all = "All", drafts = "Drafts", due = "Due", understood = "Understood"
@@ -53,8 +54,11 @@ struct DeckScreen: View {
 
     private var deckIds: [String] { store.deckIds(in: route.scope) }
 
-    private var activeCount: Int { cards.filter { $0.status == .active }.count }
-    private var draftCount: Int { cards.filter { $0.status == .draft }.count }
+    /// One source for every number on the screen, the same one the Mac's
+    /// deck page reads.
+    private var counts: DeckCardCounts { DeckCardCounts.make(cards: cards, levels: learnLevels) }
+    private var activeCount: Int { counts.active }
+    private var draftCount: Int { counts.drafts }
 
     private func matches(_ card: Card, _ filter: CardFilter) -> Bool {
         switch filter {
@@ -65,7 +69,15 @@ struct DeckScreen: View {
         }
     }
 
-    private func count(_ filter: CardFilter) -> Int { cards.filter { matches($0, filter) }.count }
+    private func count(_ filter: CardFilter) -> Int {
+        let c = counts
+        switch filter {
+        case .all: return c.all
+        case .drafts: return c.drafts
+        case .due: return c.due
+        case .understood: return c.understood
+        }
+    }
 
     private var shownCards: [Card] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -103,7 +115,7 @@ struct DeckScreen: View {
             } else {
             Section {
                 studyButtons
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                 Picker("", selection: $tab) {
                     ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -119,6 +131,7 @@ struct DeckScreen: View {
             }
         }
         .environment(\.editMode, $editMode)
+        .listSectionSpacing(6)
         .overlay(alignment: .bottom) { floatingApproveBar }
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
@@ -171,6 +184,17 @@ struct DeckScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+        }
+        .sheet(isPresented: $confirmingApproveAll) {
+            ConfirmationSheet(
+                icon: "checkmark.circle", title: "Approve \(draftCount) Draft\(draftCount == 1 ? "" : "s")?",
+                message: "They become cards you can study. Drafts the AI wrote are worth a look first -- "
+                    + "Review drafts opens them one at a time.",
+                confirmTitle: "Approve All", isDestructive: false
+            ) {
+                try? store.approveAllDrafts(inDecks: deckIds)
+                load()
+            }
         }
         .sheet(isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
             ResultSheet(icon: AIGlyph.symbol, title: "AI", leadText: aiMessage)
@@ -297,7 +321,7 @@ struct DeckScreen: View {
                         }
                     }
                 }
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
             }
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -305,15 +329,12 @@ struct DeckScreen: View {
         if draftCount > 0, query.isEmpty, !isGeneratingCards {
             Section {
                 HStack {
-                    Label("\(draftCount) awaiting review", systemImage: "circle.dashed")
+                    Label("\(draftCount) awaiting review", systemImage: "square.stack")
                         .foregroundStyle(GRASPColor.accent)
                     Spacer()
                     Button("Review drafts") { withAnimation(Motion.snappy) { filter = .drafts } }
                         .font(.graspSubheadline.weight(.semibold))
-                    Button("Approve All") {
-                        try? store.approveAllDrafts(inDecks: deckIds)
-                        load()
-                    }
+                    Button("Approve All") { confirmingApproveAll = true }
                     .font(.graspSubheadline.weight(.semibold))
                 }
             }
@@ -449,6 +470,7 @@ struct DeckScreen: View {
                 cards = fresh
                 loadSourceTitles()
             }
+            store.refreshDeckCounts()
         }
     }
 
@@ -465,7 +487,7 @@ struct DeckScreen: View {
                 .foregroundStyle(GRASPColor.textPrimary)
                 .lineLimit(1)
             Spacer(minLength: 6)
-            Text("\(recentAIIds.count) card\(recentAIIds.count == 1 ? "" : "s")")
+            Text("\(recentAIIds.count) new")
                 .graspType(.meta)
                 .monospacedDigit()
                 .foregroundStyle(GRASPColor.textSecondary)

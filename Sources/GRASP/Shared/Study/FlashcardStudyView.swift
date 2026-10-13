@@ -65,6 +65,7 @@ struct FlashcardStudyView: View {
         }
         .background(GRASPColor.canvas)
         .macWindowFrame(minWidth: 620, minHeight: 520)
+        .dimsWindowBehind()
         .task {
             queue = (try? store.dueCards(inDecks: deckIds)) ?? []
             isFocused = true
@@ -235,11 +236,18 @@ struct FlashcardStudyView: View {
                                 .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                         }
                     }
-                    .foregroundStyle(GRASPColor.textSecondary)
+                    .foregroundStyle(GRASPColor.textPrimary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 38)
+                    .frame(height: 46)
+                    .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Reveal answer")
             }
         }
         .padding(.horizontal, 24)

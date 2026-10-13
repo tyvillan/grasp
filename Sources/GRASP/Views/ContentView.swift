@@ -42,6 +42,23 @@ struct ContentView: View {
     @AppStorage("sidebarCollapsed") private var isSidebarCollapsed = false
     /// The study guide open from the Study guides page, if any.
     @State private var studyGuideTarget: StudyGuideHubTarget?
+    /// The window's width. Below `narrowBreakpoint` the deck list gives its
+    /// column back to the deck, and the sidebar steps aside for it when
+    /// asked for.
+    @State private var windowWidth: CGFloat = 1280
+    @State private var narrowShowsDeckList = false
+    private static let narrowBreakpoint: CGFloat = 1000
+    private var isNarrow: Bool { windowWidth < Self.narrowBreakpoint }
+    /// What is left for the deck once the sidebar and deck list have theirs.
+    private func deckPaneWidth(listShown: Bool) -> CGFloat {
+        windowWidth - (showsSidebar ? Self.sidebarWidth + 1 : 0) - (listShown ? 261 : 0)
+    }
+    private var showsDeckList: Bool { isNarrow ? narrowShowsDeckList : !isDeckListCollapsed }
+    /// With the deck list open in a narrow window the sidebar is what gives
+    /// way, so the deck keeps room to breathe.
+    private var showsSidebar: Bool {
+        !isSidebarCollapsed && !(isNarrow && narrowShowsDeckList && activeCourseId != nil)
+    }
 
     // New Deck and Add Files live next to what they act on (DeckListView's
     // header, DeckDetailView's); `CourseEmptyStateView` carries its own
@@ -61,12 +78,12 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(sidebarWidth: Self.sidebarWidth, showsSidebar: !isSidebarCollapsed,
+            TopBar(sidebarWidth: Self.sidebarWidth, showsSidebar: showsSidebar,
                    onHome: { selectedCourseId = Self.homeRoute }) {
                 topBarActions
             }
             HStack(spacing: 0) {
-                if !isSidebarCollapsed {
+                if showsSidebar {
                     SidebarView(selectedCourseId: $selectedCourseId)
                         .frame(width: Self.sidebarWidth)
                         .transition(.move(edge: .leading))
@@ -76,6 +93,24 @@ struct ContentView: View {
             }
         }
         .background(GRASPColor.canvas)
+        // The window's own width, read from the window: a layout that
+        // measured itself would only ever read as wide as its contents want
+        // to be.
+        .background(WindowWidthReader { windowWidth = $0 })
+        // Picking a deck in a narrow window puts the list away again.
+        .onChange(of: selectedDeckId) { _, _ in
+            if isNarrow, narrowShowsDeckList {
+                withAnimation(Motion.snappy) { narrowShowsDeckList = false }
+            }
+        }
+        // The system's sheet scrim leaves the page readable around a study
+        // sheet; this takes it down to a shadow.
+        .overlay {
+            Color.black
+                .opacity(store.presentedStudySheets > 0 ? 0.72 : 0)
+                .allowsHitTesting(false)
+                .animation(Motion.fade, value: store.presentedStudySheets > 0)
+        }
         .ignoresSafeArea(.container, edges: .top)
         .toolbar(.hidden, for: .windowToolbar)
         .tint(GRASPColor.accent)
@@ -177,7 +212,7 @@ struct ContentView: View {
                 // the eye lands on the content pane rather than
                 // treating all three as equal columns.
                 HStack(spacing: 0) {
-                    if !isDeckListCollapsed {
+                    if showsDeckList {
                         DeckListView(
                             courseId: courseId, selectedDeckId: $selectedDeckId,
                             onNewDeck: { showingNewDeck = true }
@@ -210,6 +245,7 @@ struct ContentView: View {
                 // placeholder's own width, the row shrank to the middle
                 // and left grey bars either side.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .environment(\.deckPaneWidth, deckPaneWidth(listShown: showsDeckList))
             } else if let courseId = activeCourseId {
                 // A course with no decks at all: one clean empty state
                 // spanning the full width, not a narrow "No decks yet"
@@ -256,13 +292,23 @@ struct ContentView: View {
     private var topBarActions: some View {
         if activeCourseId != nil {
             TopBarButton(systemImage: "sidebar.squares.leading",
-                         help: isDeckListCollapsed ? "Show deck list" : "Hide deck list") {
-                withAnimation(Motion.snappy) { isDeckListCollapsed.toggle() }
+                         help: showsDeckList ? "Hide deck list" : "Show deck list") {
+                withAnimation(Motion.snappy) {
+                    if isNarrow { narrowShowsDeckList.toggle() } else { isDeckListCollapsed.toggle() }
+                }
             }
         }
         TopBarButton(systemImage: "sidebar.left",
-                     help: isSidebarCollapsed ? "Show sidebar" : "Hide sidebar") {
-            withAnimation(Motion.snappy) { isSidebarCollapsed.toggle() }
+                     help: showsSidebar ? "Hide sidebar" : "Show sidebar") {
+            withAnimation(Motion.snappy) {
+                // Stepped aside for the deck list: bringing the sidebar back
+                // puts the deck list away.
+                if isNarrow, narrowShowsDeckList, !isSidebarCollapsed {
+                    narrowShowsDeckList = false
+                } else {
+                    isSidebarCollapsed.toggle()
+                }
+            }
         }
         .keyboardShortcut("s", modifiers: [.command, .control])
         TopBarButton(systemImage: "magnifyingglass", help: "Search") { showingSearch = true }
@@ -542,4 +588,49 @@ struct CoursePickRow: View {
 #Preview {
     ContentView()
         .environment(AppStore(profile: .preview))
+}
+
+extension EnvironmentValues {
+    /// The width the deck page has to work with; below about 640 it puts its
+    /// toolbar in icons.
+    @Entry var deckPaneWidth: CGFloat = 1000
+}
+
+/// Reports the hosting window's width, and again whenever it is resized.
+private struct WindowWidthReader: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ReaderView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? ReaderView)?.onChange = onChange
+    }
+
+    private final class ReaderView: NSView {
+        var onChange: ((CGFloat) -> Void)?
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            guard let window else { return }
+            report(window)
+            observer = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: window, queue: .main
+            ) { [weak self, weak window] _ in
+                guard let window else { return }
+                MainActor.assumeIsolated { self?.report(window) }
+            }
+        }
+
+        private func report(_ window: NSWindow) {
+            let width = window.frame.width
+            DispatchQueue.main.async { [weak self] in self?.onChange?(width) }
+        }
+
+    }
 }

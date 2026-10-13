@@ -24,6 +24,8 @@ extension CalendarEvent {
 struct CountdownHero: View {
     let item: AppStore.UpcomingEvent
     let days: Int
+    /// Where the student stands for this exam, when its decks are known.
+    var standing: ExamPlan.Standing? = nil
     var numeralSize: CGFloat = 190
     @State private var shown = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,6 +60,11 @@ struct CountdownHero: View {
 
             Spacer(minLength: GRASPSpace.xl)
 
+            if let standing, standing.activeCards > 0 {
+                readiness(standing)
+                    .padding(.bottom, GRASPSpace.l)
+            }
+
             Text(detail)
                 .graspType(.meta)
                 .foregroundStyle(GRASPColor.textTertiary)
@@ -69,6 +76,52 @@ struct CountdownHero: View {
             withAnimation(Motion.settle.delay(0.12)) { shown = days }
         }
         .onChange(of: days) { withAnimation(Motion.settle) { shown = days } }
+    }
+
+    /// Three figures and a sentence on where this exam stands: what is due,
+    /// what keeps getting missed, and when the last practice test was. All
+    /// of it is already read for the lower exam cards.
+    private func readiness(_ standing: ExamPlan.Standing) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+            HStack(alignment: .top, spacing: GRASPSpace.xl) {
+                figure("\(standing.dueCards)", "due")
+                figure("\(standing.weakCards)", standing.weakCards == 1 ? "weak spot" : "weak spots")
+                figure("\(standing.activeCards)", "cards in play")
+                Spacer(minLength: 0)
+            }
+            Text(readinessNote(standing))
+                .graspType(.body)
+                .foregroundStyle(GRASPColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func figure(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.graspDisplay(28))
+                .tracking(-0.4)
+                .monospacedDigit()
+                .foregroundStyle(GRASPColor.textPrimary)
+            Text(label)
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+        }
+    }
+
+    private func readinessNote(_ standing: ExamPlan.Standing) -> String {
+        let tested: String
+        switch standing.daysSinceTest {
+        case nil: tested = "You haven't taken a practice test on this yet."
+        case 0?: tested = "You took a practice test today."
+        case 1?: tested = "Your last practice test was yesterday."
+        case let n?: tested = "Your last practice test was \(n) days ago."
+        }
+        if standing.weakCards > 0 {
+            return "Drill the \(standing.weakCards) weak spot\(standing.weakCards == 1 ? "" : "s") first. " + tested
+        }
+        return standing.dueCards > 0 ? "Clear what's due, then test yourself. " + tested : tested
     }
 
     private var detail: String {
@@ -222,7 +275,7 @@ struct CelebrationBurst: View {
     }
 }
 
-/// The streak: a yellow pill that pulses once when it appears and rolls
+/// The streak: an outlined pill that pulses once when it appears and rolls
 /// its number when it grows.
 struct StreakPill: View {
     let days: Int
@@ -238,10 +291,11 @@ struct StreakPill: View {
         }
         .font(.graspUI(size: 13, weight: .semibold))
         .monospacedDigit()
-        .foregroundStyle(GRASPColor.ink)
+        .foregroundStyle(GRASPColor.textPrimary)
         .padding(.horizontal, 14)
         .frame(height: 30)
-        .background(Capsule().fill(GRASPColor.brand))
+        .background(Capsule().fill(GRASPColor.surface))
+        .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1))
         .scaleEffect(pulse ? 1.08 : 1)
         .help(studiedToday ? "You've studied today" : "Study today to keep your streak")
         .onAppear {

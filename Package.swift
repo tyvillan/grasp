@@ -22,6 +22,13 @@ let appTargets: [Target] = [
         exclude: ["Shared/Fonts"],
         swiftSettings: [.defaultIsolation(MainActor.self)]
     ),
+    // The app's own pure logic -- what the deck page counts and shows.
+    .testTarget(
+        name: "GRASPTests",
+        dependencies: ["GRASP", "GRASPCore"],
+        path: "Tests/GRASPTests",
+        swiftSettings: [.defaultIsolation(MainActor.self)]
+    ),
 ]
 #else
 let appTargets: [Target] = []
