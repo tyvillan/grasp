@@ -32,6 +32,8 @@ struct DeckScreen: View {
     @State private var seenIds: Set<String> = []
     @State private var liveSourceTitle: String?
     @State private var sourceTitles: [String: String] = [:]
+    /// Flags on parser-made drafts, shown under the card. Never acted on.
+    @State private var reviewNotes: [String: String] = [:]
     @State private var hasLoaded = false
     @State private var courseFileCount = 0
     @State private var notice: String?
@@ -445,7 +447,8 @@ struct DeckScreen: View {
             ForEach(shownCards) { card in
                 Button { editing = card } label: {
                     CardRowView(card: card, mastery: learnLevels[card.id] ?? .new,
-                                sourceTitle: card.materialId.flatMap { sourceTitles[$0] })
+                                sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
+                                reviewNote: reviewNotes[card.id])
                 }
                     .buttonStyle(.plain)
                     .tag(card.id)
@@ -497,6 +500,7 @@ struct DeckScreen: View {
     private func load() {
         let ids = deckIds
         cards = (try? store.cards(inDecks: ids)) ?? []
+        reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
@@ -561,6 +565,7 @@ struct DeckScreen: View {
             withAnimation(Motion.glide) {
                 cards = fresh
                 loadSourceTitles()
+                reviewNotes = CardQuality.reviewNotes(for: fresh)
             }
             store.refreshDeckCounts()
         }
@@ -723,6 +728,7 @@ private struct CardRowView: View {
     let card: Card
     let mastery: LearnEngine.Level
     let sourceTitle: String?
+    let reviewNote: String?
 
     /// Mastery as cream at three strengths; nothing known is the hairline.
     private var railTint: Color {
@@ -769,6 +775,12 @@ private struct CardRowView: View {
                     .lineLimit(3)
                 if card.origin == .aiGenerated, let sourceTitle {
                     Text("from \(sourceTitle)")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                }
+                if let reviewNote {
+                    Text(reviewNote)
                         .font(.graspUI(size: 12))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .lineLimit(1)

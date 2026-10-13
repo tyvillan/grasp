@@ -101,7 +101,9 @@ extension CardAI {
                         arguments: [deckId]) ?? 0
                     var inserted: [(id: String, front: String, back: String)] = []
                     for generated in proposed {
-                        guard local.matchId(front: generated.front, back: generated.back) == nil else { continue }
+                        guard CardQuality.problem(front: generated.front, back: generated.back) == nil,
+                              local.matchId(front: generated.front, back: generated.back, semantic: true) == nil
+                        else { continue }
                         let card = Card(materialId: source.id, front: generated.front, back: generated.back,
                                         origin: .aiGenerated, status: .draft)
                         try card.save(db)

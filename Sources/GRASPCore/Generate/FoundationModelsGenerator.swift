@@ -371,7 +371,8 @@ public struct FoundationModelsGenerator: CardGenerator {
             already made from it, find at most a few additional concepts the note itself mentions or \
             implies but that aren't covered yet. Every fact must be directly supported by the note \
             text -- never add outside knowledge or invent an example, number, or date the note doesn't \
-            contain. An empty result is normal and expected when the note has no such gap.
+            contain. An empty result is normal and expected when the note has no such gap. \
+            \(CardQuality.skipRule) \(CardQuality.groundingRule)
             """
         let session = LanguageModelSession(instructions: Self.plainRule + instructions)
         let covered = existing.map { "- \($0.front): \($0.back)" }.joined(separator: "\n")

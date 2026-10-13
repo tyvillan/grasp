@@ -243,6 +243,19 @@ public enum LocalMeaning {
         return synonymHeads[word] ?? synonymHeads[s] ?? s
     }
 
+    /// The content words of a card's front or back: normalized, stemmed,
+    /// synonyms folded together, and filler left out. Used to tell whether
+    /// two cards say the same thing (`CardQuality`).
+    ///
+    /// One-letter words (`w` in "File mode w", `x` in "Reflection across the
+    /// x2 axis") are kept, because there they are what tells two cards apart.
+    static func contentWords(_ text: String) -> Set<String> {
+        Set(tokens(AnswerGrading.normalize(text)).compactMap { token -> String? in
+            if token.count == 1, token.first?.isLetter == true, !filler.contains(token) { return token }
+            return canonical(token)
+        })
+    }
+
     private static func tokens(_ normalized: String) -> [String] {
         normalized.split(separator: " ").map(String.init).map { numberWords[$0] ?? $0 }
     }

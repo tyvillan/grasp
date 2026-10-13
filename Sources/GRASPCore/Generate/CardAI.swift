@@ -132,8 +132,11 @@ public enum CardAI {
                         guard var updated = try Card.fetchOne(db, key: card.id), updated.deletedAt == nil else { continue }
                         let front = result.front.trimmingCharacters(in: .whitespacesAndNewlines)
                         let back = result.back.trimmingCharacters(in: .whitespacesAndNewlines)
-                        // Unchanged (or emptied) is not a refinement.
-                        guard !front.isEmpty, !back.isEmpty, front != updated.front || back != updated.back else { continue }
+                        // Unchanged (or emptied) is not a refinement, and a
+                        // rewrite that says the notes don't define it is not
+                        // an improvement on the card it replaces.
+                        guard !front.isEmpty, !back.isEmpty, front != updated.front || back != updated.back,
+                              !CardQuality.isRefusal(back) else { continue }
                         updated.front = front
                         updated.back = back
                         // No longer the scanner's to replace on re-import.
@@ -198,6 +201,8 @@ public enum CardAI {
                     case .valid:
                         continue
                     case .refine(let newBack):
+                        // "Not defined in the notes" is not a better answer.
+                        if CardQuality.isRefusal(newBack) { continue }
                         try await database.queue.write { db in
                             guard var updated = try Card.fetchOne(db, key: card.id) else { return }
                             if updated.originalBack == nil { updated.originalBack = updated.back }
@@ -386,7 +391,11 @@ public enum CardAI {
                         arguments: [deckId]) ?? 0
                     var inserted: [(id: String, front: String, back: String)] = []
                     for generated in proposed {
-                        guard localIndex.matchId(front: generated.front, back: generated.back) == nil else { continue }
+                        // A refusal, a heading, an option-less "which of the
+                        // following", or a copy of a card already here.
+                        guard CardQuality.problem(front: generated.front, back: generated.back) == nil,
+                              localIndex.matchId(front: generated.front, back: generated.back, semantic: true) == nil
+                        else { continue }
                         let card = Card(materialId: materialId, front: generated.front, back: generated.back,
                                         origin: .aiGenerated, status: .draft)
                         try card.save(db)
@@ -473,6 +482,9 @@ public enum CardAI {
             // A question the student flagged is never asked again.
             results += proposed
                 .filter { !flagged.contains(QuestionFlags.key(prompt: $0.prompt)) }
+                // No refusal as the answer, and no "which of the following"
+                // without options.
+                .filter { CardQuality.problem(prompt: $0.prompt, answer: $0.correctAnswer) == nil }
                 .map {
                     LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer,
                                               type: .written, explanation: $0.explanation)
