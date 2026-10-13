@@ -88,6 +88,13 @@ read `accessibilityReduceMotion` and use `Motion.choose(_, reduceMotion:)` or
   and move together once a batch is on screen.
 - **Empty states.** One action, one quiet way out, no filters or counts. An empty
   deck's single filled yellow button is "Generate questions from your notes".
+- **Study finish.** "N cards done", the two tallies, one muted line of progress to
+  the daily goal, then Done (the one filled yellow button) with at most one
+  outlined follow-on beside it: "Learn the N you missed", else "Take a test".
+- **Dimmed study row.** When Study or Learn is dimmed the deck page says why in one
+  muted line under the row (Mac and iPhone use the same wording).
+- **Calendar dots.** The dot beside a day number is that day's cards due (1 to 20
+  green, 21 to 50 yellow, over 50 coral); the month's footer is the legend.
 - **Study sheets** (Learn, Test, flashcards) sit on a near-black scrim, one progress
   bar, answers never replace the question.
 
