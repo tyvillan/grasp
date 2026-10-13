@@ -138,6 +138,7 @@ extension Study {
                 choicesJSON: options.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
                 correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil,
                 payloadJSON: question.code?.encoded() ?? question.problem?.encoded()
+                    ?? PlainQuestionPayload(explanation: question.explanation)?.encoded()
             ).insert(db)
         }
         return attempt.id
@@ -220,7 +221,8 @@ extension Study {
                     id: id, cardId: item.cardId, prompt: item.promptText, correctAnswer: item.correctAnswer ?? "",
                     type: statement == nil && type == .trueFalse ? .written : type,
                     choices: type == .multipleChoice ? options : nil, statement: statement,
-                    statementIsTrue: statement == nil ? nil : item.correctAnswer == "True")
+                    statementIsTrue: statement == nil ? nil : item.correctAnswer == "True",
+                    explanation: PlainQuestionPayload.decode(item.payloadJSON)?.explanation)
             }
             questions.append(question)
             // Answers are given in order, so the first unanswered one is
@@ -230,6 +232,14 @@ extension Study {
             }
         }
         return (questions, answers)
+    }
+
+    /// Takes an AI-written question (one with no card) out of an attempt, so
+    /// it no longer counts toward the score. A card's item is never touched.
+    public static func discardTestItem(attemptId: String, ordinal: Int, db: Database) throws {
+        try db.execute(
+            sql: "DELETE FROM testItem WHERE attemptId = ? AND ordinal = ? AND cardId IS NULL",
+            arguments: [attemptId, ordinal])
     }
 
     /// Throws away an unfinished test, answers and all.

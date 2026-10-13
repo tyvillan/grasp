@@ -428,7 +428,8 @@ public enum CardAI {
     /// warning to show when the model couldn't be reached or wrote nothing.
     public static func generateTestQuestions(
         inDecks deckIds: [String], maxCount: Int, using generator: any CardGenerator,
-        database: GRASPDatabase, skipped: @escaping @Sendable () -> Bool = { false }
+        database: GRASPDatabase, flagged: Set<String> = [],
+        skipped: @escaping @Sendable () -> Bool = { false }
     ) async -> (questions: [LearnEngine.RoundQuestion], warning: String?) {
         guard maxCount > 0 else { return ([], nil) }
         guard await generator.isAvailable else {
@@ -469,9 +470,13 @@ public enum CardAI {
             let proposed = await generator.generateTestQuestions(
                 existing: candidates, noteContext: context,
                 maxCount: min(testQuestionsPerNote, maxCount - results.count))
-            results += proposed.map {
-                LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer, type: .written)
-            }
+            // A question the student flagged is never asked again.
+            results += proposed
+                .filter { !flagged.contains(QuestionFlags.key(prompt: $0.prompt)) }
+                .map {
+                    LearnEngine.RoundQuestion(cardId: nil, prompt: $0.prompt, correctAnswer: $0.correctAnswer,
+                                              type: .written, explanation: $0.explanation)
+                }
             // Notes came back thinner than expected: one more step to go.
             if let progress, results.count < maxCount, index + 1 < notes.count,
                progress.snapshot.completed + 1 >= progress.snapshot.expected {

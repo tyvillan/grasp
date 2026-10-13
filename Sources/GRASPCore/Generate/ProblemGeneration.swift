@@ -79,7 +79,7 @@ extension OllamaGenerator {
         UNIT: unit, or leave out
         SCRIPT:
         python lines (number and matrix only)
-        EXPLANATION: one or two sentences showing how to get the answer
+        EXPLANATION: one to three sentences: why the answer is right, then the most common mistake. No praise, no filler.
         ### END
 
         Terms the student already has cards for: \(terms.isEmpty ? "(none)" : terms)
@@ -165,7 +165,7 @@ extension OllamaGenerator {
             kind: kind, prompt: prompt, choices: choices, correct: correct, claimedAnswer: answer,
             unit: unit.isEmpty || unit.lowercased() == "none" ? nil : unit,
             script: script.isEmpty ? nil : script,
-            explanation: text("EXPLANATION").replacingOccurrences(of: "\n", with: " ").nilIfEmptyProblem
+            explanation: QuestionExplanation.clean(text("EXPLANATION").replacingOccurrences(of: "\n", with: " "))
         )
     }
 
@@ -200,6 +200,34 @@ extension OllamaGenerator {
         guard let reply = try? await chatText(prompt: prompt, maxTokens: 220) else { return nil }
         let text = PlainMath.clean(reply.trimmingCharacters(in: .whitespacesAndNewlines))
         return text.isEmpty || text.count > 900 ? nil : text
+    }
+
+    /// Why this student's answer was wrong, written for this answer
+    /// rather than for the question in general.
+    public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
+        let text = Self.explainWrongAnswerPrompt(prompt: prompt, correctAnswer: correctAnswer,
+                                                 givenAnswer: givenAnswer, context: context)
+        guard let reply = try? await chatText(prompt: text, maxTokens: 400) else { return nil }
+        return QuestionExplanation.cleanLong(reply)
+    }
+
+    static func explainWrongAnswerPrompt(prompt: String, correctAnswer: String, givenAnswer: String, context: String) -> String {
+        """
+        A student got this question wrong.
+
+        Question:
+        \(prompt.prefix(1500))
+
+        Correct answer:
+        \(correctAnswer.prefix(600))
+
+        The student answered:
+        \(givenAnswer.isEmpty ? "(nothing)" : String(givenAnswer.prefix(600)))
+        \(context.isEmpty ? "" : "\nCode or notes the question refers to:\n\(context.prefix(1200))\n")
+        In at most four short sentences, tell the student why the correct answer is right and exactly where \
+        their answer went wrong. Speak to them directly. You may include one very small code snippet if it \
+        helps. No praise, no apology, no preamble, no headings, no bullet points.
+        """
     }
 
     /// Explains a handful of skills in one request. Anything the reply

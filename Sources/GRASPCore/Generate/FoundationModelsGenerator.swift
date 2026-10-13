@@ -52,6 +52,11 @@ public struct FoundationModelsGenerator: CardGenerator {
         return await pipeline.explainSkill(skill, subject: subject, context: context)
     }
 
+    public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
+        guard await isAvailable else { return nil }
+        return await pipeline.explainWrongAnswer(prompt: prompt, correctAnswer: correctAnswer, givenAnswer: givenAnswer, context: context)
+    }
+
     public func explainSkills(_ skills: [String], subject: String, context: String) async -> [String: String] {
         guard await isAvailable else { return [:] }
         return await pipeline.explainSkills(skills, subject: subject, context: context)
@@ -391,6 +396,8 @@ public struct FoundationModelsGenerator: CardGenerator {
         var prompt: String
         @Guide(description: "The correct answer to the question")
         var correctAnswer: String
+        @Guide(description: "One to three sentences: why the answer is right, then the most common mistake. No praise, no filler")
+        var explanation: String
     }
 
     @Generable
@@ -426,7 +433,10 @@ public struct FoundationModelsGenerator: CardGenerator {
             return []
         }
         return response.content.questions.prefix(maxCount)
-            .map { GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.correctAnswer)) }
+            .map {
+                GeneratedTestQuestion(prompt: PlainMath.clean($0.prompt), correctAnswer: PlainMath.clean($0.correctAnswer),
+                                      explanation: QuestionExplanation.clean($0.explanation))
+            }
         #else
         return []
         #endif

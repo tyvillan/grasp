@@ -30,10 +30,16 @@ public enum LearnEngine {
         public var code: CodeQuestion?
         /// A worked problem (matrices, economics, concepts) from the bank.
         public var problem: ProblemQuestion?
+        /// Why the answer is right, for an AI-written question that came
+        /// with one (the code and problem kinds carry theirs inside).
+        public var explanation: String?
+        /// The explanation to show under "Why", whichever kind this is.
+        public var whyText: String? { explanation ?? code?.explanation ?? problem?.explanation }
 
         public init(id: String? = nil, cardId: String?, prompt: String, correctAnswer: String, type: QuestionType,
                     choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil,
-                    code: CodeQuestion? = nil, problem: ProblemQuestion? = nil) {
+                    code: CodeQuestion? = nil, problem: ProblemQuestion? = nil, explanation: String? = nil) {
+            self.explanation = explanation
             self.code = code
             self.problem = problem
             self.id = id ?? cardId ?? UUID().uuidString
