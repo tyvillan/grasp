@@ -732,6 +732,7 @@ private struct CardRowView: View {
             case .new: return GRASPColor.hairlineStrong
             case .recognition: return GRASPColor.textPrimary.opacity(0.3)
             case .recall: return GRASPColor.textPrimary.opacity(0.6)
+            case .familiar: return GRASPColor.textPrimary.opacity(0.8)
             case .mastered: return GRASPColor.textPrimary
             }
         }

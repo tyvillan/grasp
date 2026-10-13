@@ -29,7 +29,7 @@ struct StudyModesTests {
         return (db, ids.0, ids.1)
     }
 
-    @Test("I Know This masters a card and schedules it; Needs Review resets it")
+    @Test("I Know This makes a card familiar and schedules it; Needs Review resets it")
     func mark() async throws {
         let (db, deckId, cards) = try await makeDeck()
         try await db.queue.write { db in
@@ -37,10 +37,10 @@ struct StudyModesTests {
             try Study.mark(cards[1], understood: false, db: db)
         }
         let levels = try await db.queue.read { try Study.learnLevels(forDecks: [deckId], db: $0) }
-        #expect(levels[cards[0]] == .mastered)
+        #expect(levels[cards[0]] == .familiar)
         #expect(levels[cards[1]] == .new)
         let mastery = try await db.queue.read { try Study.mastery(forDecks: [deckId], db: $0) }
-        #expect(mastery.mastered == 1)
+        #expect(mastery.mastered == 0)
         #expect(mastery.total == 8)
         let logs = try await db.queue.read { try Review.fetchCount($0) }
         #expect(logs == 2)
@@ -151,7 +151,8 @@ struct StudyModesTests {
     func emptyTest() async throws {
         let (db, deckId, cards) = try await makeDeck()
         try await db.queue.write { db in
-            for card in cards.prefix(8) { try Study.mark(card, understood: true, db: db) }
+            // Mastered, not just familiar: a self-rating no longer excludes a card.
+            for card in cards.prefix(8) { try LearnState(cardId: card, level: 3, consecutiveCorrect: 3).save(db) }
         }
         let config = TestBuilder.Config(questionCount: 5, allowMultipleChoice: true, allowWritten: true,
                                         allowTrueFalse: true, shuffle: false, timeLimitSeconds: nil, excludeMastered: true)
