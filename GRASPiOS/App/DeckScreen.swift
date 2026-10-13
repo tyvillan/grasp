@@ -146,6 +146,7 @@ struct DeckScreen: View {
         .environment(\.editMode, $editMode)
         .listSectionSpacing(6)
         .overlay(alignment: .bottom) { floatingApproveBar }
+        .animation(Motion.glide, value: editMode == .active && !selectedDrafts.isEmpty)
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
@@ -173,6 +174,7 @@ struct DeckScreen: View {
             default: break
             }
         }
+        .animation(Motion.base, value: runningJob != nil && !isGeneratingCards)
         .fullScreenCover(isPresented: $studying, onDismiss: {
             load()
             guard let step = pendingNextStep else { return }

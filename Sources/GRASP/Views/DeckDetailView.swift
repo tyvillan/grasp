@@ -329,14 +329,18 @@ struct DeckDetailView: View {
         VStack(spacing: 0) {
             deckHeader
             // Card generation has its own strip, at the top of the list.
-            if let aiActivity, !isGeneratingCards {
-                AIProgressStrip(
-                    activity: aiActivity,
-                    onStop: { store.stopAIJob(cardJobKey) },
-                    stopHelp: "Stops now. Cards already finished keep their changes; "
-                        + "the one in progress is left as it was."
-                )
+            Group {
+                if let aiActivity, !isGeneratingCards {
+                    AIProgressStrip(
+                        activity: aiActivity,
+                        onStop: { store.stopAIJob(cardJobKey) },
+                        stopHelp: "Stops now. Cards already finished keep their changes; "
+                            + "the one in progress is left as it was."
+                    )
+                    .transition(.opacity)
+                }
             }
+            .animation(Motion.base, value: aiActivity != nil && !isGeneratingCards)
             switch contentTab {
             case .cards:
                 if showsEmptyDeck {
@@ -1387,6 +1391,7 @@ struct DeckDetailView: View {
         // The last rows scroll clear of the floating bar.
         .contentMargins(.bottom, selectedCardIds.isEmpty ? 0 : 76, for: .scrollContent)
         .overlay(alignment: .bottom) { floatingApproveBar }
+        .animation(Motion.glide, value: selectedCardIds.isEmpty)
         .contextMenu(forSelectionType: Card.ID.self) { ids in
             if ids.isEmpty {
                 Button("Approve All Drafts") {
