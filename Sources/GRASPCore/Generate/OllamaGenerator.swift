@@ -985,8 +985,7 @@ public struct OllamaGenerator: CardGenerator {
 
         Respond with ONLY one JSON object shaped {"items": [...]}, where items holds at most \
         \(maxCount) objects, each shaped {"prompt": "...", "answer": "...", "explanation": "..."}. The \
-        explanation is one to three sentences: why the answer is right, then the most common mistake and \
-        why it is wrong. No praise, no filler, no restating the question. Return {"items": []} \
+        explanation follows these rules: \(QuestionExplanation.styleRules) Return {"items": []} \
         if there is nothing worth asking. No other text.
         """
     }

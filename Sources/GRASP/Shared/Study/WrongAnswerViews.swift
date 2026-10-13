@@ -13,13 +13,37 @@ struct WhyBlock: View {
                     .graspType(.eyebrow)
                     .textCase(.uppercase)
                     .foregroundStyle(GRASPColor.textTertiary)
-                Text(text)
-                    .graspType(.body)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                ExplanationText(text: text)
             }
         }
+    }
+}
+
+/// Explanation prose with its inline code (text between backticks) set in
+/// the code face, the backticks removed.
+struct ExplanationText: View {
+    let text: String
+
+    var body: some View {
+        Text(Self.attributed(text))
+            .graspType(.body)
+            .foregroundStyle(GRASPColor.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+    }
+
+    static func attributed(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        for segment in QuestionExplanation.segments(in: text) {
+            var run = AttributedString(segment.text)
+            if segment.isCode {
+                run.font = .system(size: 13, design: .monospaced)
+                run.foregroundColor = GRASPColor.textPrimary
+                run.backgroundColor = GRASPColor.inset
+            }
+            result += run
+        }
+        return result
     }
 }
 
@@ -127,11 +151,7 @@ struct ExplainThisBlock: View {
                         .graspType(.eyebrow)
                         .textCase(.uppercase)
                         .foregroundStyle(GRASPColor.textTertiary)
-                    Text(text)
-                        .graspType(.body)
-                        .foregroundStyle(GRASPColor.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
+                    ExplanationText(text: text)
                 }
             case .failed(let message):
                 Text(message).graspType(.meta).foregroundStyle(GRASPColor.rejected)

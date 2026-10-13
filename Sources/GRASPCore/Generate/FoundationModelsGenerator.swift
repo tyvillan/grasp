@@ -396,7 +396,7 @@ public struct FoundationModelsGenerator: CardGenerator {
         var prompt: String
         @Guide(description: "The correct answer to the question")
         var correctAnswer: String
-        @Guide(description: "One to three sentences: why the answer is right, then the most common mistake. No praise, no filler")
+        @Guide(description: "Two to four short sentences written to the reader as \"you\": why the answer is right, then the most common mistake. No praise, no filler, never \"the student\"")
         var explanation: String
     }
 
