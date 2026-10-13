@@ -752,6 +752,11 @@ struct DeckDetailView: View {
         PillMenu(title: "Add", systemImage: "plus", isBusy: store.isImporting, showsTitle: !isCompact) {
             let aiBusy = aiActivity != nil
             var items: [PillMenuItem] = [
+                .action("Generate cards with AI…", ai: true,
+                        disabled: !isGeneratorAvailable || aiBusy,
+                        help: "New draft cards for concepts this deck's notes mention that have no card yet") {
+                    showingGenerateSheet = true
+                },
                 .action("Practice problems with AI…", ai: true,
                         help: "Code, calculations and matrices from this deck's notes, checked before they're kept") {
                     showingCodeQuestions = true
@@ -768,7 +773,7 @@ struct DeckDetailView: View {
             items += addSourceItems
             return items
         }
-        .help("Add a card, practice problems, files or a study guide")
+        .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
     /// Overview view: rewriting the overviews, and adding sources.
