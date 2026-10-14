@@ -109,27 +109,38 @@ A view that uses the tokens needs no check of its own.
   looks like a heading."). It is a flag only: nothing is hidden or removed, and
   approved cards, manual cards and AI cards are never flagged. AI cards that fail
   the same checks are never saved (`CardQuality`).
-- **Understanding meter.** Three pips for how close a card is to understood:
-  recognition, recall, mastered (Learn ladder levels 1 to 3; level 0 has none
-  filled). Shape carries the meaning and colour only reinforces it. A **solid**
-  pip was reached and shown (cream; the last pip turns `success` green when
-  mastered). A **dotted** pip was claimed with "I Know This" and not yet shown:
-  a self-rated card is two dotted pips and one empty, and one right answer in
-  Learn completes it. An **outline** is not reached (`hairlineStrong`; the lighter
-  `hairline` for a card nobody has asked about, which reads "New"). Sizes: row 7 pt
+- **Understanding meter.** Three short capsules (about 10 x 4 pt with a 2 pt gap
+  on a row; 12 x 5 on a card; 16 x 6 large) for how close a card is to
+  understood: recognition, recall, understood (Learn ladder levels 1 to 3; level
+  0 has none filled). Capsules, not dots, so they never read as page dots or the
+  sidebar's coloured dots. Shape carries the meaning and colour only reinforces
+  it. A **solid** capsule was reached and shown (cream; the last turns `success`
+  green when understood). A **dashed** outline was claimed with "I Know This" and
+  not yet shown: a self-rated card is two dashed capsules and one empty, and one
+  right answer in Learn completes it. An **outline** is not reached
+  (`hairlineStrong` for a card nobody has asked about, which reads "New"; a firmer
+  tertiary outline for a card asked and missed). "Understood" means mastered
+  only: a self-rated card is never counted as understood, in the pips, the deck
+  bar, the "Understood N" filter pill and the card preview chip alike. Sizes: row
   (left of a row, replacing the old mastery rail; draft and suspended cards keep
-  the 2 pt rail), card 9 pt (Study corner, muted), large 13 pt with the word.
-  Learn shows the pips after an answer, never before the question. The deck
-  page shows the same steps as one stacked bar (solid green, recall and
-  recognition in cream strengths, self-rated with a dashed edge, not asked as an
-  outlined track), a count line ("14 solid, 9 recall, 6 recognition, 22 not
-  asked"), the five weakest notes (a mini bar and "3 of 14 solid"; tapping one
-  filters the card list) and an outlined "Practice weakest" button (a Learn round
-  on up to 8 cards; never a second filled yellow). No yellow, no new colour, font
-  or radius. VoiceOver reads "Recall, 2 of 3 steps", "Mastered, 3 of 3 steps",
-  "Self-rated, not yet tested", "New". Part 1 shows the current state only. Part
-  2's change animation will be a 0.20 s fill or empty (`Motion.base`) that becomes
-  an opacity swap under Reduce Motion.
+  the 2 pt rail), card (Study corner, muted), large with the word. A row with any
+  Learn progress does not say "New" on the right; "Draft", "Due today",
+  "Overdue" and "in 3d" stay. Learn shows the card after an answer, never
+  before the question, using the ladder's own rules: the single current state when
+  the level did not change, or the pips before, an arrow and the pips after with
+  one line ("Recall to understood", "Back to recognition") when it did. The change
+  fades in over 0.20 s (`Motion.base`, no overshoot) and is an instant swap under
+  Reduce Motion. The deck page shows the same steps as one stacked bar
+  (understood in green, recall and recognition in cream strengths, self-rated with
+  a dashed edge, not asked as an outlined track), a count line ("14 understood, 9
+  recall, 6 recognition, 22 not asked"), the five weakest notes (title from the
+  note's first heading, else its humanized file name; the mini bar under the name
+  at full width, "3 of 14 understood" on the right; tapping one filters the card
+  list) and an outlined "Practice weakest" button (a Learn round on up to 8 cards;
+  never a second filled yellow). On the iPhone the notes list sits behind a
+  disclosure, closed by default. No yellow, no new colour, font or radius.
+  VoiceOver reads "Recall, 2 of 3 steps", "Understood, 3 of 3 steps",
+  "Self-rated, not yet tested", "New".
 - **Selection.** Any selected row gives every row a round checkbox on its left
   (yellow check / empty ring); selected rows are `surfaceRaised`. One floating bar:
   Approve N, Suspend, Move to…, Delete (coral), clear.

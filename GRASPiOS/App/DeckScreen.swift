@@ -28,6 +28,7 @@ struct DeckScreen: View {
     /// filters to (nil: not filtering; `.some(nil)` is the "Other" group).
     @State private var understanding: [DeckUnderstanding.Card] = []
     @State private var noteFilter: String??
+    @State private var noteTitles: [String: String] = [:]
     private var understandingById: [String: UnderstandingState] {
         Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
     }
@@ -391,13 +392,13 @@ struct DeckScreen: View {
         if !cards.isEmpty {
             Section {
                 UnderstandingSummary(
-                    cards: understanding, noteTitles: sourceTitles,
+                    cards: understanding, noteTitles: noteTitles, collapsesNotes: true,
                     onOpenNote: { note in withAnimation(Motion.snappy) { noteFilter = .some(note); filter = .all } },
                     onPractice: { ids in learnFocus = Set(ids); learning = true }
                 )
                 if let note = noteFilter {
                     HStack(spacing: 8) {
-                        Text("Cards from \(note.flatMap { sourceTitles[$0] } ?? "Other")")
+                        Text("Cards from \(note.flatMap { noteTitles[$0] } ?? "Other")")
                             .font(.graspSubheadline)
                             .foregroundStyle(GRASPColor.textSecondary)
                             .lineLimit(1)
@@ -534,6 +535,7 @@ struct DeckScreen: View {
         reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
         understanding = (try? store.understanding(forDecks: ids)) ?? []
+        noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
         hasLoaded = true
@@ -794,7 +796,7 @@ private struct CardRowView: View {
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(2)
                     Spacer(minLength: 6)
-                    Text(CardRowStatus.text(for: card))
+                    Text(CardRowStatus.text(for: card, hasProgress: card.status == .active && understanding.hasProgress))
                         .font(.graspUI(size: 12))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .lineLimit(1)

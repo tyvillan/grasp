@@ -913,6 +913,11 @@ final class AppStore {
 
     /// The plural of the above, for the "All Cards" master category's own
     /// mastery badges across every deck in the course.
+    /// Readable note titles (first heading, else the humanized file name).
+    func noteTitles(forMaterials ids: [String]) -> [String: String] {
+        (try? database.queue.read { db in try Study.noteTitles(forMaterials: ids, db: db) }) ?? [:]
+    }
+
     /// One card's meter state, right after it was answered.
     func understandingState(forCard cardId: String) -> UnderstandingState {
         let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }

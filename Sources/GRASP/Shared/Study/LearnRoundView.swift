@@ -269,16 +269,13 @@ struct LearnRoundView: View {
                     } else if let verdict {
                         verdictBanner(verdict)
                     }
-                    if isAnswered, let state = feedbackState {
-                        // Shown only after the answer, so it can't bias it.
-                        // Part 1 shows where the card stands, not a change.
-                        HStack(spacing: 8) {
-                            PipMeter(state: state, size: .card, showsWord: true)
-                            Text("This card so far")
-                                .font(.graspUI(size: 12))
-                                .foregroundStyle(GRASPColor.textTertiary)
-                        }
-                        .transition(.opacity)
+                    if isAnswered, let before = feedbackState {
+                        // Shown only after the answer, so it can't bias it:
+                        // where the card stands after this answer, by the
+                        // ladder's own rules; before and after only when
+                        // the level changed.
+                        PipChange(before: before, after: before.afterAnswer(correct: lastAnswerCorrect))
+                            .id("\(question.id)-\(lastAnswerCorrect)")
                     }
                     if isAnswered, let judged, judged.outcome == .notQuite, question.type == .written,
                        let cardId = question.cardId {

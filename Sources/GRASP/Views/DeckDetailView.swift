@@ -122,6 +122,8 @@ struct DeckDetailView: View {
     /// notes" row sets (nil: not filtering; `.some(nil)` is the "Other" group).
     @State private var understanding: [DeckUnderstanding.Card] = []
     @State private var noteFilter: String??
+    /// Readable titles for the weakest-notes rows.
+    @State private var noteTitles: [String: String] = [:]
     private var understandingById: [String: UnderstandingState] {
         Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
     }
@@ -304,7 +306,7 @@ struct DeckDetailView: View {
         VStack(spacing: 0) {
             if !cards.isEmpty {
                 UnderstandingSummary(
-                    cards: understanding, noteTitles: sourceTitles,
+                    cards: understanding, noteTitles: noteTitles,
                     onOpenNote: { noteFilter = .some($0); masteryFilter = .all },
                     onPractice: { ids in learnFocus = Set(ids); isLearning = true }
                 )
@@ -312,7 +314,7 @@ struct DeckDetailView: View {
                 .padding(.top, 14)
                 if let note = noteFilter {
                     HStack(spacing: 8) {
-                        Text("Showing cards from \(note.flatMap { sourceTitles[$0] } ?? "Other")")
+                        Text("Showing cards from \(note.flatMap { noteTitles[$0] } ?? "Other")")
                             .font(.graspUI(size: 12.5))
                             .foregroundStyle(GRASPColor.textSecondary)
                             .lineLimit(1)
@@ -1638,6 +1640,7 @@ struct DeckDetailView: View {
         reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
         understanding = (try? store.understanding(forDecks: scopeDeckIds)) ?? []
+        noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
         hasLoaded = true
         loadSourceTitles()
         // A Drafts filter with no drafts left would show an empty list.
@@ -1978,8 +1981,12 @@ private struct CardPreviewPane: View {
 
     private var masteryChip: some View {
         Group {
+            // The same definition as the pips: only mastered is understood;
+            // a self-rated card is not.
             if mastery == .mastered {
                 PreviewChip(text: "Understood", tint: GRASPColor.success, tintSoft: GRASPColor.successSoft)
+            } else if mastery == .familiar {
+                PreviewChip(text: "Self-rated", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
             } else {
                 PreviewChip(text: "Needs review", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
             }
@@ -2266,7 +2273,7 @@ private struct CardRow: View {
             // cross-fades to the actions on hover or keyboard focus. The
             // slot is a fixed width, so nothing in the row moves.
             ZStack(alignment: .trailing) {
-                Text(CardRowStatus.text(for: card))
+                Text(CardRowStatus.text(for: card, hasProgress: card.status == .active && understanding.hasProgress))
                     .font(.graspUI(size: 12))
                     .foregroundStyle(GRASPColor.textTertiary)
                     .lineLimit(1)

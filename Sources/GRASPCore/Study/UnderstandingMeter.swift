@@ -23,13 +23,13 @@ public struct UnderstandingState: Equatable, Sendable {
     public var solidCount: Int { pips.filter { $0 == .solid }.count }
 
     /// A short word for the card itself: "New", "Recognition", "Recall",
-    /// "Mastered", "Self-rated", or "Not yet" for a card asked and missed.
+    /// "Understood", "Self-rated", or "Not yet" for a card asked and missed.
     public var word: String {
         switch level {
         case .new: return asked ? "Not yet" : "New"
         case .recognition: return "Recognition"
         case .recall: return "Recall"
-        case .mastered: return "Mastered"
+        case .mastered: return "Understood"
         case .familiar: return "Self-rated"
         }
     }
@@ -40,9 +40,39 @@ public struct UnderstandingState: Equatable, Sendable {
         case .new: return asked ? "Not yet recognized, 0 of 3 steps" : "New"
         case .recognition: return "Recognition, 1 of 3 steps"
         case .recall: return "Recall, 2 of 3 steps"
-        case .mastered: return "Mastered, 3 of 3 steps"
+        case .mastered: return "Understood, 3 of 3 steps"
         case .familiar: return "Self-rated, not yet tested"
         }
+    }
+
+    /// Any pip filled or dotted: the card has Learn progress, so a row
+    /// has no need to say "New".
+    public var hasProgress: Bool { pips.contains { $0 != .empty } }
+
+    /// Where the card stands after one more answer, by the existing
+    /// ladder rules (`LearnEngine.advance`), nothing new.
+    public func afterAnswer(correct: Bool) -> UnderstandingState {
+        let next = LearnEngine.advance(level: level, consecutiveCorrect: 0, wasCorrect: correct).level
+        return .of(level: next, asked: true)
+    }
+
+    /// One line for a change of level: "Recall to understood", "Back to
+    /// recognition". nil when the level did not change.
+    public static func changeCaption(from: UnderstandingState, to: UnderstandingState) -> String? {
+        guard from.level != to.level else { return nil }
+        func rank(_ level: LearnEngine.Level) -> Double {
+            switch level {
+            case .new: return 0
+            case .recognition: return 1
+            case .recall: return 2
+            case .familiar: return 2.5
+            case .mastered: return 3
+            }
+        }
+        if rank(to.level) < rank(from.level) {
+            return to.level == .new ? "Back to the start" : "Back to \(to.word.lowercased())"
+        }
+        return "\(from.word) to \(to.word.lowercased())"
     }
 
     /// `level` nil means the card has no learn row at all.
@@ -87,11 +117,11 @@ public enum DeckUnderstanding {
         public var total: Int { notAsked + recognition + recall + solid + selfRated }
         public var solidShare: Double { total == 0 ? 0 : Double(solid) / Double(total) }
 
-        /// "14 solid, 9 recall, 6 recognition, 3 self-rated, 22 not asked",
+        /// "14 understood, 9 recall, 6 recognition, 3 self-rated, 22 not asked",
         /// leaving out any part that is zero.
         public var line: String {
             guard total > 0 else { return "No cards yet" }
-            let parts: [(Int, String)] = [(solid, "solid"), (recall, "recall"), (recognition, "recognition"),
+            let parts: [(Int, String)] = [(solid, "understood"), (recall, "recall"), (recognition, "recognition"),
                                           (selfRated, "self-rated"), (notAsked, "not asked")]
             return parts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
         }
@@ -121,8 +151,8 @@ public enum DeckUnderstanding {
         public var id: String { materialId ?? "other" }
         public var solid: Int { distribution.solid }
         public var total: Int { distribution.total }
-        /// "3 of 14 solid".
-        public var summary: String { "\(solid) of \(total) solid" }
+        /// "3 of 14 understood".
+        public var summary: String { "\(solid) of \(total) understood" }
     }
 
     /// The deck's notes, weakest first: lowest share of solid cards, then
@@ -196,5 +226,67 @@ extension Study {
     /// The meter state of every card in these decks, by card id.
     public static func understandingStates(forDecks deckIds: [String], db: Database) throws -> [String: UnderstandingState] {
         Dictionary(uniqueKeysWithValues: try understanding(forDecks: deckIds, db: db).map { ($0.id, $0.state) })
+    }
+}
+
+/// A note's title as a person would say it.
+public enum NoteTitle {
+    /// The note's first heading when it has one, else the file name made
+    /// readable.
+    public static func readable(raw: String?, fileName: String) -> String {
+        if let raw, let heading = firstHeading(in: raw) { return heading }
+        return humanized(fileName)
+    }
+
+    static func firstHeading(in raw: String) -> String? {
+        var lines = raw.components(separatedBy: "\n")
+        // Skip a frontmatter block.
+        if lines.first?.trimmingCharacters(in: .whitespaces) == "---" {
+            lines.removeFirst()
+            while let line = lines.first {
+                lines.removeFirst()
+                if line.trimmingCharacters(in: .whitespaces) == "---" { break }
+            }
+        }
+        var inFence = false
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { inFence.toggle(); continue }
+            guard !inFence, trimmed.hasPrefix("#") else { continue }
+            let text = trimmed.drop(while: { $0 == "#" })
+            guard text.first == " " else { continue }
+            let cleaned = text.trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "**", with: "")
+                .replacingOccurrences(of: "`", with: "")
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return nil
+    }
+
+    /// `2026-09-08_Module-03_C++-Basics-and-Functions.md` to
+    /// `Module 03 C++ Basics and Functions`.
+    static func humanized(_ fileName: String) -> String {
+        var name = fileName
+        if let dot = name.lastIndex(of: "."), name.distance(from: dot, to: name.endIndex) <= 6 {
+            name = String(name[..<dot])
+        }
+        name = name.replacingOccurrences(of: #"^\d{4}-\d{2}-\d{2}[_\- ]*"#, with: "", options: .regularExpression)
+        name = name.replacingOccurrences(of: #"^\d{2}_"#, with: "", options: .regularExpression)
+        name = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        name = name.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return name.isEmpty ? fileName : name
+    }
+}
+
+extension Study {
+    /// Readable titles for notes, by material id.
+    public static func noteTitles(forMaterials ids: [String], db: Database) throws -> [String: String] {
+        var result: [String: String] = [:]
+        for id in ids {
+            guard let material = try Material.fetchOne(db, key: id) else { continue }
+            let raw = try NoteText.fetchOne(db, key: id)?.raw
+            result[id] = NoteTitle.readable(raw: raw, fileName: material.title)
+        }
+        return result
     }
 }

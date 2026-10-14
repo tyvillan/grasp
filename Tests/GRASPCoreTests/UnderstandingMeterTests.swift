@@ -14,7 +14,7 @@ struct UnderstandingMeterTests {
             (.new, [.empty, .empty, .empty], "New", "New"),
             (.recognition, [.solid, .empty, .empty], "Recognition", "Recognition, 1 of 3 steps"),
             (.recall, [.solid, .solid, .empty], "Recall", "Recall, 2 of 3 steps"),
-            (.mastered, [.solid, .solid, .solid], "Mastered", "Mastered, 3 of 3 steps"),
+            (.mastered, [.solid, .solid, .solid], "Understood", "Understood, 3 of 3 steps"),
             (.familiar, [.dotted, .dotted, .empty], "Self-rated", "Self-rated, not yet tested"),
         ]
         for (level, pips, word, label) in cases {
@@ -72,7 +72,7 @@ struct UnderstandingMeterTests {
                      card("4", "a", .familiar), card("5", "a", nil), card("6", "a", .new, asked: true)]
         let d = DeckUnderstanding.distribution(of: mixed)
         #expect(d == { var x = DeckUnderstanding.Distribution(); x.solid = 1; x.recall = 1; x.recognition = 1; x.selfRated = 1; x.notAsked = 2; return x }())
-        #expect(d.line == "1 solid, 1 recall, 1 recognition, 1 self-rated, 2 not asked")
+        #expect(d.line == "1 understood, 1 recall, 1 recognition, 1 self-rated, 2 not asked")
     }
 
     @Test("weakest notes are ranked by share solid, then by size, with cards without a note in Other")
@@ -94,8 +94,8 @@ struct UnderstandingMeterTests {
         let weak = DeckUnderstanding.weakestNotes(of: cards)
         #expect(weak.map(\.materialId) == [nil, "d", "a", "c", "b"])
         #expect(weak[0].id == "other")
-        #expect(weak[0].summary == "0 of 2 solid")
-        #expect(weak[1].summary == "1 of 8 solid")
+        #expect(weak[0].summary == "0 of 2 understood")
+        #expect(weak[1].summary == "1 of 8 understood")
         #expect(DeckUnderstanding.weakestNotes(of: cards, limit: 2).count == 2)
         #expect(!weak.contains { $0.materialId == "e" })
     }
@@ -144,5 +144,67 @@ struct UnderstandingMeterTests {
         #expect(cards.filter { $0.materialId == nil }.count == 1)
         let again = try await db.queue.read { try Study.learnLevels(forDecks: [deckId], db: $0) }
         #expect(again[learned] == .recall)
+    }
+
+    @Test("the display state after an answer follows the existing ladder rules")
+    func afterAnswer() {
+        func after(_ level: LearnEngine.Level?, _ correct: Bool, asked: Bool? = nil) -> UnderstandingState {
+            UnderstandingState.of(level: level, asked: asked).afterAnswer(correct: correct)
+        }
+        #expect(after(.recognition, true).level == .recall)
+        #expect(after(.recall, true).level == .mastered)
+        #expect(after(.recall, false).level == .recognition)
+        #expect(after(.mastered, true).level == .mastered)
+        #expect(after(.mastered, false).level == .recall)
+        #expect(after(.familiar, true).level == .mastered)
+        #expect(after(.familiar, false).level == .recognition)
+        #expect(after(nil, true).level == .recognition)
+        #expect(after(nil, false).level == .new)
+        // A miss on a never-asked card leaves it at the start, now asked.
+        #expect(after(nil, false).asked)
+        // It uses the engine's own function, so the two can't drift.
+        for level in [LearnEngine.Level.new, .recognition, .recall, .mastered, .familiar] {
+            for correct in [true, false] {
+                let expected = LearnEngine.advance(level: level, consecutiveCorrect: 0, wasCorrect: correct).level
+                #expect(UnderstandingState.of(level: level).afterAnswer(correct: correct).level == expected)
+            }
+        }
+    }
+
+    @Test("a change of level gets one line, and no change gets none")
+    func captions() {
+        func caption(_ from: LearnEngine.Level?, _ correct: Bool) -> String? {
+            let before = UnderstandingState.of(level: from)
+            return UnderstandingState.changeCaption(from: before, to: before.afterAnswer(correct: correct))
+        }
+        #expect(caption(.recall, true) == "Recall to understood")
+        #expect(caption(.recognition, true) == "Recognition to recall")
+        #expect(caption(.recall, false) == "Back to recognition")
+        #expect(caption(.mastered, false) == "Back to recall")
+        #expect(caption(.familiar, true) == "Self-rated to understood")
+        #expect(caption(.familiar, false) == "Back to recognition")
+        #expect(caption(.recognition, false) == "Back to the start")
+        #expect(caption(.mastered, true) == nil)
+        #expect(caption(.new, false) == nil)
+    }
+
+    @Test("a card has progress when any pip is filled or dotted")
+    func progress() {
+        #expect(!UnderstandingState.of(level: nil).hasProgress)
+        #expect(!UnderstandingState.of(level: .new, asked: true).hasProgress)
+        #expect(UnderstandingState.of(level: .recognition).hasProgress)
+        #expect(UnderstandingState.of(level: .familiar).hasProgress)
+        #expect(UnderstandingState.of(level: .mastered).hasProgress)
+    }
+
+    @Test("a note's title is its first heading, else its file name made readable")
+    func titles() {
+        let withHeading = "---\ncourse: x\n---\n\n# Module 5 \u{2014} Midterm Review Overview\n\ntext"
+        #expect(NoteTitle.readable(raw: withHeading, fileName: "2026-10-06_Module-05_Midterm") == "Module 5 \u{2014} Midterm Review Overview")
+        #expect(NoteTitle.readable(raw: "no heading here\n\n## Second level", fileName: "x") == "Second level")
+        #expect(NoteTitle.readable(raw: "```\n# comment in code\n```\ntext", fileName: "2026-09-08_Module-03_C++-Basics-and-Functions.md")
+                == "Module 03 C++ Basics and Functions")
+        #expect(NoteTitle.readable(raw: nil, fileName: "Module-03_Flow-of-Control-and-Functions") == "Module 03 Flow of Control and Functions")
+        #expect(NoteTitle.readable(raw: "", fileName: "00_Course-Roadmap") == "Course Roadmap")
     }
 }
