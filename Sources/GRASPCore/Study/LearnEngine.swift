@@ -41,6 +41,18 @@ public enum LearnEngine {
         /// The explanation to show under "Why", whichever kind this is.
         public var whyText: String? { explanation ?? code?.explanation ?? problem?.explanation }
 
+        /// Whether "I actually got this right" may be offered. Text matching
+        /// is a poor judge of a loaded free-response answer, but blanks,
+        /// predicted output and a bug's line number are compared exactly
+        /// against a checked answer, so an override there only turns a real
+        /// miss into a hit. `completeFunction` stays overridable: on a device
+        /// that cannot run code the student marks it themselves.
+        public var allowsMarkCorrect: Bool {
+            guard type == .written else { return false }
+            guard let code else { return true }
+            return code.kind == .completeFunction
+        }
+
         public init(id: String? = nil, cardId: String?, prompt: String, correctAnswer: String, type: QuestionType,
                     choices: [String]? = nil, statement: String? = nil, statementIsTrue: Bool? = nil,
                     code: CodeQuestion? = nil, problem: ProblemQuestion? = nil, explanation: String? = nil) {

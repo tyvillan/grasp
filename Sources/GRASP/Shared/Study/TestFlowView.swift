@@ -695,7 +695,7 @@ struct TestRunView: View {
             Spacer(minLength: 12)
             // Text matching is a poor judge of a long or loaded answer --
             // offered only for written questions, and only while wrong.
-            if question.type == .written && !lastCorrect {
+            if question.allowsMarkCorrect && !lastCorrect {
                 Button("I actually got this right") { override(question) }
                     .buttonStyle(GRASPProminentButton(tint: GRASPColor.success))
             }
@@ -1018,7 +1018,7 @@ struct TestResultsView: View {
                     // Exact/fuzzy text matching is a poor judge of a long or
                     // loaded free-response answer -- offered only for
                     // written questions, and only while still marked wrong.
-                    if !item.isCorrect && item.question.type == .written {
+                    if !item.isCorrect && item.question.allowsMarkCorrect {
                         Button("I actually got this right") { override(item) }
                             .buttonStyle(.plain)
                             .font(.graspUI(size: 12, weight: .medium))

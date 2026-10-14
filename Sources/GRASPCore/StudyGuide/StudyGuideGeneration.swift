@@ -31,7 +31,8 @@ extension OllamaGenerator {
         lists its options A) to D) inside the question.
         - terms: up to 6 key terms, each with a one-sentence definition.
         - traps: 2 or 3 mistakes students commonly make on this material, one sentence each.
-        Never add outside facts. Anything the notes don't support is an empty list. Write every value \
+        Never add outside facts. Anything the notes don't support is an empty list. \
+        \(CardQuality.skipRule) Write every value \
         as plain text on one line: no line breaks, markdown, backslashes or quotation marks.
 
         Terms the student already has cards for: \(terms.isEmpty ? "(none)" : terms)
@@ -106,6 +107,15 @@ extension OllamaGenerator {
         return rest.isEmpty ? answer : rest
     }
 
+    /// The same plain checks cards get: a refusal for an answer ("the notes
+    /// don't define this"), "which of the following" with no options, or a
+    /// question that is only a heading. Such a question is dropped, never
+    /// shown to the student as something to practise.
+    static func isUsable(question: String, answer: String) -> Bool {
+        CardQuality.problem(prompt: question, answer: answer) == nil
+            && !CardQuality.isPlaceholderFront(question)
+    }
+
     /// Reads a model's answer into a guide part, keeping only what is
     /// usable: a practice problem needs a question and an answer to check
     /// against, a term needs both halves. Nil when nothing usable remains.
@@ -123,16 +133,19 @@ extension OllamaGenerator {
 
         var examples: [StudyGuideDocument.Example] = []
         for problem in (dto.problems ?? []).prefix(max(1, problemLimit)) {
-            guard let question = clean(problem.question?.text), let answer = clean(problem.answer?.text) else { continue }
+            guard let question = clean(problem.question?.text), let answer = clean(problem.answer?.text),
+                  isUsable(question: question, answer: answer) else { continue }
             examples.append(.init(label: "Practice \(examples.count + 1)", question: question,
                                   steps: cleaned(problem.steps), answer: answer))
         }
         var sample = 0
         for item in (dto.questions ?? []).prefix(5) {
             guard let question = clean(item.question?.text), let answer = clean(item.answer?.text) else { continue }
+            let kept = withoutDanglingChoice(answer, for: question)
+            guard isUsable(question: question, answer: kept) else { continue }
             sample += 1
             examples.append(.init(label: "Sample question \(sample)", question: question, steps: [],
-                                  answer: withoutDanglingChoice(answer, for: question)))
+                                  answer: kept))
         }
         let terms = (dto.terms ?? []).prefix(8).compactMap { entry -> StudyGuideDocument.Term? in
             guard let term = clean(entry.term?.text), let definition = clean(entry.definition?.text) else { return nil }
