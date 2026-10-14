@@ -74,7 +74,14 @@ public struct GeminiTransport: ChatTransport {
         apiKey: String, model: String, baseURL: URL = CloudProvider.baseURL,
         usage: CloudUsage = .shared, pacer: RequestPacer = .shared, failures: FailureLog? = nil,
         maxRetries: Int = 2, alternates: [String] = [], overloadPauses: [TimeInterval] = [3, 8],
-        send: @escaping Send = { try await GeminiTransport.session.data(for: $0) },
+        send: @escaping Send = { request in
+            #if DEBUG
+            if AITiming.isEnabled, let metrics = AITiming.metrics {
+                return try await GeminiTransport.session.data(for: request, delegate: metrics)
+            }
+            #endif
+            return try await GeminiTransport.session.data(for: request)
+        },
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = {
             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
         }
@@ -112,9 +119,18 @@ public struct GeminiTransport: ChatTransport {
         var index = 0
         var retries = 0
         var overloadedModels = 0
+        #if DEBUG
+        var pacerWaited = 0.0
+        #endif
         while true {
             try Task.checkCancellation()
+            #if DEBUG
+            let pacerStart = Date()
+            #endif
             try await pacer.waitTurn()
+            #if DEBUG
+            pacerWaited = Date().timeIntervalSince(pacerStart)
+            #endif
             let current = order[index]
             let isLast = index + 1 >= order.count
             func moveToNext(_ reason: String) {
@@ -123,10 +139,27 @@ public struct GeminiTransport: ChatTransport {
                 AIProgress.current?.setNote("\(reason), so GRASP is using \(order[index])")
             }
             do {
+                #if DEBUG
+                let started = Date()
+                let metrics = AITiming.Metrics()
+                let answer = try await AITiming.$metrics.withValue(metrics) {
+                    try await request(
+                        prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
+                        boost: boost, reasoning: useReasoning
+                    )
+                }
+                let seen = metrics.snapshot
+                AITiming.record(.init(
+                    feature: AITiming.feature, model: current, promptChars: prompt.count, outputChars: answer.count,
+                    pacerWait: pacerWaited, request: Date().timeIntervalSince(started),
+                    firstByte: seen.firstByte, connect: seen.connect, reusedConnection: seen.reused, status: 200))
+                return answer
+                #else
                 return try await request(
                     prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
                     boost: boost, reasoning: useReasoning
                 )
+                #endif
             } catch AIBackendError.overloaded(let status) {
                 // The first model gets the full wait; the others one short one.
                 let pauses = index == 0 ? overloadPauses : Array(overloadPauses.prefix(1))

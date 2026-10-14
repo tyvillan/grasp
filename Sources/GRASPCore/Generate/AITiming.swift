@@ -1,0 +1,84 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+/// Per-call timing for cloud AI requests. Debug builds only, and then only
+/// when `GRASP_AI_TIMING=1` is in the environment or the `GRASPAITiming`
+/// default is set. In a release build every entry point below is empty, so
+/// nothing is measured, kept or logged.
+///
+/// A record holds sizes and durations. It never holds the prompt, the reply,
+/// the URL or any header, so an API key cannot end up in one.
+public enum AITiming {
+    public struct Call: Sendable {
+        public var feature: String
+        public var model: String
+        public var promptChars: Int
+        public var outputChars: Int
+        /// Seconds spent waiting for the request pacer's turn.
+        public var pacerWait: Double
+        /// Seconds from sending the request to the whole reply in hand.
+        public var request: Double
+        /// Seconds from sending to the first byte of the reply, when known.
+        public var firstByte: Double?
+        /// Seconds spent connecting (DNS, TCP, TLS), 0 for a reused connection.
+        public var connect: Double?
+        public var reusedConnection: Bool?
+        public var status: Int
+    }
+
+    /// Names the feature a call belongs to, for the table. Set by the
+    /// harness around a run; "unlabeled" otherwise.
+    @TaskLocal public static var feature: String = "unlabeled"
+
+    #if DEBUG
+    /// The collector for the request in flight on this task.
+    @TaskLocal static var metrics: Metrics?
+
+    public static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment["GRASP_AI_TIMING"] == "1"
+            || UserDefaults.standard.bool(forKey: "GRASPAITiming")
+    }
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var calls: [Call] = []
+
+    static func record(_ call: Call) {
+        guard isEnabled else { return }
+        lock.lock(); calls.append(call); lock.unlock()
+    }
+
+    /// Everything recorded since the last drain.
+    public static func drain() -> [Call] {
+        lock.lock(); defer { lock.unlock() }
+        let out = calls
+        calls = []
+        return out
+    }
+
+    /// Collects the connection timings for one request.
+    final class Metrics: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let lock = NSLock()
+        private var firstByte: Double?
+        private var connect: Double?
+        private var reused: Bool?
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+            guard let t = metrics.transactionMetrics.last, let start = t.fetchStartDate else { return }
+            lock.lock(); defer { lock.unlock() }
+            reused = t.isReusedConnection
+            if let first = t.responseStartDate { firstByte = first.timeIntervalSince(start) }
+            if let s = t.connectStartDate, let e = t.connectEndDate { connect = e.timeIntervalSince(s) } else { connect = 0 }
+        }
+
+        var snapshot: (firstByte: Double?, connect: Double?, reused: Bool?) {
+            lock.lock(); defer { lock.unlock() }
+            return (firstByte, connect, reused)
+        }
+    }
+    #else
+    public static var isEnabled: Bool { false }
+    static func record(_ call: Call) {}
+    public static func drain() -> [Call] { [] }
+    #endif
+}
