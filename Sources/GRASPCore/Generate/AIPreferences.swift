@@ -142,7 +142,7 @@ public enum AIPreferences {
 
     /// The rest of the list, in the order the picker shows it.
     static func alternates(from known: [String], besides primary: String) -> [String] {
-        (known.isEmpty ? [CloudProvider.fallbackModel] : known).filter { $0 != primary }
+        CloudModelSelection.rest(of: known, besides: primary)
     }
 
     /// The best model the key's live list offered, remembered so a request
@@ -154,9 +154,7 @@ public enum AIPreferences {
 
     /// The model requests actually use.
     public static var resolvedCloudModel: String {
-        let chosen = cloudModel
-        if !chosen.isEmpty { return chosen }
-        return bestKnownCloudModel ?? CloudProvider.fallbackModel
+        CloudModelSelection.read(from: .standard).primary
     }
 
     public static var hasAcceptedCloudNotice: Bool {

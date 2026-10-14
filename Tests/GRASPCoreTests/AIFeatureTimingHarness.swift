@@ -134,35 +134,53 @@ struct AIFeatureTimingHarness {
         let env = ProcessInfo.processInfo.environment
         var generators: [(String, String, any CardGenerator, Int)] = []
         var modelsLine = ""
+        let runsEach = max(1, Int(env["GRASP_TIMING_RUNS"] ?? "1") ?? 1)
         if let key = env["GRASP_TIMING_GEMINI_KEY"], !key.isEmpty {
-            // The model comes from what this key can actually use right
-            // now (the same list the app reads), unless one is named. A
-            // fixed name goes stale when Google retires a model.
-            let live = (try? await GeminiTransport.listModels(apiKey: key)).map(CloudProvider.chatModels(from:)) ?? []
+            // Which model, chosen by the app's own rule (`CloudModelSelection`):
+            // - by default, what the app would use right now, read from the
+            //   app's saved settings (its remembered best model and list);
+            // - GRASP_TIMING_LIVE_LIST=1: what a fresh connection check
+            //   would make it, from the key's live list;
+            // - GRASP_TIMING_MODEL=<name>: that model alone, no walking.
+            let raw = (try? await GeminiTransport.listModels(apiKey: key)) ?? []
+            let live = CloudProvider.chatModels(from: raw)
+            let selection: CloudModelSelection
+            if let named = env["GRASP_TIMING_MODEL"], !named.isEmpty {
+                selection = CloudModelSelection(primary: named, alternates: [], source: "named")
+            } else if env["GRASP_TIMING_LIVE_LIST"] == "1" {
+                selection = CloudModelSelection.fromLiveList(raw)
+            } else {
+                selection = CloudModelSelection.read(from: UserDefaults(suiteName: "com.tyvillan.grasp") ?? .standard)
+            }
             modelsLine = "models this key lists: \(live.prefix(8).joined(separator: ", "))\n"
-            let model = env["GRASP_TIMING_MODEL"] ?? live.first ?? CloudProvider.fallbackModel
-            generators.append(("Cloud", model, CloudGenerator(apiKey: key, model: model), Int(env["GRASP_TIMING_RUNS"] ?? "3") ?? 3))
+                + "model selection: primary \(selection.primary) (\(selection.source)), then \(selection.alternates.isEmpty ? "no alternates" : selection.alternates.joined(separator: ", "))\n"
+            generators.append(("Cloud", selection.primary,
+                               CloudGenerator(apiKey: key, model: selection.primary, alternates: selection.alternates), runsEach))
         }
         if env["GRASP_TIMING_LOCAL"] == "1" {
             let local = OllamaGenerator(model: env["GRASP_TIMING_LOCAL_MODEL"] ?? "qwen3.5:9b")
             if await local.isAvailable { generators.append(("Local", local.modelName, local, 1)) }
         }
         if let plan = env["GRASP_TIMING_PLAN"].flatMap(GeminiPlan.init(rawValue:)) { AIPreferences.geminiPlan = plan }
+        // GRASP_TIMING_FEATURES=generate,refine,context,agreement,questions,overview,explain,judge,guide
+        let wanted = Set((env["GRASP_TIMING_FEATURES"] ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+        func on(_ key: String) -> Bool { wanted.isEmpty || wanted.contains(key) }
         var rows: [Row] = []
         var agreement = ""
         for (backend, model, generator, runs) in generators {
             let (db, deckId, cards, note) = try await makeDeck()
             let g = generator
-            rows.append(await measure("Generate cards", backend: backend, model: model, runs: runs) { _ in
+            if on("generate") { rows.append(await measure("Generate cards", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], maxPerNote: 3, using: g, database: db)
-            })
-            rows.append(await measure("Refine pass (6 cards)", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("refine") { rows.append(await measure("Refine pass (6 cards)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.refineWording(of: cards, using: g, database: db)
-            })
-            rows.append(await measure("Context check (4 cards)", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("context") { rows.append(await measure("Context check (4 cards)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.verifyContext(of: Array(cards.prefix(4)), using: g, database: db)
-            })
-            if backend == "Cloud" {
+            }) }
+            if backend == "Cloud", on("agreement") {
                 // The same cards asked one per call and in batches of five:
                 // do the verdict kinds (valid / refine / reject) agree?
                 let items = cards.map { ContextCheckItem(id: $0.id, front: $0.front, back: $0.back) }
@@ -182,25 +200,25 @@ struct AIFeatureTimingHarness {
                 let same = answered.filter { kind(batched[$0.id]!) == kind(single[$0.id]!) }
                 agreement = "batched answered \(answered.count)/\(cards.count) cards; verdict kind agrees on \(same.count)/\(answered.count)\n"
             }
-            rows.append(await measure("Test questions (2)", backend: backend, model: model, runs: runs) { _ in
+            if on("questions") { rows.append(await measure("Test questions (2)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.generateTestQuestions(inDecks: [deckId], maxCount: 2, using: g, database: db)
-            })
-            rows.append(await measure("Overview", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("overview") { rows.append(await measure("Overview", backend: backend, model: model, runs: runs) { _ in
                 _ = await OverviewComposer.compose(using: g, noteTitle: "Processes and threads", courseName: "Operating Systems", note: note)
-            })
-            rows.append(await measure("Explain a wrong answer", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("explain") { rows.append(await measure("Explain a wrong answer", backend: backend, model: model, runs: runs) { _ in
                 _ = await g.explainWrongAnswer(prompt: "What is a race condition?",
                                                correctAnswer: "A result that depends on the order in which threads run.",
                                                givenAnswer: "Two threads that run at the same speed.", context: Self.note)
-            })
-            rows.append(await measure("AI judge (one answer)", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("judge") { rows.append(await measure("AI judge (one answer)", backend: backend, model: model, runs: runs) { _ in
                 _ = await g.judgeAnswer(question: "What is a thread?", expected: "A unit of execution inside a process",
                                         given: "A part of a program that runs on its own inside a process")
-            })
-            rows.append(await measure("Study guide part", backend: backend, model: model, runs: runs) { _ in
+            }) }
+            if on("guide") { rows.append(await measure("Study guide part", backend: backend, model: model, runs: runs) { _ in
                 _ = await g.generateStudyGuidePart(deckName: "Processes", courseName: "Operating Systems",
                                                    noteContext: Self.note, cardTerms: cards.map(\.front), problemCount: 3)
-            })
+            }) }
         }
         var out = "feature | backend | runs | ok calls | failed calls | total s | pacer wait s | request s | first byte s | connect s | reused | first result s | prompt tok | output tok | model | failures\n"
         for r in rows {

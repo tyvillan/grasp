@@ -305,7 +305,7 @@ struct DeckScreen: View {
             aiMessage = "Every note here already has an overview."
             return
         }
-        let run = AIActivity(headline: "Writing overviews", units: targets.count)
+        let run = AIActivity(headline: "Writing overviews", units: targets.count, unitName: "Note")
         store.runAIJob(store.overviewJobKey(courseId: courseId), activity: run) { [store] run in
             var written = 0
             for (index, target) in targets.enumerated() {

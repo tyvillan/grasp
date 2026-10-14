@@ -43,8 +43,13 @@ final class AIActivity {
     /// back), for the strip's "Cloud" tag.
     let runsInCloud: Bool
 
-    init(headline: String, units: Int = 1, purpose: String = "") {
+    /// What a unit is called in the detail line ("Note" for overviews),
+    /// or nil for a job whose units are not worth counting aloud.
+    let unitName: String?
+
+    init(headline: String, units: Int = 1, purpose: String = "", unitName: String? = nil) {
         self.headline = headline
+        self.unitName = unitName
         self.purpose = purpose
         var cloud = AIPreferences.mode.usesCloud && AIKeyStore.read() != nil
         #if DEBUG
@@ -107,9 +112,13 @@ final class AIActivity {
         fraction = max(fraction, (Double(index) + new.fraction) / Double(units))
     }
 
-    /// "Part 1 of 2 · Writing section 2 of 5 · about 4 min left"
+    /// "Note 2 of 5 · Part 1 of 2 · Writing section 2 of 5 · about 4 min left"
     func detail(at now: Date) -> String {
-        var parts = [snapshot.part, snapshot.step].compactMap { $0 }
+        var parts: [String] = []
+        // Which unit the section count belongs to: without it, "section 4
+        // of 4" next to a small bar reads as nearly done.
+        if let unitName, units > 1 { parts.append("\(unitName) \(min(unit + 1, units)) of \(units)") }
+        parts += [snapshot.part, snapshot.step].compactMap { $0 }
         let remaining = AIProgressEstimate.remaining(
             fraction: fraction, elapsed: now.timeIntervalSince(startedAt)
         )
