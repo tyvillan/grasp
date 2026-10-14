@@ -269,6 +269,17 @@ struct LearnRoundView: View {
                     } else if let verdict {
                         verdictBanner(verdict)
                     }
+                    if isAnswered, let state = feedbackState {
+                        // Shown only after the answer, so it can't bias it.
+                        // Part 1 shows where the card stands, not a change.
+                        HStack(spacing: 8) {
+                            PipMeter(state: state, size: .card, showsWord: true)
+                            Text("This card so far")
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        .transition(.opacity)
+                    }
                     if isAnswered, let judged, judged.outcome == .notQuite, question.type == .written,
                        let cardId = question.cardId {
                         // The judge can be wrong about a loaded answer. Say
@@ -300,9 +311,14 @@ struct LearnRoundView: View {
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
         #endif
+        .onChange(of: isAnswered) { _, answered in
+            feedbackState = answered ? question.cardId.map { store.understandingState(forCard: $0) } : nil
+        }
     }
 
     @State private var lastAnswerCorrect = false
+    /// The answered card's meter state, read when the answer is submitted.
+    @State private var feedbackState: UnderstandingState?
 
     @ViewBuilder
     private func actionButton(_ question: LearnEngine.RoundQuestion) -> some View {
