@@ -59,6 +59,9 @@ public enum DuplicateDetector {
         let id: String
         let front: String
         let backPrefix: String
+        /// Content words of the raw front and back, for the semantic match.
+        let frontWords: Set<String>
+        let backWords: Set<String>
     }
 
     /// An incremental duplicate index, seeded from a deck's existing cards
@@ -86,7 +89,9 @@ public enum DuplicateDetector {
             let entry = Entry(
                 id: id,
                 front: AnswerGrading.normalize(front),
-                backPrefix: String(AnswerGrading.normalize(back).prefix(backComparisonLength))
+                backPrefix: String(AnswerGrading.normalize(back).prefix(backComparisonLength)),
+                frontWords: LocalMeaning.contentWords(front),
+                backWords: LocalMeaning.contentWords(back)
             )
             let insertAt = entriesByLength.firstIndex { $0.front.count >= entry.front.count }
                 ?? entriesByLength.count
@@ -97,7 +102,12 @@ public enum DuplicateDetector {
         /// See `sameTermFrontThreshold`'s doc comment for what
         /// `allowSameTermFallback` does and why it must stay `false`
         /// everywhere except a human-reviewed flow.
-        public func matchId(front: String, back: String, allowSameTermFallback: Bool = false) -> String? {
+        ///
+        /// `semantic` also catches a reworded copy: the same term and an
+        /// answer sharing most of its content words (`CardQuality`). AI
+        /// generation turns it on; import-time suppression does not.
+        public func matchId(front: String, back: String, allowSameTermFallback: Bool = false,
+                            semantic: Bool = false) -> String? {
             let normalizedFront = AnswerGrading.normalize(front)
             guard !normalizedFront.isEmpty else { return nil }
             let normalizedBackPrefix = String(AnswerGrading.normalize(back).prefix(backComparisonLength))
@@ -120,6 +130,15 @@ public enum DuplicateDetector {
                     return entry.id
                 }
                 if allowSameTermFallback, frontSimilarity >= sameTermFrontThreshold {
+                    return entry.id
+                }
+            }
+            if semantic {
+                let frontWords = LocalMeaning.contentWords(front)
+                let backWords = LocalMeaning.contentWords(back)
+                for entry in entriesByLength where CardQuality.areNearDuplicates(
+                    frontWords: frontWords, backWords: backWords,
+                    otherFrontWords: entry.frontWords, otherBackWords: entry.backWords) {
                     return entry.id
                 }
             }

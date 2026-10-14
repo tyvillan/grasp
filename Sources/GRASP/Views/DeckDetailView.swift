@@ -103,6 +103,9 @@ struct DeckDetailView: View {
     @State private var liveSourceTitle: String?
     /// Note titles for AI-made cards' "from <note>" line.
     @State private var sourceTitles: [String: String] = [:]
+    /// Flags on parser-made drafts ("Looks like a duplicate of ...", "This
+    /// front looks like a heading."). Shown, never acted on.
+    @State private var reviewNotes: [String: String] = [:]
     /// False until the first `load()` -- an empty deck's state must not
     /// flash while the cards are still being read.
     @State private var hasLoaded = false
@@ -1271,6 +1274,7 @@ struct DeckDetailView: View {
             recentAIIds = ordered.map(\.id) + recentAIIds
             cards = fresh
             loadSourceTitles()
+            reviewNotes = CardQuality.reviewNotes(for: fresh)
             let step = min(0.06, 1.5 / Double(ordered.count))
             for card in ordered.reversed() {
                 if reduceMotion {
@@ -1351,6 +1355,7 @@ struct DeckDetailView: View {
                     isSelected: selectedCardIds.contains(card.id),
                     selectionActive: !selectedCardIds.isEmpty,
                     sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
+                    reviewNote: reviewNotes[card.id],
                     mastery: learnLevels[card.id] ?? .new,
                     siblingDecks: siblingDecks,
                     isRefining: refiningCardIds.contains(card.id),
@@ -1599,6 +1604,7 @@ struct DeckDetailView: View {
             scopeDeckIds = store.deckIds(in: scope)
         }
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
+        reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
         hasLoaded = true
         loadSourceTitles()
@@ -2113,6 +2119,8 @@ private struct CardRow: View {
     let selectionActive: Bool
     /// The note an AI-made card came from, when known.
     let sourceTitle: String?
+    /// A flag on a parser-made draft, when it looks like a duplicate or a heading.
+    let reviewNote: String?
     let mastery: LearnEngine.Level
     let siblingDecks: [Deck]
     let isRefining: Bool
@@ -2200,6 +2208,14 @@ private struct CardRow: View {
                     .buttonStyle(.plain)
                     .help("Open this note")
                     .padding(.top, 1)
+                }
+                if let reviewNote {
+                    Text(reviewNote)
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.top, 1)
                 }
             }
             Spacer(minLength: 8)

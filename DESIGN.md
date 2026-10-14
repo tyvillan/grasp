@@ -104,6 +104,11 @@ A view that uses the tokens needs no check of its own.
   it cross-fades to the row's actions (preview, approve, ⋯) on hover or keyboard focus.
   A 2 pt rail on the left carries mastery in cream steps; AI-made drafts carry the
   sparkle and a "from <note>" line.
+- **Row flag.** A parser-made draft that looks like a duplicate or a heading gets one
+  muted line under its answer ("Looks like a duplicate of “Set”.", "This front
+  looks like a heading."). It is a flag only: nothing is hidden or removed, and
+  approved cards, manual cards and AI cards are never flagged. AI cards that fail
+  the same checks are never saved (`CardQuality`).
 - **Selection.** Any selected row gives every row a round checkbox on its left
   (yellow check / empty ring); selected rows are `surfaceRaised`. One floating bar:
   Approve N, Suspend, Move to…, Delete (coral), clear.

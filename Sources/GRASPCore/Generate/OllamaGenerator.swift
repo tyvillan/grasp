@@ -907,7 +907,8 @@ public struct OllamaGenerator: CardGenerator {
         match what the back is really about -- replace it entirely with the correct short term or \
         question for that concept, grounded only in the note context below. Otherwise, leave the \
         term's meaning alone and only fix minor wording or OCR/parsing artifacts. For the back, \
-        rewrite it as a concise, accurate answer. Do not invent facts not implied by the note context.
+        rewrite it as a concise, accurate answer. Do not invent facts not implied by the note context. \
+        \(CardQuality.unchangedRule) \(CardQuality.groundingRule)
 
         Note context:
         \(noteContext.prefix(2000))
@@ -941,7 +942,7 @@ public struct OllamaGenerator: CardGenerator {
         without an example. Every fact on a new card must be directly supported by the note text \
         below. Do not add outside knowledge, and do not invent an example, number, or date that \
         isn't in the note. If you can't find any such gap, return an empty array -- that is a normal \
-        and expected result, not a failure.
+        and expected result, not a failure. \(CardQuality.skipRule) \(CardQuality.groundingRule)
 
         \(focusLine)Note:
         \(noteContext.prefix(3000))
@@ -975,7 +976,7 @@ public struct OllamaGenerator: CardGenerator {
         directly supported by the note text below. Do not add outside knowledge, and do not invent \
         an example, number, or date that isn't in the note. If the note doesn't support any good \
         question beyond what's already covered, return an empty array -- that is a normal and \
-        expected result, not a failure.
+        expected result, not a failure. \(CardQuality.skipRule) \(CardQuality.groundingRule)
 
         Note:
         \(noteContext.prefix(3000))
