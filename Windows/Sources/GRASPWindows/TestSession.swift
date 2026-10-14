@@ -361,12 +361,15 @@ private struct ResultRow: View {
                     Text(MathNotation.prettify(item.question.prompt))
                         .font(GRASPFont.rowTitle)
                         .foregroundColor(GRASPColor.textPrimary)
+                    if let code = item.question.code {
+                        CodeBlockView(code: code.code)
+                    }
                     if !item.isCorrect {
-                        Text("You answered: \(item.givenAnswer)")
+                        Text("You answered: \(item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer)")
                             .font(GRASPFont.body)
                             .foregroundColor(GRASPColor.textSecondary)
                     }
-                    Text(MathNotation.prettify(item.question.correctAnswer))
+                    Text(MathNotation.prettify(item.question.code?.answerText ?? item.question.correctAnswer))
                         .font(GRASPFont.body)
                         .foregroundColor(GRASPColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

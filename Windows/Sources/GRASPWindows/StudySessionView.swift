@@ -426,6 +426,12 @@ struct EmptyStudy: View {
 struct AnswerState {
     var selected: String?
     var written = ""
+    /// A code question's blank answers, in order (`written` holds them encoded).
+    var blanks: [String] = []
+    /// A find-the-bug question's picked line.
+    var selectedLine: Int?
+    /// A complete-the-function answer waiting for the student's own verdict.
+    var checkingFunction = false
     var verdict: AnswerGrading.Verdict?
     var isAnswered = false
     var wasCorrect = false
@@ -449,7 +455,11 @@ struct QuestionView: View {
         ScrollView {
             VStack(spacing: 18) {
                 if question.cardId == nil {
-                    Chip(text: "AI-generated", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
+                    if question.code != nil || question.problem != nil {
+                        Chip(text: "Practice question", tint: GRASPColor.success, soft: GRASPColor.successSoft)
+                    } else {
+                        Chip(text: "AI-generated", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
+                    }
                 }
                 Text(MathNotation.prettify(question.prompt))
                     .font(Font.system(size: 22, weight: .semibold))
@@ -459,11 +469,16 @@ struct QuestionView: View {
                     .padding(.top, 30)
                 switch question.type {
                 case .multipleChoice:
+                    if let code = question.code { CodeContextBlock(code: code) }
                     ChoiceList(question: question, answer: answer, pick: pick)
                 case .trueFalse:
                     TrueFalse(question: question, answer: answer, pick: pick)
                 case .written:
-                    WrittenAnswer(question: question, answer: $answer, submit: submit)
+                    if let code = question.code {
+                        CodeAnswerArea(code: code, answer: $answer, submit: submit)
+                    } else {
+                        WrittenAnswer(question: question, answer: $answer, submit: submit)
+                    }
                 }
                 VerdictLine(question: question, answer: answer)
                 actions
@@ -478,7 +493,7 @@ struct QuestionView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             if answer.isAnswered {
-                if question.type == .written, !answer.wasCorrect, let onOverride {
+                if question.allowsMarkCorrect, !answer.wasCorrect, let onOverride {
                     Button("I Actually Got This Right") {
                         answer.wasCorrect = true
                         answer.wasOverridden = true
@@ -487,8 +502,15 @@ struct QuestionView: View {
                     .fixedSize()
                 }
                 Button(nextTitle) { next() }.fixedSize()
+            } else if answer.checkingFunction {
+                // No compiler on this PC: the student marks their own code
+                // against the reference, as the Mac does where it can't run.
+                Button("I Got It") { finishFunction(correct: true) }.fixedSize()
+                Button("Not Yet") { finishFunction(correct: false) }.fixedSize()
+            } else if question.code?.kind == .findBug && question.type == .written {
+                // Tapping a line answers it.
             } else if !submitsOnChoice || question.type == .written {
-                Button("Submit") { submit() }
+                Button(question.code?.kind == .completeFunction ? "Check" : "Submit") { submit() }
                     .disabled(!canSubmit)
                     .fixedSize()
             }
@@ -496,9 +518,20 @@ struct QuestionView: View {
     }
 
     private var canSubmit: Bool {
-        question.type == .written
+        if question.type == .written, let code = question.code, code.kind == .codeBlanks {
+            return answer.blanks.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        }
+        return question.type == .written
             ? !answer.written.trimmingCharacters(in: .whitespaces).isEmpty
             : answer.selected != nil
+    }
+
+    private func finishFunction(correct: Bool) {
+        answer.checkingFunction = false
+        answer.wasCorrect = correct
+        answer.verdict = correct ? .correct : .incorrect
+        answer.isAnswered = true
+        onAnswered?()
     }
 
     private func pick(_ choice: String) {
@@ -518,9 +551,20 @@ struct QuestionView: View {
             answer.wasCorrect = answer.selected == question.correctAnswer
             answer.verdict = answer.wasCorrect ? .correct : .incorrect
         case .written:
-            let verdict = AnswerGrading.grade(given: answer.written, correct: question.correctAnswer)
-            answer.verdict = verdict
-            answer.wasCorrect = verdict != .incorrect
+            if let code = question.code {
+                // A program's blanks, output and bug line are compared
+                // exactly; nothing here guesses at a loose answer.
+                guard let result = CodeAnswerGrading.grade(code, given: answer.written) else {
+                    answer.checkingFunction = true
+                    return
+                }
+                answer.verdict = result ? .correct : .incorrect
+                answer.wasCorrect = result
+            } else {
+                let verdict = AnswerGrading.grade(given: answer.written, correct: question.correctAnswer)
+                answer.verdict = verdict
+                answer.wasCorrect = verdict != .incorrect
+            }
         }
         answer.isAnswered = true
         onAnswered?()
