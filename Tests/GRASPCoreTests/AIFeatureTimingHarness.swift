@@ -133,8 +133,14 @@ struct AIFeatureTimingHarness {
     func table() async throws {
         let env = ProcessInfo.processInfo.environment
         var generators: [(String, String, any CardGenerator, Int)] = []
+        var modelsLine = ""
         if let key = env["GRASP_TIMING_GEMINI_KEY"], !key.isEmpty {
-            let model = env["GRASP_TIMING_MODEL"] ?? CloudProvider.fallbackModel
+            // The model comes from what this key can actually use right
+            // now (the same list the app reads), unless one is named. A
+            // fixed name goes stale when Google retires a model.
+            let live = (try? await GeminiTransport.listModels(apiKey: key)).map(CloudProvider.chatModels(from:)) ?? []
+            modelsLine = "models this key lists: \(live.prefix(8).joined(separator: ", "))\n"
+            let model = env["GRASP_TIMING_MODEL"] ?? live.first ?? CloudProvider.fallbackModel
             generators.append(("Cloud", model, CloudGenerator(apiKey: key, model: model), Int(env["GRASP_TIMING_RUNS"] ?? "3") ?? 3))
         }
         if env["GRASP_TIMING_LOCAL"] == "1" {
@@ -203,6 +209,7 @@ struct AIFeatureTimingHarness {
                           r.connect, r.reused, r.firstResult, r.promptTokens, r.outputTokens, r.model,
                           r.failureKinds.isEmpty ? "-" : r.failureKinds)
         }
+        out += modelsLine
         out += agreement
         for event in AITiming.drainEvents() { out += "event: \(event)\n" }
         out += "plan: \(AIPreferences.geminiPlan.rawValue), pace \(CloudProvider.requestsPerMinute) per minute\n"

@@ -261,11 +261,16 @@ public struct GeminiTransport: ChatTransport {
                 } catch {
                     // A failed call is a row too: its time is real, and the
                     // kind of failure (never the body) says why.
+                    let answered = metrics.answer
+                    var kind = AITiming.describeFailure(error)
+                    if let code = answered.status {
+                        kind += " (HTTP \(code)" + (answered.errorStatus.map { " \($0)" } ?? "") + ")"
+                    }
                     AITiming.record(.init(
                         feature: AITiming.feature, model: current, promptChars: prompt.count, outputChars: 0,
                         pacerWait: pacerWaited, request: Date().timeIntervalSince(started),
-                        firstByte: nil, connect: nil, reusedConnection: nil, status: 0,
-                        failure: AITiming.describeFailure(error)))
+                        firstByte: nil, connect: nil, reusedConnection: nil, status: answered.status ?? 0,
+                        failure: kind))
                     throw error
                 }
                 let seen = metrics.snapshot
@@ -404,6 +409,18 @@ public struct GeminiTransport: ChatTransport {
         return "Google answered with something GRASP couldn't read: \(body.prefix(300))"
     }
 
+    /// Google's own status word for an error (`NOT_FOUND`), for the debug
+    /// timing output. Letters and underscores only, so nothing else can
+    /// ride along.
+    static func errorStatusWord(in body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let object = (json as? [[String: Any]])?.first ?? (json as? [String: Any])
+        guard let word = (object?["error"] as? [String: Any])?["status"] as? String,
+              word.count <= 40, word.allSatisfy({ $0.isUppercase || $0 == "_" }) else { return nil }
+        return word
+    }
+
     static func errorMessage(in body: String) -> String? {
         guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
@@ -468,6 +485,9 @@ public struct GeminiTransport: ChatTransport {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let body = String(data: data, encoding: .utf8) ?? ""
+        #if DEBUG
+        AITiming.metrics?.setAnswer(status: status, errorStatus: status == 200 ? nil : Self.errorStatusWord(in: body))
+        #endif
         switch status {
         case 200:
             guard let reply = try? JSONDecoder().decode(Reply.self, from: data), let choice = reply.choices.first

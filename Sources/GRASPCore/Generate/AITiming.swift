@@ -101,6 +101,19 @@ public enum AITiming {
         private var firstByte: Double?
         private var connect: Double?
         private var reused: Bool?
+        private var httpStatus: Int?
+        private var errorStatus: String?
+
+        /// What Google answered, as a number and its own status word
+        /// (NOT_FOUND, INVALID_ARGUMENT...). Never the body.
+        func setAnswer(status: Int, errorStatus: String?) {
+            lock.lock(); httpStatus = status; self.errorStatus = errorStatus; lock.unlock()
+        }
+
+        var answer: (status: Int?, errorStatus: String?) {
+            lock.lock(); defer { lock.unlock() }
+            return (httpStatus, errorStatus)
+        }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
             guard let t = metrics.transactionMetrics.last, let start = t.fetchStartDate else { return }

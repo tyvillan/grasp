@@ -326,3 +326,15 @@ struct CloudFailureOwnTests {
         #expect(!CloudFailureText.isOwn("The model's reply couldn't be read."))
     }
 }
+
+@Suite("Debug timing: Google's status word")
+struct ErrorStatusWordTests {
+    @Test("a Google error body gives its status word and nothing else")
+    func word() {
+        let body = #"{"error":{"code":404,"message":"models/x is not found","status":"NOT_FOUND"}}"#
+        #expect(GeminiTransport.errorStatusWord(in: body) == "NOT_FOUND")
+        #expect(GeminiTransport.errorStatusWord(in: #"[{"error":{"status":"INVALID_ARGUMENT"}}]"#) == "INVALID_ARGUMENT")
+        #expect(GeminiTransport.errorStatusWord(in: "not json") == nil)
+        #expect(GeminiTransport.errorStatusWord(in: #"{"error":{"status":"has spaces and Key=abc123"}}"#) == nil)
+    }
+}
