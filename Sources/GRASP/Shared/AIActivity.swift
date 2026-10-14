@@ -46,7 +46,11 @@ final class AIActivity {
     init(headline: String, units: Int = 1, purpose: String = "") {
         self.headline = headline
         self.purpose = purpose
-        self.runsInCloud = AIPreferences.mode.usesCloud && AIKeyStore.read() != nil
+        var cloud = AIPreferences.mode.usesCloud && AIKeyStore.read() != nil
+        #if DEBUG
+        if CloudStub.isActive { cloud = true }
+        #endif
+        self.runsInCloud = cloud
         self.units = max(1, units)
         #if os(macOS)
         assertion = ProcessInfo.processInfo.beginActivity(

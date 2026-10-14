@@ -79,7 +79,14 @@ public struct CloudGenerator: CardGenerator {
     public func generateAdditionalResult(
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> AdditionalNoteResult {
-        await pipeline.generateAdditionalResult(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        failures.reset()
+        let result = await pipeline.generateAdditionalResult(
+            existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        // "The model didn't answer" says nothing; the transport knows why.
+        if case .failed = result, let error = failures.lastError {
+            return .failed(CloudFailureText.text(for: error))
+        }
+        return result
     }
 
     public func generateTestQuestions(
@@ -266,6 +273,26 @@ struct FallbackTransport: ChatTransport {
             AIProgress.current?.setNote(FallbackMessage.text(for: .quotaExhausted, local: secondaryName))
         }
         return try await secondary.complete(prompt: prompt, json: json, maxTokens: maxTokens)
+    }
+}
+
+/// Why a cloud call failed, in a sentence a student can act on.
+public enum CloudFailureText {
+    public static func text(for error: AIBackendError) -> String {
+        switch error {
+        case .unreachable:
+            return "GRASP can't reach Google. Check your internet connection and try again."
+        case .overloaded:
+            return "Google's Gemini models are overloaded right now. Try again in a few minutes."
+        case .rateLimited:
+            return "Google asked GRASP to slow down and is still busy. Wait a minute and try again."
+        case .quotaExhausted:
+            return "Today's free Gemini limit is used up. It comes back at midnight Pacific time, or you can switch to Local in Settings."
+        case .unauthorized:
+            return "Google did not accept your API key. Check it in Settings, under AI."
+        case .badResponse:
+            return "Google sent back something GRASP could not use. Try again."
+        }
     }
 }
 

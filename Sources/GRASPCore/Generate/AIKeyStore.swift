@@ -69,6 +69,10 @@ public enum AIKeyStore {
 
     /// `found`: an item came back, whatever it held.
     private static func fetch() -> (key: String?, status: Int32, found: Bool) {
+        // The debug stand-in for Google never touches the Keychain.
+        #if DEBUG
+        if CloudStub.isActive { return ("stub", errSecSuccess, true) }
+        #endif
         #if canImport(Security)
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

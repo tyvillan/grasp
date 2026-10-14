@@ -18,6 +18,7 @@ struct GRASPApp: App {
 
     init() {
         _ = GRASPFonts.available
+        StubHooks.installCloudStub()
     }
 
     var body: some Scene {

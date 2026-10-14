@@ -259,8 +259,10 @@ public struct OllamaGenerator: CardGenerator {
                 // mid-JSON.
                 let response = try? await self.chat(prompt: prompt, maxTokens: 1_800)
                 progress?.advance()
-                guard let response else { return nil }
-                return Self.parseSectionResponse(response, heading: planned.heading)
+                guard let response,
+                      let section = Self.parseSectionResponse(response, heading: planned.heading) else { return nil }
+                progress?.addFinished(section.heading)
+                return section
             }
             if Task.isCancelled { return .empty }
             let sections = written.compactMap { $0 ?? nil }

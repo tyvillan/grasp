@@ -145,6 +145,7 @@ public struct GeminiTransport: ChatTransport {
         maxRetries: Int = 2, alternates: [String] = [], overloadPauses: [TimeInterval] = [3, 8],
         send: @escaping Send = { request in
             #if DEBUG
+            if CloudStub.isActive { return try await CloudStub.respond(request) }
             if AITiming.isEnabled, let metrics = AITiming.metrics {
                 return try await GeminiTransport.session.data(for: request, delegate: metrics)
             }
@@ -200,7 +201,11 @@ public struct GeminiTransport: ChatTransport {
             #endif
             let gate = AIRequestContext.gate
             gate?.setQueued(true)
-            do { try await pacer.waitTurn() } catch { gate?.setQueued(false); throw error }
+            // A long wait for a turn is the free plan's pace, not a fault;
+            // say so, and say how to change it.
+            let pacingNote = Self.notify(after: 8, CloudProvider.pacingNote)
+            do { try await pacer.waitTurn() } catch { pacingNote.cancel(); gate?.setQueued(false); throw error }
+            pacingNote.cancel()
             gate?.setQueued(false)
             #if DEBUG
             pacerWaited = Date().timeIntervalSince(pacerStart)
@@ -212,6 +217,8 @@ public struct GeminiTransport: ChatTransport {
                 retries = 0
                 AIProgress.current?.setNote("\(reason), so GRASP is using \(order[index])")
             }
+            let slowNote = Self.notify(after: 25, CloudProvider.slowNote)
+            defer { slowNote.cancel() }
             do {
                 #if DEBUG
                 let started = Date()
@@ -308,6 +315,21 @@ public struct GeminiTransport: ChatTransport {
                 failures?.record(error)
                 throw error
             }
+        }
+    }
+
+    /// Shows `text` as the job's note if the call is still going after
+    /// `seconds`, and takes it down again when cancelled. The caller cancels
+    /// the returned task as soon as the call is over.
+    static func notify(after seconds: Double, _ text: String) -> Task<Void, Never> {
+        let progress = AIProgress.current
+        return Task {
+            guard let progress else { return }
+            do { try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) } catch { return }
+            progress.setNote(text)
+            // Held until cancelled, then cleared if nothing replaced it.
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 200_000_000) }
+            if progress.snapshot.note == text { progress.setNote(nil) }
         }
     }
 

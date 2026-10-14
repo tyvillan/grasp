@@ -35,6 +35,14 @@ public enum CloudProvider {
     public static let fallbackModel = "gemini-2.5-flash"
     /// Requests per minute the pacer keeps under, for the chosen plan.
     public static var requestsPerMinute: Int { AIPreferences.geminiPlan.requestsPerMinute }
+    /// Said while a request waits a long time for its turn.
+    public static var pacingNote: String {
+        AIPreferences.geminiPlan == .free
+            ? "GRASP sends one request every \(Int((60.0 / Double(requestsPerMinute)).rounded())) seconds to stay inside Google's free limit. Choose Paid in Settings if billing is on."
+            : "Waiting for a free slot in Google's request limit."
+    }
+    /// Said while one request has taken unusually long.
+    public static let slowNote = "Google is taking longer than usual to answer. GRASP is still waiting. You can stop at any time."
     /// The daily request allowance quota warnings plan against.
     public static let estimatedRequestsPerDay = 250
     /// The free tier resets at midnight Pacific.

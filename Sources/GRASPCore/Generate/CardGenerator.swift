@@ -479,10 +479,14 @@ public struct NoGenerator: CardGenerator {
 public enum CardGenerators {
     /// The generator for the student's AI mode (see `AIPreferences`).
     public static func select() async -> any CardGenerator {
-        let mode = AIPreferences.mode
+        var mode = AIPreferences.mode
+        var stubKey: String?
+        #if DEBUG
+        if CloudStub.isActive { mode = .cloud; stubKey = "stub" }
+        #endif
         let local: any CardGenerator = mode == .cloud ? NoGenerator() : await localGenerator()
         let model = AIPreferences.resolvedCloudModel
-        return select(mode: mode, cloudKey: mode.usesCloud ? AIKeyStore.read() : nil, cloudModel: model,
+        return select(mode: mode, cloudKey: mode.usesCloud ? (stubKey ?? AIKeyStore.read()) : nil, cloudModel: model,
                       alternates: AIPreferences.alternateCloudModels(besides: model), local: local)
     }
 
