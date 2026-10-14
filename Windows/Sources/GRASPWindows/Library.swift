@@ -384,6 +384,19 @@ final class Library {
         return result
     }
 
+    /// Questions saved against these decks (the test bank: code questions
+    /// and hand-written or imported ones), asked the way the test's Written
+    /// and Multiple choice settings say. As on the Mac, they come first.
+    func bankQuestions(inDecks deckIds: [String], count: Int, allowWritten: Bool, allowMultipleChoice: Bool)
+        -> [LearnEngine.RoundQuestion] {
+        guard count > 0, allowWritten || allowMultipleChoice else { return [] }
+        return (try? database.queue.read { db in
+            var rng = SystemRandomNumberGenerator()
+            return try CodeQuestionBank.pickRound(count: count, inDecks: deckIds, allowWritten: allowWritten,
+                                                  allowMultipleChoice: allowMultipleChoice, using: &rng, db: db)
+        }) ?? []
+    }
+
     func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) {
         record { try Study.submitTestAnswer(attemptId: attemptId, ordinal: ordinal, given: given, isCorrect: isCorrect, db: $0) }
     }

@@ -162,15 +162,21 @@ private struct TestSetup: View {
             allowTrueFalse: trueFalse, shuffle: shuffle, excludeMastered: excludeKnown
         )
         noQuestions = false
-        guard usesAI else {
-            launch(config, aiQuestions: [], warning: nil)
+        // Saved questions come first, as on the Mac: they were checked, or
+        // written by hand. They share the AI questions' room in the test.
+        let room = Study.aiQuestionBudget(for: questionCount)
+        let saved = library.settings.aiTestQuestions
+            ? library.bankQuestions(inDecks: deckIds, count: room, allowWritten: written, allowMultipleChoice: multipleChoice)
+            : []
+        let budget = room - saved.count
+        guard usesAI, budget > 0 else {
+            launch(config, aiQuestions: saved, warning: nil)
             return
         }
         writing = "Writing questions from your notes…"
         writingFraction = 0
         let flag = SkipFlag()
         skip = SkipBox(flag: flag)
-        let budget = Study.aiQuestionBudget(for: questionCount)
         Task {
             let generator = await CardGenerators.select()
             let progress = AIProgress { snapshot in
@@ -184,7 +190,7 @@ private struct TestSetup: View {
                                                    database: library.database, skipped: { flag.isSet })
             }
             writing = nil
-            launch(config, aiQuestions: questions, warning: warning)
+            launch(config, aiQuestions: saved + questions, warning: warning)
         }
     }
 

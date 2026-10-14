@@ -337,3 +337,7 @@ Windows still uses the old `AnswerGrading.grade` and does not have `AnswerLadder
 
 ## CardQuality (2026-10-14, generation-quality)
 `CardQuality` ships with the core (`Sources/GRASPCore/Generate/CardQuality.swift`): refusal, option-less and placeholder checks, near-duplicate detection and `reviewNotes(for:)`. Generation loops in `CardAI` already use it, so Windows generation gets the skips for free. **Row flag (Windows, done 2026-10-14):** `Library.reviewNotes(inDecks:)` caches `CardQuality.reviewNotes` on the library revision, and `CardRowView` shows the note as a muted line under a parser draft's text. Flag only: nothing is hidden or changed.
+
+## Saved test questions with a written answer (2026-10-14, Windows)
+`ProblemQuestion.writtenAnswer` (core, `[needs Mac check]`): a saved multiple-choice question can carry a model answer, so the same bank question is asked as written when Written is on and as multiple choice when Multiple choice is on (random when both are). `CodeQuestionBank.pickRound` does this; questions without one behave as before, and older builds ignore the key and show them as multiple choice. Windows's Test now reads the bank like the Mac's: with AI test questions on, saved questions fill the AI budget first (`Library.bankQuestions`). Tyler's Intro to Software Design weeks 1 to 7 (10 each, in the Week decks) were imported this way.
+

@@ -287,12 +287,20 @@ public enum CodeQuestionBank {
                 typed = allowWritten ? code.roundQuestion() : nil
             } else if let problem = record.problem {
                 if problem.kind == .multipleChoice {
-                    // Already multiple choice: it fits either kind of test.
-                    result.append(problem.roundQuestion(using: &rng))
-                    continue
+                    if let writtenVersion = problem.writtenRoundQuestion() {
+                        // Saved with a written answer too: the test's
+                        // Written and Multiple choice settings decide.
+                        choice = allowMultipleChoice ? problem.roundQuestion(using: &rng) : nil
+                        typed = allowWritten ? writtenVersion : nil
+                    } else {
+                        // Already multiple choice: it fits either kind of test.
+                        result.append(problem.roundQuestion(using: &rng))
+                        continue
+                    }
+                } else {
+                    choice = allowMultipleChoice ? ChoiceVersions.problemVersion(problem, using: &rng) : nil
+                    typed = allowWritten ? problem.roundQuestion(using: &rng) : nil
                 }
-                choice = allowMultipleChoice ? ChoiceVersions.problemVersion(problem, using: &rng) : nil
-                typed = allowWritten ? problem.roundQuestion(using: &rng) : nil
             } else {
                 continue
             }

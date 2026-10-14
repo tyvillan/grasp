@@ -62,13 +62,19 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
     public var matrix: [[Double]]?
     /// How to get there, a sentence or two.
     public var explanation: String?
+    /// `multipleChoice` only: the model answer when the same question is
+    /// asked as a written one. A test with Written on asks `prompt` and
+    /// grades the typed answer against this; with Multiple choice on it
+    /// shows `choices`; with both on, each question is one or the other.
+    /// Nil for a question that is only ever multiple choice.
+    public var writtenAnswer: String?
 
     public init(kind: ProblemKind, subject: ProblemSubject, prompt: String, choices: [String]? = nil,
                 correct: Int? = nil, number: Double? = nil, unit: String? = nil, matrix: [[Double]]? = nil,
-                explanation: String? = nil) {
+                explanation: String? = nil, writtenAnswer: String? = nil) {
         self.kind = kind; self.subject = subject; self.prompt = prompt; self.choices = choices
         self.correct = correct; self.number = number; self.unit = unit; self.matrix = matrix
-        self.explanation = explanation
+        self.explanation = explanation; self.writtenAnswer = writtenAnswer
     }
 
     public func encoded() -> String? {
@@ -84,6 +90,7 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
         problem.prompt = PlainMath.clean(problem.prompt)
         problem.choices = problem.choices.map(PlainMath.clean)
         problem.explanation = QuestionExplanation.clean(problem.explanation.map(PlainMath.clean))
+        problem.writtenAnswer = problem.writtenAnswer.map(PlainMath.clean)
         return problem
     }
 
@@ -112,6 +119,15 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
         }
         return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: answerText,
                                          type: .written, problem: self)
+    }
+
+    /// The written version of a multiple-choice question that has one.
+    public func writtenRoundQuestion(id: String = UUID().uuidString) -> LearnEngine.RoundQuestion? {
+        guard kind == .multipleChoice,
+              let answer = writtenAnswer?.trimmingCharacters(in: .whitespacesAndNewlines), !answer.isEmpty
+        else { return nil }
+        return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: answer,
+                                         type: .written, explanation: explanation)
     }
 }
 
