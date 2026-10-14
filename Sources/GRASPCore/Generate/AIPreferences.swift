@@ -33,8 +33,8 @@ public enum CloudProvider {
     public static let usagePageURL = URL(string: "https://aistudio.google.com/rate-limit")!
     /// Used until the live model list has been read once.
     public static let fallbackModel = "gemini-2.5-flash"
-    /// Requests per minute the pacer keeps under.
-    public static let requestsPerMinute = 10
+    /// Requests per minute the pacer keeps under, for the chosen plan.
+    public static var requestsPerMinute: Int { AIPreferences.geminiPlan.requestsPerMinute }
     /// The daily request allowance quota warnings plan against.
     public static let estimatedRequestsPerDay = 250
     /// The free tier resets at midnight Pacific.
@@ -57,6 +57,22 @@ public enum CloudProvider {
     }
 }
 
+/// Which Gemini plan the student's key is on. The pace of requests follows it.
+///
+/// Google no longer publishes fixed per-minute numbers (its rate-limit page
+/// says limits "depend on a variety of factors" and are shown per project
+/// in AI Studio), so these are conservative choices, not quotes: free is
+/// the long-standing 10 a minute for Flash models, paid is a rate far
+/// under what a billed project is normally given. A rate-limit reply is
+/// retried with a wait either way.
+public enum GeminiPlan: String, CaseIterable, Sendable {
+    case free, paid
+
+    public var requestsPerMinute: Int { self == .paid ? 120 : 10 }
+    /// How many independent calls may be in flight at once.
+    public var concurrency: Int { self == .paid ? 4 : 1 }
+}
+
 /// The student's AI choices. Machine-wide (`UserDefaults.standard`), like
 /// the Ollama model: they describe this device, not one person's library.
 public enum AIPreferences {
@@ -64,6 +80,13 @@ public enum AIPreferences {
     public static let cloudModelKey = "GRASP.cloudModel"
     /// Set once the student has accepted the free-tier data notice.
     public static let acceptedCloudNoticeKey = "GRASP.acceptedCloudNotice"
+
+    public static let geminiPlanKey = "GRASP.geminiPlan"
+
+    public static var geminiPlan: GeminiPlan {
+        get { UserDefaults.standard.string(forKey: geminiPlanKey).flatMap(GeminiPlan.init(rawValue:)) ?? .free }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: geminiPlanKey) }
+    }
 
     public static var mode: AIMode {
         get { UserDefaults.standard.string(forKey: modeKey).flatMap(AIMode.init(rawValue:)) ?? .local }

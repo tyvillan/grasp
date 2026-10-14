@@ -206,6 +206,12 @@ extension OllamaGenerator {
     /// the question in general. Asked again once if the first reply breaks
     /// the style rules; nil when neither does.
     public func explainWrongAnswer(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
+        await AIRequestContext.$priority.withValue(.interactive) {
+            await explainWrongAnswerNow(prompt: prompt, correctAnswer: correctAnswer, givenAnswer: givenAnswer, context: context)
+        }
+    }
+
+    private func explainWrongAnswerNow(prompt: String, correctAnswer: String, givenAnswer: String, context: String) async -> String? {
         var note = ""
         for attempt in 0..<2 {
             let text = Self.explainWrongAnswerPrompt(prompt: prompt, correctAnswer: correctAnswer,
@@ -226,7 +232,9 @@ extension OllamaGenerator {
     /// the card's answer and the student's answer, and nothing else.
     public func judgeAnswer(question: String, expected: String, given: String) async -> AIAnswerVerdict? {
         let prompt = Self.judgeAnswerPrompt(question: question, expected: expected, given: given)
-        guard let reply = try? await chat(prompt: prompt) else { return nil }
+        guard let reply = try? await AIRequestContext.$priority.withValue(.interactive, operation: {
+            try await chat(prompt: prompt)
+        }) else { return nil }
         return Self.parseJudgement(reply)
     }
 

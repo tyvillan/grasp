@@ -73,12 +73,43 @@ public enum AnswerLadder {
             return JudgedAnswer(outcome: decided, source: decided == .correct && local.isExact ? .exact : .local)
         }
         // Borderline. Ask the judge, but never wait on it.
-        if let judge, let verdict = await withTimeout(timeout, {
+        if let judge, let verdict = await withSendTimeout(timeout, {
             await judge(question, expected, given)
         }) {
             return JudgedAnswer(outcome: verdict.outcome, reason: verdict.reason, source: .ai)
         }
         return JudgedAnswer(outcome: local.fallback, source: .localFallback)
+    }
+
+    /// Like `withTimeout`, for a request that may first wait its turn: the
+    /// clock holds while the request is queued and runs from the moment it
+    /// is sent. The work goes in the interactive lane. A ceiling stops a
+    /// request that never gets its turn from holding the student up.
+    static func withSendTimeout<T: Sendable>(
+        _ limit: Duration, ceiling: Duration = .seconds(20), _ work: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        let gate = SendGate()
+        return await withTaskGroup(of: T?.self) { group in
+            group.addTask {
+                await AIRequestContext.$gate.withValue(gate) {
+                    await AIRequestContext.$priority.withValue(.interactive) { await work() }
+                }
+            }
+            group.addTask {
+                let begun = ContinuousClock.now
+                var sent = begun
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    let now = ContinuousClock.now
+                    if gate.isQueued { sent = now }
+                    if now - sent >= limit || now - begun >= ceiling { return nil }
+                }
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// Runs `work` against a clock; nil when the clock wins (the work is

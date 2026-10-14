@@ -3,24 +3,80 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// How urgent a request is. A student waiting on one answer (the AI judge,
+/// "Explain this") must not sit behind a queue of background generation.
+enum RequestPriority: Sendable { case background, interactive }
+
+/// Per-request context carried by the task, so the transport needs no
+/// extra parameters: the priority lane, and a gate the caller can watch to
+/// start its own clock when the request is really sent.
+enum AIRequestContext {
+    @TaskLocal static var priority: RequestPriority = .background
+    @TaskLocal static var gate: SendGate?
+}
+
+/// Whether a request is still waiting for the pacer's turn. A timeout that
+/// is about the answer's speed holds its clock while this is true.
+final class SendGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var queued = false
+    var isQueued: Bool { lock.lock(); defer { lock.unlock() }; return queued }
+    func setQueued(_ value: Bool) { lock.lock(); queued = value; lock.unlock() }
+}
+
 /// Spaces cloud requests out to stay under the per-minute limit. Shared by
 /// every transport, since the limit is per key, not per generator.
+///
+/// Background requests go one at a time in arrival order, spaced
+/// `minimumInterval` apart. An interactive request does not wait behind
+/// them: it goes at once. It still counts: it is recorded in the same
+/// one-minute window, so the background requests after it wait for room.
+/// The window may be exceeded by one request in ten (at least one) for an
+/// interactive call, because a student waiting is worth that and a
+/// rate-limit reply is retried anyway.
 actor RequestPacer {
     static let shared = RequestPacer(minimumInterval: 60.0 / Double(CloudProvider.requestsPerMinute))
 
-    private let minimumInterval: TimeInterval
-    private var nextSlot = Date.distantPast
+    private var minimumInterval: TimeInterval
+    private var sends: [Date] = []
+    private var lastSend = Date.distantPast
+    private var queue: [UInt64] = []
+    private var nextTicket: UInt64 = 0
 
     init(minimumInterval: TimeInterval) {
         self.minimumInterval = minimumInterval
     }
 
-    func waitTurn() async throws {
-        let now = Date()
-        let start = max(now, nextSlot)
-        nextSlot = start.addingTimeInterval(minimumInterval)
-        let wait = start.timeIntervalSince(now)
-        if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+    /// Follows the plan setting; takes effect for the next request.
+    func setRequestsPerMinute(_ rate: Int) {
+        minimumInterval = 60.0 / Double(max(1, rate))
+    }
+
+    func waitTurn(priority: RequestPriority = AIRequestContext.priority) async throws {
+        guard minimumInterval > 0 else { return }
+        let ticket = nextTicket
+        nextTicket += 1
+        if priority == .background { queue.append(ticket) }
+        defer { queue.removeAll { $0 == ticket } }
+        while true {
+            try Task.checkCancellation()
+            let now = Date()
+            sends.removeAll { now.timeIntervalSince($0) >= 60 }
+            let limit = max(1, Int((60 / minimumInterval).rounded()))
+            let allowed = priority == .interactive ? limit + max(1, limit / 10) : limit
+            var wait: TimeInterval = 0
+            if sends.count >= allowed { wait = max(wait, 60 - now.timeIntervalSince(sends[0])) }
+            if priority == .background {
+                wait = max(wait, minimumInterval - now.timeIntervalSince(lastSend))
+            }
+            let isNext = priority == .interactive || queue.first == ticket
+            if wait <= 0 && isNext {
+                sends.append(now)
+                lastSend = now
+                return
+            }
+            try await Task.sleep(nanoseconds: UInt64(max(wait, 0.025) * 1_000_000_000))
+        }
     }
 }
 
@@ -114,6 +170,8 @@ public struct GeminiTransport: ChatTransport {
         var boost = 1
         // The chosen model first, then the rest in list order -- skipping
         // any that just failed, so the next call doesn't wait them out again.
+        // Only the shared pacer follows the plan setting; a pacer made for a test keeps its own pace.
+        if pacer === RequestPacer.shared { await pacer.setRequestsPerMinute(CloudProvider.requestsPerMinute) }
         let usable = ([model] + alternates).filter { !usage.isAvoided($0) }
         let order = usable.isEmpty ? [model] : usable
         var index = 0
@@ -127,7 +185,10 @@ public struct GeminiTransport: ChatTransport {
             #if DEBUG
             let pacerStart = Date()
             #endif
-            try await pacer.waitTurn()
+            let gate = AIRequestContext.gate
+            gate?.setQueued(true)
+            do { try await pacer.waitTurn() } catch { gate?.setQueued(false); throw error }
+            gate?.setQueued(false)
             #if DEBUG
             pacerWaited = Date().timeIntervalSince(pacerStart)
             #endif
