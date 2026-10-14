@@ -62,6 +62,15 @@ public enum AnswerLadder {
         question: String, expected: String, given: String, accepted: [String] = [],
         judge: Judge?, timeout: Duration = judgeTimeout
     ) async -> JudgedAnswer {
+        await self.judge(question: question, expected: expected, given: given, accepted: accepted,
+                         judge: judge, timeout: timeout, clock: ContinuousClock())
+    }
+
+    /// The same on a clock the caller supplies (a test moves its own).
+    static func judge<C: Clock>(
+        question: String, expected: String, given: String, accepted: [String] = [],
+        judge: Judge?, timeout: Duration = judgeTimeout, clock: C
+    ) async -> JudgedAnswer where C.Duration == Duration {
         let normalizedGiven = AnswerGrading.normalize(given)
         guard !normalizedGiven.isEmpty else { return JudgedAnswer(outcome: .notQuite, source: .empty) }
         if accepted.contains(where: { AnswerGrading.normalize($0) == normalizedGiven }) {
@@ -73,7 +82,7 @@ public enum AnswerLadder {
             return JudgedAnswer(outcome: decided, source: decided == .correct && local.isExact ? .exact : .local)
         }
         // Borderline. Ask the judge, but never wait on it.
-        if let judge, let verdict = await withTimeout(timeout, {
+        if let judge, let verdict = await withTimeout(timeout, clock: clock, {
             await judge(question, expected, given)
         }) {
             return JudgedAnswer(outcome: verdict.outcome, reason: verdict.reason, source: .ai)
@@ -84,10 +93,16 @@ public enum AnswerLadder {
     /// Runs `work` against a clock; nil when the clock wins (the work is
     /// cancelled) or the work has no answer.
     static func withTimeout<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async -> T?) async -> T? {
+        await withTimeout(limit, clock: ContinuousClock(), work)
+    }
+
+    static func withTimeout<T: Sendable, C: Clock>(
+        _ limit: Duration, clock: C, _ work: @escaping @Sendable () async -> T?
+    ) async -> T? where C.Duration == Duration {
         await withTaskGroup(of: T?.self) { group in
             group.addTask { await work() }
             group.addTask {
-                try? await Task.sleep(for: limit)
+                try? await clock.sleep(for: limit)
                 return nil
             }
             let first = await group.next() ?? nil

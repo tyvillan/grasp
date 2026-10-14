@@ -138,14 +138,35 @@ struct AnswerJudgeTests {
 
     @Test("a judge slower than the limit is dropped and the local verdict stands")
     func timeoutFallsBack() async {
-        let slow = StubJudge(AIAnswerVerdict(outcome: .notQuite, reason: "late"), delay: .seconds(5))
-        let started = ContinuousClock.now
-        let result = await AnswerLadder.judge(
-            question: "What is an IDE?", expected: "platform to write code on", given: "program to write code on",
-            judge: slow.judge, timeout: .milliseconds(150))
-        #expect(ContinuousClock.now - started < .seconds(4))  // the judge sleeps 5 s; slack for a loaded runner
+        // The judge never answers by itself, and the limit is a hand-moved
+        // clock: nothing here waits on wall time, so load can't matter.
+        let clock = HandClock()
+        let slow = StubJudge(AIAnswerVerdict(outcome: .notQuite, reason: "late"), delay: .seconds(3600))
+        let pending = Task {
+            await AnswerLadder.judge(
+                question: "What is an IDE?", expected: "platform to write code on", given: "program to write code on",
+                judge: slow.judge, timeout: .seconds(3), clock: clock)
+        }
+        await clock.waitUntilSleeping()
+        clock.advance(by: .seconds(2))
+        // Not yet: two of three seconds have passed.
+        await Task.yield()
+        #expect(clock.sleeperCount == 1)
+        clock.advance(by: .seconds(1))
+        let result = await pending.value
         #expect(result.source == .localFallback)
         #expect(result.outcome == .closeEnough)
+    }
+
+    @Test("a judge that answers before the limit is used")
+    func answersInTime() async {
+        let clock = HandClock()
+        let fast = StubJudge(AIAnswerVerdict(outcome: .notQuite, reason: "different idea"))
+        let result = await AnswerLadder.judge(
+            question: "What is an IDE?", expected: "platform to write code on", given: "program to write code on",
+            judge: fast.judge, timeout: .seconds(3), clock: clock)
+        #expect(result.source == .ai)
+        #expect(result.outcome == .notQuite)
     }
 
     @Test("an unreachable judge is silent: the local verdict is used, with no reason")
@@ -250,5 +271,64 @@ struct AnswerJudgeTests {
         let score = try await db.queue.write { try Study.finishTest(attemptId: attemptId, db: $0) }
         #expect(score.correct == 1)
         #expect(score.total == 1)
+    }
+}
+
+/// A clock the test moves by hand. `sleep` suspends until `advance` reaches
+/// its deadline, or the sleeping task is cancelled.
+private final class HandClock: Clock, @unchecked Sendable {
+    struct Instant: InstantProtocol, Hashable, Comparable {
+        var offset: Duration
+        func advanced(by duration: Duration) -> Instant { Instant(offset: offset + duration) }
+        func duration(to other: Instant) -> Duration { other.offset - offset }
+        static func < (a: Instant, b: Instant) -> Bool { a.offset < b.offset }
+    }
+    typealias Duration = Swift.Duration
+
+    private let lock = NSLock()
+    private var current = Instant(offset: .zero)
+    private var sleepers: [(id: Int, deadline: Instant, resume: @Sendable (Bool) -> Void)] = []
+    private var nextId = 0
+
+    var now: Instant { lock.lock(); defer { lock.unlock() }; return current }
+    var minimumResolution: Duration { .zero }
+    var sleeperCount: Int { lock.lock(); defer { lock.unlock() }; return sleepers.count }
+
+    func sleep(until deadline: Instant, tolerance: Duration?) async throws {
+        if now >= deadline { return }
+        let id: Int = { lock.lock(); defer { lock.unlock() }; nextId += 1; return nextId }()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if current >= deadline {
+                    lock.unlock()
+                    continuation.resume()
+                    return
+                }
+                sleepers.append((id, deadline, { finished in
+                    if finished { continuation.resume() } else { continuation.resume(throwing: CancellationError()) }
+                }))
+                lock.unlock()
+            }
+        } onCancel: {
+            lock.lock()
+            let found = sleepers.firstIndex { $0.id == id }.map { sleepers.remove(at: $0) }
+            lock.unlock()
+            found?.resume(false)
+        }
+    }
+
+    func advance(by duration: Duration) {
+        lock.lock()
+        current = current.advanced(by: duration)
+        let due = sleepers.filter { $0.deadline <= current }
+        sleepers.removeAll { $0.deadline <= current }
+        lock.unlock()
+        for sleeper in due { sleeper.resume(true) }
+    }
+
+    /// Yields until a task is sleeping on the clock (bounded by yields, not time).
+    func waitUntilSleeping() async {
+        for _ in 0..<100_000 where sleeperCount == 0 { await Task.yield() }
     }
 }
