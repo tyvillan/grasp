@@ -11,7 +11,17 @@ import FoundationNetworking
 public enum CloudStub {
     #if DEBUG
     /// "ok", "slow", "sections" or "unreachable".
-    nonisolated(unsafe) public static var mode: String?
+    ///
+    /// Read from the environment the first time anything asks, so it is
+    /// settled before the Keychain could be touched at launch: a debug
+    /// build with `-GRASPAllowStubs 1` and `GRASP_STUB_CLOUD` set.
+    nonisolated(unsafe) public static var mode: String? = fromEnvironment()
+
+    private static func fromEnvironment() -> String? {
+        guard UserDefaults.standard.bool(forKey: "GRASPAllowStubs") else { return nil }
+        let value = ProcessInfo.processInfo.environment["GRASP_STUB_CLOUD"]
+        return (value?.isEmpty == false) ? value : nil
+    }
     nonisolated(unsafe) public static var slowSeconds: Double = 40
     public static var isActive: Bool { mode != nil }
 

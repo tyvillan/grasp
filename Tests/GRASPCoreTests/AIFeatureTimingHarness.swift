@@ -204,6 +204,8 @@ struct AIFeatureTimingHarness {
                           r.failureKinds.isEmpty ? "-" : r.failureKinds)
         }
         out += agreement
+        for event in AITiming.drainEvents() { out += "event: \(event)\n" }
+        out += "plan: \(AIPreferences.geminiPlan.rawValue), pace \(CloudProvider.requestsPerMinute) per minute\n"
         try out.write(toFile: env["GRASP_TIMING_OUT"] ?? "/tmp/cloud-speed-timing.txt", atomically: true, encoding: .utf8)
         #expect(!rows.isEmpty)
     }

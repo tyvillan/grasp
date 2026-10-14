@@ -289,3 +289,30 @@ private final class NoteLog: @unchecked Sendable {
     private var notes: [String?] = []
     func add(_ n: String?) { lock.lock(); notes.append(n); lock.unlock() }
 }
+
+@Suite("Paid pace halves after a 429")
+struct PaidPaceTests {
+    @Test("the paid rate is a named constant, and each halving cuts it to no lower than the free pace")
+    func halving() async {
+        let pacer = RequestPacer(minimumInterval: 0.5)
+        await pacer.setRequestsPerMinute(GeminiPlan.paidRequestsPerMinute)
+        #expect(await pacer.effectiveRequestsPerMinute == 120)
+        #expect(await pacer.halveRate() == 60)
+        #expect(await pacer.halveRate() == 30)
+        // The plan setting being re-read does not undo the halving.
+        await pacer.setRequestsPerMinute(GeminiPlan.paidRequestsPerMinute)
+        #expect(await pacer.effectiveRequestsPerMinute == 30)
+        #expect(await pacer.halveRate() == 15)
+        #expect(await pacer.halveRate() == 10)
+        #expect(await pacer.halveRate() == nil)
+        #expect(await pacer.effectiveRequestsPerMinute == 10)
+    }
+
+    @Test("a free pace is never halved")
+    func freeNotHalved() async {
+        let pacer = RequestPacer(minimumInterval: 6)
+        await pacer.setRequestsPerMinute(GeminiPlan.freeRequestsPerMinute)
+        #expect(await pacer.halveRate() == nil)
+        #expect(await pacer.effectiveRequestsPerMinute == 10)
+    }
+}

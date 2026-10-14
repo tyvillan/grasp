@@ -76,7 +76,16 @@ public enum CloudProvider {
 public enum GeminiPlan: String, CaseIterable, Sendable {
     case free, paid
 
-    public var requestsPerMinute: Int { self == .paid ? 120 : 10 }
+    public var requestsPerMinute: Int { self == .paid ? Self.paidRequestsPerMinute : Self.freeRequestsPerMinute }
+
+    /// The free pace: the long-standing limit for Flash models.
+    public static let freeRequestsPerMinute = 10
+    /// The paid pace. A conservative choice, not a quote from Google:
+    /// Google no longer publishes fixed numbers, and a billed project's
+    /// real limit is higher and shown per project in AI Studio. If a paid
+    /// key still gets a 429, the pacer halves this for the rest of the
+    /// session (`RequestPacer.halveRate`).
+    public static let paidRequestsPerMinute = 120
     /// How many independent calls may be in flight at once.
     public var concurrency: Int { self == .paid ? 4 : 1 }
 

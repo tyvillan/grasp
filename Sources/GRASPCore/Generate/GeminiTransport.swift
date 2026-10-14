@@ -60,9 +60,30 @@ actor RequestPacer {
     /// Requests waiting for a turn (background ones), for tests.
     var waitingCount: Int { queue.count }
 
+    private var planRate = GeminiPlan.freeRequestsPerMinute
+    private var halvings = 0
+
+    /// The rate in force: the plan's, halved once for each time a paid
+    /// key was told to slow down this session, never below the free pace.
+    var effectiveRequestsPerMinute: Int {
+        max(GeminiPlan.freeRequestsPerMinute, planRate >> halvings)
+    }
+
     /// Follows the plan setting; takes effect for the next request.
     func setRequestsPerMinute(_ rate: Int) {
-        minimumInterval = 60.0 / Double(max(1, rate))
+        planRate = max(1, rate)
+        minimumInterval = 60.0 / Double(effectiveRequestsPerMinute)
+    }
+
+    /// A 429 on a paid key: halve the rate for the rest of the session.
+    /// Returns the new rate, or nil when already at the free pace.
+    @discardableResult
+    func halveRate() -> Int? {
+        guard planRate > GeminiPlan.freeRequestsPerMinute,
+              effectiveRequestsPerMinute > GeminiPlan.freeRequestsPerMinute else { return nil }
+        halvings += 1
+        minimumInterval = 60.0 / Double(effectiveRequestsPerMinute)
+        return effectiveRequestsPerMinute
     }
 
     func waitTurn(priority: RequestPriority = AIRequestContext.priority) async throws {
@@ -285,6 +306,10 @@ public struct GeminiTransport: ChatTransport {
                 }
                 moveToNext("today's free limit for \(current) is used up")
             } catch AIBackendError.rateLimited(let retryAfter) {
+                if pacer === RequestPacer.shared, AIPreferences.geminiPlan == .paid,
+                   let slower = await pacer.halveRate() {
+                    AITiming.event("Paid key got a 429: pace halved to \(slower) requests per minute for the rest of the session")
+                }
                 if retries < maxRetries {
                     retries += 1
                     AIProgress.current?.setNote("\(CloudProvider.name) asked GRASP to slow down; waiting a moment")

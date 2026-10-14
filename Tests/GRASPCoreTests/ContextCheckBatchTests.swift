@@ -294,6 +294,7 @@ struct OverviewWholeReviewTests {
         var wholeReply: [[OverviewFix]]?
         var sectionReviews = 0
         var wholeReviews = 0
+        var repetitionChecks = 0
         init(whole: Bool, wholeReply: [[OverviewFix]]? = nil) { self.whole = whole; self.wholeReply = wholeReply }
         var isAvailable: Bool { get async { true } }
         var overviewContextWordBudget: Int { 2_000 }
@@ -310,12 +311,17 @@ struct OverviewWholeReviewTests {
                 OverviewSection(heading: "Claim \($0)", paragraphs: ["Threads share a stack \($0)."])
             }))
         }
+        func noteRepetition() { lock.lock(); repetitionChecks += 1; lock.unlock() }
         func note(section: Bool) { lock.lock(); if section { sectionReviews += 1 } else { wholeReviews += 1 }; lock.unlock() }
         func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
             note(section: true); return []
         }
         func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
             note(section: false); return wholeReply
+        }
+        func findRepetition(in document: OverviewDocument) async -> OverviewRepetition {
+            noteRepetition()
+            return .none
         }
     }
 
@@ -338,6 +344,40 @@ struct OverviewWholeReviewTests {
         let g = Gen(whole: false)
         _ = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
         #expect(g.wholeReviews == 0)
+    }
+
+    @Test("calls through any CardGenerator reach the generator's own review and repetition check, not the empty default")
+    func requirementsReachImplementation() async {
+        let g: any CardGenerator = Gen(whole: true)
+        _ = await g.reviewSection(noteContext: "n", section: OverviewSection(heading: "h", paragraphs: ["p"]))
+        _ = await g.findRepetition(in: OverviewDocument(title: "t", sections: []))
+        let gen = g as! Gen
+        #expect(gen.sectionReviews == 1)
+        #expect(gen.repetitionChecks == 1)
+    }
+
+    @Test("on the cloud the repetition check runs once over the finished lesson")
+    func cloudRunsRepetitionCheck() async {
+        let g = Gen(whole: true, wholeReply: Array(repeating: [], count: 4))
+        _ = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        #expect(g.repetitionChecks == 1)
+    }
+
+    @Test("a local generator gets neither the section review nor the repetition check, as before")
+    func localGetsNoChecks() async {
+        let g = Gen(whole: false)
+        _ = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        #expect(g.sectionReviews == 0)
+        #expect(g.wholeReviews == 0)
+        #expect(g.repetitionChecks == 0)
+    }
+
+    @Test("an unusable whole-lesson reply is followed by one review per section")
+    func fallbackReviewsEachSection() async {
+        let g = Gen(whole: true, wholeReply: nil)
+        _ = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        #expect(g.wholeReviews == 1)
+        #expect(g.sectionReviews == 4)
     }
 
     @Test("if the whole-lesson reply is unusable the overview still finishes")

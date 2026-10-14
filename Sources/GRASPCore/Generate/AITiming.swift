@@ -53,7 +53,25 @@ public enum AITiming {
         }
     }
 
+    /// A line for the timing output about something that changed the run
+    /// (the pace being halved, for instance). Text only, never a key.
+    public static func event(_ text: String) {
+        #if DEBUG
+        guard isEnabled else { return }
+        lock.lock(); events.append(text); lock.unlock()
+        #endif
+    }
+
     #if DEBUG
+    nonisolated(unsafe) private static var events: [String] = []
+
+    public static func drainEvents() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        let out = events
+        events = []
+        return out
+    }
+
     /// The collector for the request in flight on this task.
     @TaskLocal static var metrics: Metrics?
 
@@ -98,6 +116,7 @@ public enum AITiming {
         }
     }
     #else
+    public static func drainEvents() -> [String] { [] }
     public static var isEnabled: Bool { false }
     static func record(_ call: Call) {}
     public static func drain() -> [Call] { [] }

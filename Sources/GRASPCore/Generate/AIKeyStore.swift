@@ -104,6 +104,9 @@ public enum AIKeyStore {
     /// was stored.
     @discardableResult
     public static func save(_ key: String) -> Bool {
+        #if DEBUG
+        if CloudStub.isActive { return true }
+        #endif
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         delete()
         guard !trimmed.isEmpty else { return true }
@@ -136,6 +139,9 @@ public enum AIKeyStore {
     }
 
     public static func delete() {
+        #if DEBUG
+        if CloudStub.isActive { return }
+        #endif
         #if canImport(Security)
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

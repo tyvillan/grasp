@@ -292,6 +292,17 @@ public protocol CardGenerator: Sendable {
     /// `i` belongs to `sections[i]`. Nil when the reply was unusable, so
     /// the caller reviews section by section instead.
     func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]?
+
+    /// The second pass over one written section: corrections for
+    /// statements the note contradicts or that are simply wrong. A
+    /// requirement, not only an extension default: declared in an
+    /// extension alone, a call through `any CardGenerator` ran the empty
+    /// default and never reached a generator's own version.
+    func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix]
+
+    /// The second pass over a whole lesson: sections that repeat an
+    /// earlier one. Also a requirement, for the same reason.
+    func findRepetition(in document: OverviewDocument) async -> OverviewRepetition
 }
 
 /// One card in a batched context check.

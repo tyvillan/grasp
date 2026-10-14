@@ -95,29 +95,29 @@ public enum OverviewComposer {
             // writing about a lecture got real statements wrong -- which
             // swap makes a reflection, what "one-to-one" means -- and a
             // study tool must not teach those with confidence.
-            if !document.sections.isEmpty {
+            //
+            // Checks run only where `reviewsWholeOverview` says so (the
+            // cloud model). A local model goes without them, as it always
+            // has in practice: they were never reachable through
+            // `any CardGenerator` until `reviewSection` became a protocol
+            // requirement, and running one call per section on a local
+            // model is a cost and quality change that is the student's to
+            // choose.
+            if !document.sections.isEmpty, generator.reviewsWholeOverview {
                 var reviewed: [[OverviewFix]]?
-                if generator.reviewsWholeOverview {
-                    // One call over the whole lesson and the note: the
-                    // note is read once, not once per section.
-                    progress?.expect(1)
-                    progress?.begin("Checking the lesson against your note")
-                    reviewed = await generator.reviewOverview(noteContext: chunk.text, sections: document.sections)
-                    progress?.advance()
-                    if let fixes = reviewed, fixes.count == document.sections.count {
-                        for index in document.sections.indices {
-                            document.sections[index] = OverviewReview.apply(fixes[index], to: document.sections[index])
-                        }
-                    } else {
-                        // Unusable reply: section by section, as on a
-                        // local model.
-                        reviewed = nil
-                        progress?.expect(document.sections.count)
+                // One call over the whole lesson and the note: the note
+                // is read once, not once per section.
+                progress?.expect(1)
+                progress?.begin("Checking the lesson against your note")
+                reviewed = await generator.reviewOverview(noteContext: chunk.text, sections: document.sections)
+                progress?.advance()
+                if let fixes = reviewed, fixes.count == document.sections.count {
+                    for index in document.sections.indices {
+                        document.sections[index] = OverviewReview.apply(fixes[index], to: document.sections[index])
                     }
                 } else {
+                    // Unusable reply: section by section.
                     progress?.expect(document.sections.count)
-                }
-                if reviewed == nil {
                     if Task.isCancelled { return .empty }
                     let width = max(1, generator.maxConcurrentCalls)
                     let sections = document.sections
@@ -215,7 +215,7 @@ public enum OverviewComposer {
         // can tell -- measured on real lessons, two sections teaching the
         // same idea shared no more words than two that merely shared a
         // topic.
-        if merged.sections.count > 2 {
+        if merged.sections.count > 2, generator.reviewsWholeOverview {
             progress?.expect(1)
             progress?.begin("Removing repetition")
             merged = OverviewReview.apply(await generator.findRepetition(in: merged), to: merged)
