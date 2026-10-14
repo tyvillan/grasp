@@ -66,7 +66,7 @@ actor RequestPacer {
     /// The rate in force: the plan's, halved once for each time a paid
     /// key was told to slow down this session, never below the free pace.
     var effectiveRequestsPerMinute: Int {
-        max(GeminiPlan.freeRequestsPerMinute, planRate >> halvings)
+        halvings == 0 ? planRate : max(GeminiPlan.freeRequestsPerMinute, planRate >> halvings)
     }
 
     /// Follows the plan setting; takes effect for the next request.
@@ -206,7 +206,13 @@ public struct GeminiTransport: ChatTransport {
         // The chosen model first, then the rest in list order -- skipping
         // any that just failed, so the next call doesn't wait them out again.
         // Only the shared pacer follows the plan setting; a pacer made for a test keeps its own pace.
-        if pacer === RequestPacer.shared { await pacer.setRequestsPerMinute(CloudProvider.requestsPerMinute) }
+        if pacer === RequestPacer.shared {
+            var rate = CloudProvider.requestsPerMinute
+            #if DEBUG
+            if CloudStub.isActive, let slowed = CloudStub.requestsPerMinute { rate = slowed }
+            #endif
+            await pacer.setRequestsPerMinute(rate)
+        }
         let usable = ([model] + alternates).filter { !usage.isAvoided($0) }
         let order = usable.isEmpty ? [model] : usable
         var index = 0
@@ -533,6 +539,9 @@ public struct GeminiTransport: ChatTransport {
 
     /// The model ids this key can use.
     public static func listModels(apiKey: String, baseURL: URL = CloudProvider.baseURL) async throws -> [String] {
+        #if DEBUG
+        if CloudStub.isActive { return [CloudProvider.fallbackModel] }
+        #endif
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15

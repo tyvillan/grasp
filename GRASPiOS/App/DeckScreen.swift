@@ -574,6 +574,7 @@ struct DeckScreen: View {
     // MARK: - Generating and empty states
 
     private var generatingStrip: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
@@ -591,6 +592,13 @@ struct DeckScreen: View {
             if let job = runningJob {
                 Button("Stop") { store.stopAIJob(job.key) }
                     .font(.graspUI(size: 13, weight: .semibold))
+            }
+        }
+            if let note = runningJob?.activity.snapshot.note {
+                Label(note, systemImage: "hourglass")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(3)
             }
         }
     }

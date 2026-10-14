@@ -316,3 +316,13 @@ struct PaidPaceTests {
         #expect(await pacer.effectiveRequestsPerMinute == 10)
     }
 }
+
+@Suite("Cloud failure wording is recognised")
+struct CloudFailureOwnTests {
+    @Test("its own sentences are recognised, other reasons are not")
+    func recognised() {
+        #expect(CloudFailureText.isOwn(CloudFailureText.text(for: .unreachable)))
+        #expect(CloudFailureText.isOwn(CloudFailureText.text(for: .quotaExhausted)))
+        #expect(!CloudFailureText.isOwn("The model's reply couldn't be read."))
+    }
+}

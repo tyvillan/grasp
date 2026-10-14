@@ -278,6 +278,13 @@ struct FallbackTransport: ChatTransport {
 
 /// Why a cloud call failed, in a sentence a student can act on.
 public enum CloudFailureText {
+    /// Whether `text` is one of these sentences, which already says what to
+    /// do, so a caller does not wrap it in more advice.
+    public static func isOwn(_ text: String) -> Bool {
+        let all: [AIBackendError] = [.unreachable, .overloaded(status: 0), .rateLimited(retryAfter: nil),
+                                     .quotaExhausted, .unauthorized, .badResponse("")]
+        return all.contains { Self.text(for: $0) == text }
+    }
     public static func text(for error: AIBackendError) -> String {
         switch error {
         case .unreachable:

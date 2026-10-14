@@ -169,7 +169,17 @@ public enum AIPreferences {
 /// paused, and the last time a job fell back to the local model. Shown in
 /// the AI settings and used to warn before a job that won't fit.
 public final class CloudUsage: @unchecked Sendable {
-    public static let shared = CloudUsage()
+    /// A stand-in run (debug only) counts into a throwaway defaults suite,
+    /// so it never changes the real request count or settings.
+    public static let shared: CloudUsage = {
+        #if DEBUG
+        if CloudStub.isActive, let suite = UserDefaults(suiteName: "GRASP.stub.cloudusage") {
+            suite.removePersistentDomain(forName: "GRASP.stub.cloudusage")
+            return CloudUsage(defaults: suite)
+        }
+        #endif
+        return CloudUsage()
+    }()
     /// Posted (on whatever thread) after any change, for UI to re-read.
     public static let didChange = Notification.Name("GRASP.CloudUsage.didChange")
 

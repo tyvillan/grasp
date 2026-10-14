@@ -24,6 +24,12 @@ public enum CloudStub {
     }
     nonisolated(unsafe) public static var slowSeconds: Double = 40
     public static var isActive: Bool { mode != nil }
+    /// `GRASP_STUB_CLOUD_RPM=3` slows the pace so the "waiting for a
+    /// turn" note can be shown without waiting minutes.
+    nonisolated(unsafe) public static var requestsPerMinute: Int? = {
+        guard UserDefaults.standard.bool(forKey: "GRASPAllowStubs") else { return nil }
+        return ProcessInfo.processInfo.environment["GRASP_STUB_CLOUD_RPM"].flatMap(Int.init)
+    }()
 
     static func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
         guard let mode else { throw URLError(.notConnectedToInternet) }
