@@ -34,6 +34,9 @@ struct FlashcardStudyView: View {
     /// Cards marked Needs Review this session, for "Learn the N you missed".
     @State private var missedIds: Set<String> = []
     @FocusState private var isFocused: Bool
+    /// Where each card stands on the understanding meter, shown quietly in
+    /// the card's corner. The current state only; it does not animate.
+    @State private var meterStates: [String: UnderstandingState] = [:]
     private var reduceMotion: Bool { Motion.isReduced }
     /// The card's turn during a flip: it rotates edge-on, the answer
     /// appears, and it turns back -- the question stays on the same face.
@@ -75,6 +78,8 @@ struct FlashcardStudyView: View {
         .dimsWindowBehind()
         .task {
             queue = (try? store.dueCards(inDecks: deckIds)) ?? []
+            let known = (try? store.understanding(forDecks: deckIds)) ?? []
+            meterStates = Dictionary(known.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
             isFocused = true
             focusTimer.workMinutes = workMinutes
             focusTimer.breakMinutes = breakMinutes
@@ -221,6 +226,12 @@ struct FlashcardStudyView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 22)
         )
+        .overlay(alignment: .topTrailing) {
+            PipMeter(state: meterStates[card.id] ?? .of(level: nil), size: .row)
+                .opacity(0.8)
+                .padding(.top, 38)
+                .padding(.trailing, 44)
+        }
         .scaleEffect(flipScale)
         .contentShape(Rectangle())
         .onTapGesture { flip() }
@@ -358,6 +369,7 @@ struct FlashcardStudyView: View {
         let cardId = queue[index].id
         if markedIds.insert(cardId).inserted {
             try? store.markCard(cardId, understood: understood, source: "flashcards")
+            meterStates[cardId] = store.understandingState(forCard: cardId)
             if understood { understoodCount += 1 } else { reviewCount += 1; missedIds.insert(cardId) }
             focusTimer.countCard()
         }

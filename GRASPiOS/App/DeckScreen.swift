@@ -24,6 +24,14 @@ struct DeckScreen: View {
     @State private var aiMessage: String?
     private var reduceMotion: Bool { Motion.isReduced }
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
+    /// The meter's view of each card, and the note a "Weakest notes" row
+    /// filters to (nil: not filtering; `.some(nil)` is the "Other" group).
+    @State private var understanding: [DeckUnderstanding.Card] = []
+    @State private var noteFilter: String??
+    @State private var noteTitles: [String: String] = [:]
+    private var understandingById: [String: UnderstandingState] {
+        Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+    }
     @State private var filter: CardFilter = .all
     @State private var editMode: EditMode = .inactive
     @State private var selection: Set<String> = []
@@ -91,6 +99,7 @@ struct DeckScreen: View {
     private var shownCards: [Card] {
         let q = query.trimmingCharacters(in: .whitespaces)
         var base = cards.filter { matches($0, filter) }
+        if let note = noteFilter { base = base.filter { $0.materialId == note } }
         if !q.isEmpty {
             base = base.filter { $0.front.localizedCaseInsensitiveContains(q) || $0.back.localizedCaseInsensitiveContains(q) }
         }
@@ -382,6 +391,29 @@ struct DeckScreen: View {
         }
         if !cards.isEmpty {
             Section {
+                UnderstandingSummary(
+                    cards: understanding, noteTitles: noteTitles, collapsesNotes: true,
+                    onOpenNote: { note in withAnimation(Motion.snappy) { noteFilter = .some(note); filter = .all } },
+                    onPractice: { ids in learnFocus = Set(ids); learning = true }
+                )
+                if let note = noteFilter {
+                    HStack(spacing: 8) {
+                        Text("Cards from \(note.flatMap { noteTitles[$0] } ?? "Other")")
+                            .font(.graspSubheadline)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Button("Show all") { withAnimation(Motion.snappy) { noteFilter = nil } }
+                            .buttonStyle(.plain)
+                            .font(.graspUI(size: 13, weight: .semibold))
+                            .foregroundStyle(GRASPColor.textPrimary)
+                    }
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            Section {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(CardFilter.allCases) { option in
@@ -446,7 +478,7 @@ struct DeckScreen: View {
         Section("\(shownCards.count) cards") {
             ForEach(shownCards) { card in
                 Button { editing = card } label: {
-                    CardRowView(card: card, mastery: learnLevels[card.id] ?? .new,
+                    CardRowView(card: card, understanding: understandingById[card.id] ?? .of(level: nil),
                                 sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
                                 reviewNote: reviewNotes[card.id])
                 }
@@ -502,6 +534,8 @@ struct DeckScreen: View {
         cards = (try? store.cards(inDecks: ids)) ?? []
         reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
+        understanding = (try? store.understanding(forDecks: ids)) ?? []
+        noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
         hasLoaded = true
@@ -535,7 +569,7 @@ struct DeckScreen: View {
     #endif
 
     private func loadSourceTitles() {
-        for id in Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil }) where sourceTitles[id] == nil {
+        for id in Set(cards.compactMap(\.materialId)) where sourceTitles[id] == nil {
             if let material = (try? store.material(id)) ?? nil { sourceTitles[id] = material.title }
         }
     }
@@ -726,32 +760,30 @@ private struct StudyPill: View {
 
 private struct CardRowView: View {
     let card: Card
-    let mastery: LearnEngine.Level
+    let understanding: UnderstandingState
     let sourceTitle: String?
     let reviewNote: String?
 
-    /// Mastery as cream at three strengths; nothing known is the hairline.
+    /// Draft and suspended cards keep the 2 pt rail; it no longer says
+    /// anything about mastery, the pips do.
     private var railTint: Color {
-        switch card.status {
-        case .draft: return GRASPColor.hairlineStrong
-        case .suspended: return GRASPColor.rejected
-        case .active:
-            switch mastery {
-            case .new: return GRASPColor.hairlineStrong
-            case .recognition: return GRASPColor.textPrimary.opacity(0.3)
-            case .recall: return GRASPColor.textPrimary.opacity(0.6)
-            case .familiar: return GRASPColor.textPrimary.opacity(0.8)
-            case .mastered: return GRASPColor.textPrimary
-            }
-        }
+        card.status == .suspended ? GRASPColor.rejected : GRASPColor.hairlineStrong
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(railTint)
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
+            Group {
+                if card.status == .active {
+                    PipMeter(state: understanding, size: .row)
+                        .padding(.top, 5)
+                } else {
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(railTint)
+                        .frame(width: 2)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 27, alignment: .leading)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if card.origin == .aiGenerated && card.status == .draft {
@@ -764,7 +796,7 @@ private struct CardRowView: View {
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(2)
                     Spacer(minLength: 6)
-                    Text(CardRowStatus.text(for: card))
+                    Text(CardRowStatus.text(for: card, hasProgress: card.status == .active && understanding.hasProgress))
                         .font(.graspUI(size: 12))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .lineLimit(1)

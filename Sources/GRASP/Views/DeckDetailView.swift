@@ -118,6 +118,15 @@ struct DeckDetailView: View {
     @State private var showingGenerateSheet = false
     @State private var showingCodeQuestions = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
+    /// The meter's view of each card, and the note filter a "Weakest
+    /// notes" row sets (nil: not filtering; `.some(nil)` is the "Other" group).
+    @State private var understanding: [DeckUnderstanding.Card] = []
+    @State private var noteFilter: String??
+    /// Readable titles for the weakest-notes rows.
+    @State private var noteTitles: [String: String] = [:]
+    private var understandingById: [String: UnderstandingState] {
+        Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+    }
     @State private var masteryFilter: MasteryFilter = .all
     @AppStorage("cardSortOption") private var cardSortOption: CardSortOption = .deckOrder
     @State private var courseId: String?
@@ -216,6 +225,7 @@ struct DeckDetailView: View {
     }
 
     private func matchesFilter(_ card: Card) -> Bool {
+        if let note = noteFilter, card.materialId != note { return false }
         switch masteryFilter {
         case .all: return true
         case .drafts: return card.status == .draft
@@ -295,6 +305,28 @@ struct DeckDetailView: View {
     private var cardsTab: some View {
         VStack(spacing: 0) {
             if !cards.isEmpty {
+                UnderstandingSummary(
+                    cards: understanding, noteTitles: noteTitles,
+                    onOpenNote: { noteFilter = .some($0); masteryFilter = .all },
+                    onPractice: { ids in learnFocus = Set(ids); isLearning = true }
+                )
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                if let note = noteFilter {
+                    HStack(spacing: 8) {
+                        Text("Showing cards from \(note.flatMap { noteTitles[$0] } ?? "Other")")
+                            .font(.graspUI(size: 12.5))
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .lineLimit(1)
+                        Button("Show all") { noteFilter = nil }
+                            .buttonStyle(.plain)
+                            .font(.graspUI(size: 12.5, weight: .medium))
+                            .foregroundStyle(GRASPColor.textPrimary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                }
                 HStack {
                     FilterPills(selection: $masteryFilter, counts: filterCounts)
                     Spacer()
@@ -1357,6 +1389,7 @@ struct DeckDetailView: View {
                     sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
                     reviewNote: reviewNotes[card.id],
                     mastery: learnLevels[card.id] ?? .new,
+                    understanding: understandingById[card.id] ?? .of(level: nil),
                     siblingDecks: siblingDecks,
                     isRefining: refiningCardIds.contains(card.id),
                     dragCardIds: selectedCardIds.contains(card.id) ? selection : [card.id],
@@ -1585,7 +1618,7 @@ struct DeckDetailView: View {
     }
 
     private func loadSourceTitles() {
-        let ids = Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil })
+        let ids = Set(cards.compactMap(\.materialId))
         for id in ids where sourceTitles[id] == nil {
             if let material = (try? store.material(id)) ?? nil { sourceTitles[id] = material.title }
         }
@@ -1606,6 +1639,8 @@ struct DeckDetailView: View {
         cards = (try? store.cards(inDecks: scopeDeckIds)) ?? []
         reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
+        understanding = (try? store.understanding(forDecks: scopeDeckIds)) ?? []
+        noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
         hasLoaded = true
         loadSourceTitles()
         // A Drafts filter with no drafts left would show an empty list.
@@ -1946,8 +1981,12 @@ private struct CardPreviewPane: View {
 
     private var masteryChip: some View {
         Group {
+            // The same definition as the pips: only mastered is understood;
+            // a self-rated card is not.
             if mastery == .mastered {
                 PreviewChip(text: "Understood", tint: GRASPColor.success, tintSoft: GRASPColor.successSoft)
+            } else if mastery == .familiar {
+                PreviewChip(text: "Self-rated", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
             } else {
                 PreviewChip(text: "Needs review", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
             }
@@ -2122,6 +2161,8 @@ private struct CardRow: View {
     /// A flag on a parser-made draft, when it looks like a duplicate or a heading.
     let reviewNote: String?
     let mastery: LearnEngine.Level
+    /// The understanding meter's state for an active card.
+    let understanding: UnderstandingState
     let siblingDecks: [Deck]
     let isRefining: Bool
     /// What dragging this row carries.
@@ -2158,16 +2199,24 @@ private struct CardRow: View {
                     .transition(.opacity)
                     .accessibilityLabel(isSelected ? "Selected" : "Not selected")
             }
-            // A hairline rule down the left of each card, tinted by
-            // mastery: understood teal, still-to-review amber, draft
-            // grey. It's the one place a colored rail earns its keep --
-            // it lets a long list be scanned for what still needs work
-            // without reading a single word.
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(railTint)
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
-                .help(railHelp ?? "")
+            // The left column says where the card stands. An approved
+            // card shows its understanding pips; a draft or a suspended
+            // card keeps the 2 pt rail (hairline, or coral). Fixed width so
+            // every row's text lines up.
+            Group {
+                if card.status == .active {
+                    PipMeter(state: understanding, size: .row)
+                        .padding(.top, 5)
+                        .help(understanding.accessibilityLabel)
+                } else {
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(railTint)
+                        .frame(width: 2)
+                        .frame(maxHeight: .infinity)
+                        .help(railHelp ?? "")
+                }
+            }
+            .frame(width: 27, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 3) {
                 let term = CardTermDisplay.split(card.front)
@@ -2224,7 +2273,7 @@ private struct CardRow: View {
             // cross-fades to the actions on hover or keyboard focus. The
             // slot is a fixed width, so nothing in the row moves.
             ZStack(alignment: .trailing) {
-                Text(CardRowStatus.text(for: card))
+                Text(CardRowStatus.text(for: card, hasProgress: card.status == .active && understanding.hasProgress))
                     .font(.graspUI(size: 12))
                     .foregroundStyle(GRASPColor.textTertiary)
                     .lineLimit(1)
@@ -2325,34 +2374,14 @@ private struct CardRow: View {
     /// second, redundant circular icon that used to sit beside this same
     /// bar and say the same thing.
     private var railTint: Color {
-        switch card.status {
-        case .draft: return GRASPColor.hairlineStrong
-        case .suspended: return GRASPColor.rejected
-        case .active:
-            // Mastery as cream at three strengths -- nothing known yet is
-            // the hairline; the fuller the rail, the better it's known.
-            switch mastery {
-            case .new: return GRASPColor.hairlineStrong
-            case .recognition: return GRASPColor.textPrimary.opacity(0.3)
-            case .recall: return GRASPColor.textPrimary.opacity(0.6)
-            case .familiar: return GRASPColor.textPrimary.opacity(0.8)
-            case .mastered: return GRASPColor.textPrimary
-            }
-        }
+        card.status == .suspended ? GRASPColor.rejected : GRASPColor.hairlineStrong
     }
 
     private var railHelp: String? {
         switch card.status {
         case .draft: return "Pending review"
         case .suspended: return "Rejected"
-        case .active:
-            switch mastery {
-            case .new: return "Not started"
-            case .recognition: return "Recognized"
-            case .recall: return "Recalled"
-            case .familiar: return "Familiar"
-            case .mastered: return "Understood"
-            }
+        case .active: return nil
         }
     }
 

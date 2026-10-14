@@ -913,6 +913,23 @@ final class AppStore {
 
     /// The plural of the above, for the "All Cards" master category's own
     /// mastery badges across every deck in the course.
+    /// Readable note titles (first heading, else the humanized file name).
+    func noteTitles(forMaterials ids: [String]) -> [String: String] {
+        (try? database.queue.read { db in try Study.noteTitles(forMaterials: ids, db: db) }) ?? [:]
+    }
+
+    /// One card's meter state, right after it was answered.
+    func understandingState(forCard cardId: String) -> UnderstandingState {
+        let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }
+        guard let row = row ?? nil else { return .of(level: nil) }
+        return .of(level: LearnEngine.Level(rawValue: row.level) ?? .new, asked: true)
+    }
+
+    /// Each card's meter state and source note, for the understanding meter.
+    func understanding(forDecks deckIds: [String]) throws -> [DeckUnderstanding.Card] {
+        try database.queue.read { db in try Study.understanding(forDecks: deckIds, db: db) }
+    }
+
     func learnLevels(forDecks deckIds: [String]) throws -> [String: LearnEngine.Level] {
         try database.queue.read { db in try Study.learnLevels(forDecks: deckIds, db: db) }
     }
