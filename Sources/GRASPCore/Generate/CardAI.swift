@@ -401,56 +401,89 @@ public enum CardAI {
         var lastFailureReason: String?
         let progress = AIProgress.current
         progress?.expect(existingByMaterial.count)
-        for (index, (materialId, existing)) in existingByMaterial.enumerated() {
+        // Notes are asked about a group at a time (one at a time unless the
+        // generator allows more); each group's answers are then applied in
+        // the notes' own order, so duplicates are caught the same way
+        // whichever answer arrived first.
+        struct NoteJob: Sendable {
+            let position: Int
+            let materialId: String
+            let deckId: String
+            let context: String
+            let candidates: [CandidatePair]
+        }
+        let entries = Array(existingByMaterial.enumerated())
+        let width = max(1, generator.maxConcurrentCalls)
+        var cursor = 0
+        groups: while cursor < entries.count {
             if Task.isCancelled { break }
-            guard let context = await noteText(materialId, database: database), !context.isEmpty,
-                  let deckId = existing.first.flatMap({ deckOfCard[$0.id] })
-            else { progress?.advance(); continue }
-            let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
-            progress?.begin("Reading note \(index + 1) of \(existingByMaterial.count)")
-            notesAsked += 1
-            let result = await generator.generateAdditionalResult(
-                existing: candidates, noteContext: context, maxCount: maxPerNote, topic: topic)
-            progress?.advance()
-            if Task.isCancelled { break }
-            let proposed: [GeneratedCard]
-            switch result {
-            case .cards(let cards): proposed = cards
-            case .failed(let reason):
-                notesFailed += 1
-                lastFailureReason = reason
-                continue
+            let slice = entries[cursor..<min(cursor + width, entries.count)]
+            cursor += width
+            var jobs: [NoteJob] = []
+            for (index, (materialId, existing)) in slice {
+                guard let context = await noteText(materialId, database: database), !context.isEmpty,
+                      let deckId = existing.first.flatMap({ deckOfCard[$0.id] })
+                else { progress?.advance(); continue }
+                let candidates = existing.map { CandidatePair(front: $0.front, back: $0.back, sourceLine: $0.sourceLine ?? 0) }
+                jobs.append(NoteJob(position: index, materialId: materialId, deckId: deckId,
+                                    context: context, candidates: candidates))
             }
-            guard !proposed.isEmpty else { continue }
-            let snapshot = duplicateIndex
-            do {
-                let inserted = try await database.queue.write { db -> [(id: String, front: String, back: String)] in
-                    var localIndex = snapshot
-                    var next = try Int.fetchOne(db, sql:
-                        "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
-                        arguments: [deckId]) ?? 0
-                    var inserted: [(id: String, front: String, back: String)] = []
-                    for generated in proposed {
-                        // A refusal, a heading, an option-less "which of the
-                        // following", or a copy of a card already here.
-                        guard CardQuality.problem(front: generated.front, back: generated.back) == nil,
-                              localIndex.matchId(front: generated.front, back: generated.back, semantic: true) == nil
-                        else { continue }
-                        let card = Card(materialId: materialId, front: generated.front, back: generated.back,
-                                        origin: .aiGenerated, status: .draft)
-                        try card.save(db)
-                        try DeckCard(deckId: deckId, cardId: card.id, sortIndex: next).save(db)
-                        localIndex.insert(id: card.id, front: generated.front, back: generated.back)
-                        inserted.append((card.id, generated.front, generated.back))
-                        next += 1
-                    }
-                    return inserted
+            guard !jobs.isEmpty else { continue }
+            if let first = jobs.first {
+                progress?.begin(width > 1 && jobs.count > 1
+                    ? "Reading notes \(first.position + 1) to \(jobs.last!.position + 1) of \(entries.count)"
+                    : "Reading note \(first.position + 1) of \(entries.count)")
+            }
+            notesAsked += jobs.count
+            let answers = await AIConcurrency.map(jobs, limit: width) { job -> AdditionalNoteResult in
+                let result = await generator.generateAdditionalResult(
+                    existing: job.candidates, noteContext: job.context, maxCount: maxPerNote, topic: topic)
+                progress?.advance()
+                return result
+            }
+            for (job, answer) in zip(jobs, answers) {
+                if Task.isCancelled { break groups }
+                guard let result = answer else { break groups }
+                let materialId = job.materialId, deckId = job.deckId
+                let proposed: [GeneratedCard]
+                switch result {
+                case .cards(let cards): proposed = cards
+                case .failed(let reason):
+                    notesFailed += 1
+                    lastFailureReason = reason
+                    continue
                 }
-                for item in inserted { duplicateIndex.insert(id: item.id, front: item.front, back: item.back) }
-                createdCount += inserted.count
-            } catch {
-                writeFailure = "\(error)"
-                continue
+                guard !proposed.isEmpty else { continue }
+                let snapshot = duplicateIndex
+                do {
+                    let inserted = try await database.queue.write { db -> [(id: String, front: String, back: String)] in
+                        var localIndex = snapshot
+                        var next = try Int.fetchOne(db, sql:
+                            "SELECT COALESCE(MAX(sortIndex), -1) + 1 FROM deckCard WHERE deckId = ?",
+                            arguments: [deckId]) ?? 0
+                        var inserted: [(id: String, front: String, back: String)] = []
+                        for generated in proposed {
+                            // A refusal, a heading, an option-less "which of the
+                            // following", or a copy of a card already here.
+                            guard CardQuality.problem(front: generated.front, back: generated.back) == nil,
+                                  localIndex.matchId(front: generated.front, back: generated.back, semantic: true) == nil
+                            else { continue }
+                            let card = Card(materialId: materialId, front: generated.front, back: generated.back,
+                                            origin: .aiGenerated, status: .draft)
+                            try card.save(db)
+                            try DeckCard(deckId: deckId, cardId: card.id, sortIndex: next).save(db)
+                            localIndex.insert(id: card.id, front: generated.front, back: generated.back)
+                            inserted.append((card.id, generated.front, generated.back))
+                            next += 1
+                        }
+                        return inserted
+                    }
+                    for item in inserted { duplicateIndex.insert(id: item.id, front: item.front, back: item.back) }
+                    createdCount += inserted.count
+                } catch {
+                    writeFailure = "\(error)"
+                    continue
+                }
             }
         }
         if let writeFailure { return .failed(.writeFailed(created: createdCount, reason: writeFailure)) }

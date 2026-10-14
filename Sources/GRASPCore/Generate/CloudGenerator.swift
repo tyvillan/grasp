@@ -26,7 +26,8 @@ public struct CloudGenerator: CardGenerator {
         // a piece must still fit Ollama's 8K context if a call lands there.
         let budget = local == nil ? 6_000 : 3_000
         self.init(model: model, localModelName: local?.modelName, hasKey: !apiKey.isEmpty, failures: failures,
-                  pipeline: OllamaGenerator(transport: transport, model: model, wordBudget: budget))
+                  pipeline: OllamaGenerator(transport: transport, model: model, wordBudget: budget,
+                                            concurrency: { AIPreferences.geminiPlan.concurrency }))
     }
 
     init(model: String, localModelName: String?, hasKey: Bool, failures: FailureLog, pipeline: OllamaGenerator) {
@@ -48,6 +49,12 @@ public struct CloudGenerator: CardGenerator {
     public var contextCheckBatchSize: Int { 5 }
 
     public var maxConcurrentCalls: Int { AIPreferences.geminiPlan.concurrency }
+
+    public var reviewsWholeOverview: Bool { true }
+
+    public func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
+        await pipeline.reviewOverview(noteContext: noteContext, sections: sections)
+    }
 
     public func validateContextBatch(
         items: [ContextCheckItem], noteContext: String, courseName: String
@@ -307,6 +314,17 @@ public struct FallbackGenerator: CardGenerator {
     public var contextCheckBatchSize: Int { cloud.contextCheckBatchSize }
 
     public var maxConcurrentCalls: Int { cloud.maxConcurrentCalls }
+
+    public var reviewsWholeOverview: Bool { cloud.reviewsWholeOverview }
+
+    /// Cloud only. If the cloud can't take it the answer is nil and the
+    /// composer reviews section by section, which falls back as usual.
+    public func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
+        await run(
+            cloud: { await cloud.reviewOverview(noteContext: noteContext, sections: sections) },
+            local: { nil }
+        )
+    }
 
     /// Batches go to the cloud only. When the cloud can't take one, the
     /// answer is empty and the caller asks card by card, which then falls

@@ -257,3 +257,224 @@ private actor Counter {
     func enter() { current += 1; peak = max(peak, current) }
     func leave() { current -= 1 }
 }
+
+@Suite("Overview: one review over the whole lesson, parallel sections")
+struct OverviewWholeReviewTests {
+    @Test("a whole-lesson review reply is read per section and drops unknown section numbers")
+    func parse() throws {
+        let raw = """
+        {"sections": [{"section": 2, "items": [{"original": "Threads share a stack.", "corrected": "Threads have their own stacks."}]},
+                      {"section": 9, "items": [{"original": "x", "corrected": "y"}]},
+                      {"section": 1, "items": []}]}
+        """
+        let out = try #require(OllamaGenerator.parseOverviewReview(raw, sectionCount: 3))
+        #expect(out.count == 3)
+        #expect(out[0].isEmpty && out[2].isEmpty)
+        #expect(out[1].count == 1)
+        #expect(out[1][0].original == "Threads share a stack.")
+    }
+
+    @Test("an unusable reply is nil so the composer reviews section by section")
+    func unusable() {
+        #expect(OllamaGenerator.parseOverviewReview("No problems found.", sectionCount: 3) == nil)
+        #expect(OllamaGenerator.parseOverviewReview(#"{"items": []}"#, sectionCount: 3) == nil)
+    }
+
+    @Test("the prompt carries the note once and every section")
+    func prompt() {
+        let sections = (1...4).map { OverviewSection(heading: "Heading \($0)", paragraphs: ["Paragraph \($0)."]) }
+        let p = OllamaGenerator.reviewOverviewPrompt(noteContext: "NOTE-MARKER body", sections: sections)
+        #expect(p.components(separatedBy: "NOTE-MARKER").count == 2)
+        for n in 1...4 { #expect(p.contains("Section \(n): Heading \(n)")) }
+    }
+
+    private final class Gen: CardGenerator, @unchecked Sendable {
+        let lock = NSLock()
+        var whole: Bool
+        var wholeReply: [[OverviewFix]]?
+        var sectionReviews = 0
+        var wholeReviews = 0
+        init(whole: Bool, wholeReply: [[OverviewFix]]? = nil) { self.whole = whole; self.wholeReply = wholeReply }
+        var isAvailable: Bool { get async { true } }
+        var overviewContextWordBudget: Int { 2_000 }
+        var reviewsWholeOverview: Bool { whole }
+        func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] { [] }
+        func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] { [] }
+        func generateAdditional(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> [GeneratedCard] { [] }
+        func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] { [] }
+        func validateContext(front: String, back: String, noteContext: String, courseName: String) async -> ContextValidation { ContextValidation(.valid) }
+        func generateFigures(noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
+        func generateOverview(noteTitle: String, courseName: String, noteContext: String,
+                              includeFormulas: Bool, partLabel: String?) async -> GeneratedOverview {
+            GeneratedOverview(document: OverviewDocument(title: "T", sections: (1...4).map {
+                OverviewSection(heading: "Claim \($0)", paragraphs: ["Threads share a stack \($0)."])
+            }))
+        }
+        func note(section: Bool) { lock.lock(); if section { sectionReviews += 1 } else { wholeReviews += 1 }; lock.unlock() }
+        func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix] {
+            note(section: true); return []
+        }
+        func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
+            note(section: false); return wholeReply
+        }
+    }
+
+    private func sampleNote() -> NoteText {
+        let text = (0..<30).map { "Sentence number \($0) explains one idea about processes and threads in some detail." }
+            .joined(separator: " ")
+        return NoteText(materialId: "m", raw: text, reflowed: text, wordCount: text.split { $0.isWhitespace }.count, hasMath: false)
+    }
+
+    @Test("on the cloud, four sections are reviewed by one call, not four")
+    func oneReviewCall() async {
+        let g = Gen(whole: true, wholeReply: Array(repeating: [], count: 4))
+        let outcome = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        guard case .generated = outcome else { Issue.record("expected an overview"); return }
+        #expect(g.wholeReviews == 1)
+    }
+
+    @Test("a generator that does not review the whole lesson is never asked to")
+    func localNotAskedForWhole() async {
+        let g = Gen(whole: false)
+        _ = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        #expect(g.wholeReviews == 0)
+    }
+
+    @Test("if the whole-lesson reply is unusable the overview still finishes")
+    func unusableStillFinishes() async {
+        let g = Gen(whole: true, wholeReply: nil)
+        let outcome = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        guard case .generated = outcome else { Issue.record("expected an overview"); return }
+        #expect(g.wholeReviews == 1)
+    }
+
+    @Test("a correction from the whole-lesson review lands on its own section only")
+    func fixLandsOnSection() async throws {
+        var fixes = [[OverviewFix]](repeating: [], count: 4)
+        fixes[2] = [OverviewFix(original: "Threads share a stack 3.", corrected: "Threads each have their own stack 3.")]
+        let g = Gen(whole: true, wholeReply: fixes)
+        let outcome = await OverviewComposer.compose(using: g, noteTitle: "T", courseName: "OS", note: sampleNote())
+        guard case .generated(let result) = outcome else { Issue.record("expected an overview"); return }
+        let texts = result.document.sections.map { $0.paragraphs.joined(separator: " ") }
+        #expect(texts.contains { $0.contains("own stack 3") })
+        #expect(texts.contains { $0.contains("share a stack 1") })
+    }
+}
+
+@Suite("Overview: sections written in parallel keep the plan's order")
+struct ParallelSectionsTests {
+    /// Answers the plan, then each section after a delay that is longest
+    /// for the first section, so completion order is the reverse of plan
+    /// order.
+    private final class Transport: ChatTransport, @unchecked Sendable {
+        let lock = NSLock()
+        var inFlight = 0
+        var peak = 0
+        func enter() { lock.lock(); inFlight += 1; peak = max(peak, inFlight); lock.unlock() }
+        func leave() { lock.lock(); inFlight -= 1; lock.unlock() }
+
+        func complete(prompt: String, json: Bool, maxTokens: Int?) async throws -> String {
+            enter(); defer { leave() }
+            for n in 1...6 where prompt.contains("HEADING-\(n)") && prompt.contains("covers-\(n)") && maxTokens == 1_800 {
+                try await Task.sleep(nanoseconds: UInt64(7 - n) * 20_000_000)
+                return #"{"paragraphs": ["Body of section \#(n)."]}"#
+            }
+            if maxTokens == 900 {
+                let sections = (1...6).map { #"{"heading": "HEADING-\#($0)", "covers": "covers-\#($0)"}"# }.joined(separator: ",")
+                return #"{"title": "Lesson", "sections": [\#(sections)]}"#
+            }
+            return "{}"
+        }
+    }
+
+    @Test("six sections with a limit of 3: at most 3 at once, written in plan order")
+    func orderAndLimit() async {
+        let t = Transport()
+        let g = OllamaGenerator(transport: t, model: "m", wordBudget: 2_000, concurrency: { 3 })
+        let result = await g.generateOverview(noteTitle: "T", courseName: "C", noteContext: "A note about things.",
+                                              includeFormulas: false, partLabel: nil)
+        let headings = result.document.sections.map(\.heading)
+        #expect(headings == (1...6).map { "HEADING-\($0)" })
+        #expect(t.peak >= 2 && t.peak <= 3)
+    }
+
+    @Test("a limit of 1 stays one at a time")
+    func sequential() async {
+        let t = Transport()
+        let g = OllamaGenerator(transport: t, model: "m", wordBudget: 2_000, concurrency: { 1 })
+        _ = await g.generateOverview(noteTitle: "T", courseName: "C", noteContext: "A note about things.",
+                                     includeFormulas: false, partLabel: nil)
+        #expect(t.peak == 1)
+    }
+}
+
+@Suite("Card generation across notes in parallel")
+struct ParallelGenerationTests {
+    private final class Gen: CardGenerator, @unchecked Sendable {
+        let lock = NSLock()
+        var width: Int
+        var inFlight = 0
+        var peak = 0
+        init(width: Int) { self.width = width }
+        var isAvailable: Bool { get async { true } }
+        var overviewContextWordBudget: Int { 1_800 }
+        var maxConcurrentCalls: Int { width }
+        func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] { [] }
+        func distractors(for correctAnswer: String, deckContext: [String], count: Int) async -> [String] { [] }
+        func generateAdditional(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> [GeneratedCard] { [] }
+        func generateTestQuestions(existing: [CandidatePair], noteContext: String, maxCount: Int) async -> [GeneratedTestQuestion] { [] }
+        func validateContext(front: String, back: String, noteContext: String, courseName: String) async -> ContextValidation { ContextValidation(.valid) }
+        func generateOverview(noteTitle: String, courseName: String, noteContext: String,
+                              includeFormulas: Bool, partLabel: String?) async -> GeneratedOverview { .empty }
+        func generateFigures(noteTitle: String, courseName: String, noteContext: String, sectionHeadings: [String]) async -> [GeneratedFigure] { [] }
+        func begin() { lock.lock(); inFlight += 1; peak = max(peak, inFlight); lock.unlock() }
+        func end() { lock.lock(); inFlight -= 1; lock.unlock() }
+        func generateAdditionalResult(existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?) async -> AdditionalNoteResult {
+            begin(); defer { end() }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            let names = ["note0": ("Quantum", "a discrete slice of processor time"), "note1": ("Mutex", "a lock one thread holds at a time"),
+                         "note2": ("Semaphore", "a counter threads wait on and signal"), "note3": ("Deadlock", "threads each holding what another needs"),
+                         "note4": ("Thrashing", "more time paging than running"), "note5": ("Frame", "a fixed block of physical memory")]
+            let entry = names[noteContext] ?? ("Other", "something else")
+            return .cards([GeneratedCard(front: entry.0, back: "It is \(entry.1).")])
+        }
+    }
+
+    private func library() async throws -> (GRASPDatabase, String) {
+        let db = try GRASPDatabase.inMemory()
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "OS"); try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "D"); try deck.insert(conn)
+            for i in 0..<6 {
+                let m = Material(courseId: course.id, relativePath: "/v/n\(i).md", kind: .markdown, contentHash: "h\(i)", title: "N\(i)")
+                try m.insert(conn)
+                try NoteText(materialId: m.id, raw: "note\(i)", reflowed: "note\(i)", wordCount: 1, hasMath: false).insert(conn)
+                let c = Card(materialId: m.id, front: "Seed \(i)", back: "Seed answer \(i)", origin: .parser, status: .draft)
+                try c.insert(conn)
+                try DeckCard(deckId: deck.id, cardId: c.id, sortIndex: i).insert(conn)
+            }
+            return deck.id
+        }
+        return (db, deckId)
+    }
+
+    @Test("six notes with a limit of 3 are asked 3 at a time and every card lands once")
+    func parallelNotes() async throws {
+        let (db, deckId) = try await library()
+        let g = Gen(width: 3)
+        let outcome = await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: g, database: db)
+        #expect(outcome == .added(6))
+        #expect(g.peak == 3)
+        let cards = try await db.queue.read { try Card.fetchAll($0).filter { $0.origin == .aiGenerated } }
+        #expect(Set(cards.map(\.front)).count == 6)
+    }
+
+    @Test("a limit of 1 asks one note at a time and adds the same cards")
+    func sequentialNotes() async throws {
+        let (db, deckId) = try await library()
+        let g = Gen(width: 1)
+        let outcome = await CardAI.generateAdditionalCardsOutcome(inDecks: [deckId], using: g, database: db)
+        #expect(outcome == .added(6))
+        #expect(g.peak == 1)
+    }
+}

@@ -282,6 +282,16 @@ public protocol CardGenerator: Sendable {
     func validateContextBatch(
         items: [ContextCheckItem], noteContext: String, courseName: String
     ) async -> [String: ContextValidation]
+
+    /// Whether the second pass over an overview can be one call over the
+    /// whole lesson. A cloud model reads all sections and the note at once;
+    /// a small local model needs one section at a time to catch errors.
+    var reviewsWholeOverview: Bool { get }
+
+    /// Corrections for every section of one lesson, in one call: element
+    /// `i` belongs to `sections[i]`. Nil when the reply was unusable, so
+    /// the caller reviews section by section instead.
+    func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]?
 }
 
 /// One card in a batched context check.
@@ -353,6 +363,10 @@ public extension CardGenerator {
     var contextCheckBatchSize: Int { 1 }
 
     var maxConcurrentCalls: Int { 1 }
+
+    var reviewsWholeOverview: Bool { false }
+
+    func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? { nil }
 
     func validateContextBatch(
         items: [ContextCheckItem], noteContext: String, courseName: String

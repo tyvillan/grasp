@@ -96,13 +96,47 @@ public enum OverviewComposer {
             // swap makes a reflection, what "one-to-one" means -- and a
             // study tool must not teach those with confidence.
             if !document.sections.isEmpty {
-                progress?.expect(document.sections.count)
-                for index in document.sections.indices {
-                    if Task.isCancelled { return .empty }
-                    progress?.begin("Checking section \(index + 1) of \(document.sections.count)")
-                    let fixes = await generator.reviewSection(noteContext: chunk.text, section: document.sections[index])
-                    document.sections[index] = OverviewReview.apply(fixes, to: document.sections[index])
+                var reviewed: [[OverviewFix]]?
+                if generator.reviewsWholeOverview {
+                    // One call over the whole lesson and the note: the
+                    // note is read once, not once per section.
+                    progress?.expect(1)
+                    progress?.begin("Checking the lesson against your note")
+                    reviewed = await generator.reviewOverview(noteContext: chunk.text, sections: document.sections)
                     progress?.advance()
+                    if let fixes = reviewed, fixes.count == document.sections.count {
+                        for index in document.sections.indices {
+                            document.sections[index] = OverviewReview.apply(fixes[index], to: document.sections[index])
+                        }
+                    } else {
+                        // Unusable reply: section by section, as on a
+                        // local model.
+                        reviewed = nil
+                        progress?.expect(document.sections.count)
+                    }
+                } else {
+                    progress?.expect(document.sections.count)
+                }
+                if reviewed == nil {
+                    if Task.isCancelled { return .empty }
+                    let width = max(1, generator.maxConcurrentCalls)
+                    let sections = document.sections
+                    let noteChunk = chunk.text
+                    progress?.begin(width > 1 ? "Checking \(sections.count) sections"
+                                              : "Checking section 1 of \(sections.count)")
+                    let found = await AIConcurrency.map(Array(sections.enumerated()), limit: width) { item -> [OverviewFix] in
+                        let (position, section) = item
+                        if width == 1 {
+                            progress?.begin("Checking section \(position + 1) of \(sections.count)")
+                        }
+                        let fixes = await generator.reviewSection(noteContext: noteChunk, section: section)
+                        progress?.advance()
+                        return fixes
+                    }
+                    if Task.isCancelled { return .empty }
+                    for index in document.sections.indices {
+                        document.sections[index] = OverviewReview.apply(found[index] ?? [], to: document.sections[index])
+                    }
                 }
                 document.sections = document.sections.filter { !$0.paragraphs.isEmpty }
             }

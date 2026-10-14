@@ -141,7 +141,9 @@ struct AIFeatureTimingHarness {
             let local = OllamaGenerator(model: env["GRASP_TIMING_LOCAL_MODEL"] ?? "qwen3.5:9b")
             if await local.isAvailable { generators.append(("Local", local.modelName, local, 1)) }
         }
+        if let plan = env["GRASP_TIMING_PLAN"].flatMap(GeminiPlan.init(rawValue:)) { AIPreferences.geminiPlan = plan }
         var rows: [Row] = []
+        var agreement = ""
         for (backend, model, generator, runs) in generators {
             let (db, deckId, cards, note) = try await makeDeck()
             let g = generator
@@ -154,6 +156,26 @@ struct AIFeatureTimingHarness {
             rows.append(await measure("Context check (4 cards)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.verifyContext(of: Array(cards.prefix(4)), using: g, database: db)
             })
+            if backend == "Cloud" {
+                // The same cards asked one per call and in batches of five:
+                // do the verdict kinds (valid / refine / reject) agree?
+                let items = cards.map { ContextCheckItem(id: $0.id, front: $0.front, back: $0.back) }
+                var batched: [String: ContextValidation] = [:]
+                for start in stride(from: 0, to: items.count, by: 5) {
+                    let chunk = Array(items[start..<min(start + 5, items.count)])
+                    batched.merge(await g.validateContextBatch(items: chunk, noteContext: Self.note, courseName: "Operating Systems")) { a, _ in a }
+                }
+                var single: [String: ContextValidation] = [:]
+                for card in cards {
+                    single[card.id] = await g.validateContext(front: card.front, back: card.back, noteContext: Self.note, courseName: "Operating Systems")
+                }
+                func kind(_ v: ContextValidation) -> String {
+                    switch v.verdict { case .valid: return "valid"; case .refine: return "refine"; case .reject: return "reject" }
+                }
+                let answered = cards.filter { batched[$0.id] != nil }
+                let same = answered.filter { kind(batched[$0.id]!) == kind(single[$0.id]!) }
+                agreement = "batched answered \(answered.count)/\(cards.count) cards; verdict kind agrees on \(same.count)/\(answered.count)\n"
+            }
             rows.append(await measure("Test questions (2)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.generateTestQuestions(inDecks: [deckId], maxCount: 2, using: g, database: db)
             })
@@ -181,6 +203,7 @@ struct AIFeatureTimingHarness {
                           r.connect, r.reused, r.firstResult, r.promptTokens, r.outputTokens, r.model,
                           r.failureKinds.isEmpty ? "-" : r.failureKinds)
         }
+        out += agreement
         try out.write(toFile: env["GRASP_TIMING_OUT"] ?? "/tmp/cloud-speed-timing.txt", atomically: true, encoding: .utf8)
         #expect(!rows.isEmpty)
     }
