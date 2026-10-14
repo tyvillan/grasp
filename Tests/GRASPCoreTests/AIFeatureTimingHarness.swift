@@ -183,22 +183,41 @@ struct AIFeatureTimingHarness {
             if backend == "Cloud", on("agreement") {
                 // The same cards asked one per call and in batches of five:
                 // do the verdict kinds (valid / refine / reject) agree?
+                //
+                // A failed call makes `validateContext` answer "valid" (it
+                // fails soft), which would look like a disagreement. So a
+                // card counts only when its own call really got an answer:
+                // at least one call recorded without a failure.
                 let items = cards.map { ContextCheckItem(id: $0.id, front: $0.front, back: $0.back) }
-                var batched: [String: ContextValidation] = [:]
-                for start in stride(from: 0, to: items.count, by: 5) {
-                    let chunk = Array(items[start..<min(start + 5, items.count)])
-                    batched.merge(await g.validateContextBatch(items: chunk, noteContext: Self.note, courseName: "Operating Systems")) { a, _ in a }
-                }
-                var single: [String: ContextValidation] = [:]
-                for card in cards {
-                    single[card.id] = await g.validateContext(front: card.front, back: card.back, noteContext: Self.note, courseName: "Operating Systems")
-                }
                 func kind(_ v: ContextValidation) -> String {
                     switch v.verdict { case .valid: return "valid"; case .refine: return "refine"; case .reject: return "reject" }
                 }
-                let answered = cards.filter { batched[$0.id] != nil }
-                let same = answered.filter { kind(batched[$0.id]!) == kind(single[$0.id]!) }
-                agreement = "batched answered \(answered.count)/\(cards.count) cards; verdict kind agrees on \(same.count)/\(answered.count)\n"
+                var batched: [String: ContextValidation] = [:]
+                var batchedFailures = 0
+                for start in stride(from: 0, to: items.count, by: 5) {
+                    let chunk = Array(items[start..<min(start + 5, items.count)])
+                    _ = AITiming.drain()
+                    let got = await g.validateContextBatch(items: chunk, noteContext: Self.note, courseName: "Operating Systems")
+                    let recorded = AITiming.drain()
+                    batchedFailures += recorded.filter { $0.failure != nil }.count
+                    if recorded.contains(where: { $0.failure == nil }) { batched.merge(got) { a, _ in a } }
+                }
+                var single: [String: ContextValidation] = [:]
+                var singleFailures = 0
+                for card in cards {
+                    _ = AITiming.drain()
+                    let got = await g.validateContext(front: card.front, back: card.back, noteContext: Self.note, courseName: "Operating Systems")
+                    let recorded = AITiming.drain()
+                    singleFailures += recorded.filter { $0.failure != nil }.count
+                    if recorded.contains(where: { $0.failure == nil }) { single[card.id] = got }
+                }
+                let both = cards.filter { batched[$0.id] != nil && single[$0.id] != nil }
+                let same = both.filter { kind(batched[$0.id]!) == kind(single[$0.id]!) }
+                let pairs = both.map { "\(kind(single[$0.id]!))/\(kind(batched[$0.id]!))" }.joined(separator: " ")
+                agreement = "per-card answered \(single.count)/\(cards.count) (\(singleFailures) failed attempts); "
+                    + "batched answered \(batched.count)/\(cards.count) (\(batchedFailures) failed attempts)\n"
+                    + "compared on \(both.count) cards where both really answered: verdict kind agrees on \(same.count)/\(both.count)\n"
+                    + "per-card/batched kinds: \(pairs.isEmpty ? "-" : pairs)"
             }
             if on("questions") { rows.append(await measure("Test questions (2)", backend: backend, model: model, runs: runs) { _ in
                 _ = await CardAI.generateTestQuestions(inDecks: [deckId], maxCount: 2, using: g, database: db)
