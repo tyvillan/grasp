@@ -798,6 +798,24 @@ final class AppStore {
         reload()
     }
 
+    /// Suspends a deck: every active card goes back to a draft (see
+    /// `CardActions.suspendDeck`). Returns how many moved.
+    @discardableResult
+    func suspendDeck(inDecks deckIds: [String]) throws -> Int {
+        let moved = try database.queue.write { db in try CardActions.suspendDeck(deckIds, db: db) }
+        reload()
+        return moved
+    }
+
+    /// Brings a suspended deck back: every draft and suspended card in it
+    /// becomes active (see `CardActions.reactivateDeck`).
+    @discardableResult
+    func reactivateDeck(inDecks deckIds: [String]) throws -> Int {
+        let moved = try database.queue.write { db in try CardActions.reactivateDeck(deckIds, db: db) }
+        reload()
+        return moved
+    }
+
     /// Bulk-promotes every draft card in a deck to active, so a deck the
     /// parser filled with good pairs can be studied without clicking
     /// through each card one at a time.
