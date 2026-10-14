@@ -153,37 +153,51 @@ struct UnderstandingMeterTests {
         }
         #expect(after(.recognition, true).level == .recall)
         #expect(after(.recall, true).level == .mastered)
-        #expect(after(.recall, false).level == .recognition)
+        // A first miss keeps the level and is remembered.
+        #expect(after(.recall, false).level == .recall)
+        #expect(after(.recall, false).missedOnce)
         #expect(after(.mastered, true).level == .mastered)
-        #expect(after(.mastered, false).level == .recall)
+        #expect(after(.mastered, false).level == .mastered)
         #expect(after(.familiar, true).level == .mastered)
-        #expect(after(.familiar, false).level == .recognition)
+        #expect(after(.familiar, false).level == .familiar)
         #expect(after(nil, true).level == .recognition)
         #expect(after(nil, false).level == .new)
+        // A second miss in a row drops one level.
+        let missedOnce = UnderstandingState.of(level: .recall, consecutiveCorrect: -1)
+        #expect(missedOnce.afterAnswer(correct: false).level == .recognition)
+        #expect(!missedOnce.afterAnswer(correct: false).missedOnce)
+        #expect(missedOnce.afterAnswer(correct: true).level == .mastered)
+        #expect(UnderstandingState.of(level: .familiar, consecutiveCorrect: -1).afterAnswer(correct: false).level == .recognition)
         // A miss on a never-asked card leaves it at the start, now asked.
         #expect(after(nil, false).asked)
         // It uses the engine's own function, so the two can't drift.
         for level in [LearnEngine.Level.new, .recognition, .recall, .mastered, .familiar] {
             for correct in [true, false] {
-                let expected = LearnEngine.advance(level: level, consecutiveCorrect: 0, wasCorrect: correct).level
-                #expect(UnderstandingState.of(level: level).afterAnswer(correct: correct).level == expected)
+                for run in [0, 2, -1] {
+                    let expected = LearnEngine.advance(level: level, consecutiveCorrect: run, wasCorrect: correct).level
+                    let state = UnderstandingState.of(level: level, consecutiveCorrect: run)
+                    #expect(state.afterAnswer(correct: correct).level == expected)
+                }
             }
         }
     }
 
     @Test("a change of level gets one line, and no change gets none")
     func captions() {
-        func caption(_ from: LearnEngine.Level?, _ correct: Bool) -> String? {
-            let before = UnderstandingState.of(level: from)
+        func caption(_ from: LearnEngine.Level?, _ correct: Bool, run: Int = 0) -> String? {
+            let before = UnderstandingState.of(level: from, consecutiveCorrect: run)
             return UnderstandingState.changeCaption(from: before, to: before.afterAnswer(correct: correct))
         }
         #expect(caption(.recall, true) == "Recall to understood")
         #expect(caption(.recognition, true) == "Recognition to recall")
-        #expect(caption(.recall, false) == "Back to recognition")
-        #expect(caption(.mastered, false) == "Back to recall")
+        // Only the second miss in a row drops, so only it gets a line.
+        #expect(caption(.recall, false) == nil)
+        #expect(caption(.recall, false, run: -1) == "Back to recognition")
+        #expect(caption(.mastered, false, run: -1) == "Back to recall")
         #expect(caption(.familiar, true) == "Self-rated to understood")
-        #expect(caption(.familiar, false) == "Back to recognition")
-        #expect(caption(.recognition, false) == "Back to the start")
+        #expect(caption(.familiar, false) == nil)
+        #expect(caption(.familiar, false, run: -1) == "Back to recognition")
+        #expect(caption(.recognition, false, run: -1) == "Back to the start")
         #expect(caption(.mastered, true) == nil)
         #expect(caption(.new, false) == nil)
     }

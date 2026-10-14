@@ -17,6 +17,12 @@ public struct UnderstandingState: Equatable, Sendable {
     /// asked about reads "New".
     public var asked: Bool
     public var level: LearnEngine.Level
+    /// The card's signed run: negative is misses in a row (one miss is
+    /// remembered but has not dropped the card), positive is rights.
+    public var consecutiveCorrect: Int = 0
+
+    /// Missed once and not yet dropped: one more miss in a row drops it.
+    public var missedOnce: Bool { consecutiveCorrect < 0 }
 
     public var isMastered: Bool { level == .mastered }
     public var isSelfRated: Bool { level == .familiar }
@@ -52,8 +58,8 @@ public struct UnderstandingState: Equatable, Sendable {
     /// Where the card stands after one more answer, by the existing
     /// ladder rules (`LearnEngine.advance`), nothing new.
     public func afterAnswer(correct: Bool) -> UnderstandingState {
-        let next = LearnEngine.advance(level: level, consecutiveCorrect: 0, wasCorrect: correct).level
-        return .of(level: next, asked: true)
+        let next = LearnEngine.advance(level: level, consecutiveCorrect: consecutiveCorrect, wasCorrect: correct)
+        return .of(level: next.level, asked: true, consecutiveCorrect: next.consecutiveCorrect)
     }
 
     /// One line for a change of level: "Recall to understood", "Back to
@@ -76,7 +82,8 @@ public struct UnderstandingState: Equatable, Sendable {
     }
 
     /// `level` nil means the card has no learn row at all.
-    public static func of(level: LearnEngine.Level?, asked: Bool? = nil) -> UnderstandingState {
+    public static func of(level: LearnEngine.Level?, asked: Bool? = nil,
+                          consecutiveCorrect: Int = 0) -> UnderstandingState {
         let level = level ?? .new
         let hasBeenAsked = asked ?? (level != .new)
         let pips: [Pip]
@@ -89,7 +96,7 @@ public struct UnderstandingState: Equatable, Sendable {
         // shown. One right answer in Learn completes it.
         case .familiar: pips = [.dotted, .dotted, .empty]
         }
-        return UnderstandingState(pips: pips, asked: hasBeenAsked, level: level)
+        return UnderstandingState(pips: pips, asked: hasBeenAsked, level: level, consecutiveCorrect: consecutiveCorrect)
     }
 }
 
@@ -216,8 +223,11 @@ extension Study {
         guard !ids.isEmpty else { return [] }
         let materials = try Card.filter(ids.contains(Column("id"))).fetchAll(db)
         let materialById = Dictionary(uniqueKeysWithValues: materials.map { ($0.id, $0.materialId) })
+        let streaks = Dictionary(uniqueKeysWithValues: try LearnState.filter(ids.contains(Column("cardId"))).fetchAll(db)
+            .map { ($0.cardId, $0.consecutiveCorrect) })
         return rows.map { row in
-            let state = UnderstandingState.of(level: row.candidate.level, asked: row.lastSeenAt != nil)
+            let state = UnderstandingState.of(level: row.candidate.level, asked: row.lastSeenAt != nil,
+                                              consecutiveCorrect: streaks[row.candidate.cardId] ?? 0)
             return DeckUnderstanding.Card(id: row.candidate.cardId, materialId: materialById[row.candidate.cardId] ?? nil,
                                           state: state)
         }

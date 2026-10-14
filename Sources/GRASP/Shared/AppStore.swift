@@ -940,7 +940,8 @@ final class AppStore {
     func understandingState(forCard cardId: String) -> UnderstandingState {
         let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }
         guard let row = row ?? nil else { return .of(level: nil) }
-        return .of(level: LearnEngine.Level(rawValue: row.level) ?? .new, asked: true)
+        return .of(level: LearnEngine.Level(rawValue: row.level) ?? .new, asked: true,
+                   consecutiveCorrect: row.consecutiveCorrect)
     }
 
     /// Each card's meter state and source note, for the understanding meter.
