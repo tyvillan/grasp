@@ -26,12 +26,16 @@ struct FamiliarLevelTests {
         }
     }
 
-    @Test("a right answer on a familiar card makes it mastered; a miss sends it to recognition")
+    @Test("a right answer on a familiar card makes it mastered; two misses in a row send it to recognition")
     func advanceFromFamiliar() {
         let right = LearnEngine.advance(level: .familiar, consecutiveCorrect: 0, wasCorrect: true)
         #expect(right.level == .mastered)
         #expect(right.consecutiveCorrect == 1)
-        let miss = LearnEngine.advance(level: .familiar, consecutiveCorrect: 0, wasCorrect: false)
+        // One miss is remembered; the second in a row sends it to recognition.
+        let first = LearnEngine.advance(level: .familiar, consecutiveCorrect: 0, wasCorrect: false)
+        #expect(first.level == .familiar)
+        #expect(first.consecutiveCorrect == -1)
+        let miss = LearnEngine.advance(level: .familiar, consecutiveCorrect: first.consecutiveCorrect, wasCorrect: false)
         #expect(miss.level == .recognition)
         #expect(miss.consecutiveCorrect == 0)
     }

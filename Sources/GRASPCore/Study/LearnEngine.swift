@@ -209,21 +209,27 @@ public enum LearnEngine {
     // MARK: - Progress
 
     /// Applies one answer's outcome to a level/streak pair: promotion on
-    /// correct (capped at mastered), demotion by one level on a miss
-    /// (never below new).
+    /// correct (capped at mastered). A miss does not drop the card by
+    /// itself: the first miss only remembers it (the streak goes to -1), and
+    /// a second miss in a row drops it one level (never below new) and
+    /// starts the streak over. A right answer in between clears the miss.
+    ///
+    /// `consecutiveCorrect` is a signed run: positive is right answers in a
+    /// row, negative is misses in a row. An older client reads a negative
+    /// run as a streak and still works.
     public static func advance(level: Level, consecutiveCorrect: Int, wasCorrect: Bool) -> (level: Level, consecutiveCorrect: Int) {
-        // Familiar sits outside the 0...3 ladder (its raw value is 4), so
-        // the arithmetic below would misread it: a right answer proves it,
-        // a miss sends it to the gentlest rung.
-        if level == .familiar {
-            return wasCorrect ? (.mastered, consecutiveCorrect + 1) : (.recognition, 0)
-        }
         if wasCorrect {
+            let run = max(consecutiveCorrect, 0) + 1
+            // Familiar sits outside the 0...3 ladder (its raw value is 4),
+            // so a right answer proves it outright.
+            if level == .familiar { return (.mastered, run) }
             let next = Level(rawValue: min(level.rawValue + 1, Level.mastered.rawValue)) ?? .mastered
-            return (next, consecutiveCorrect + 1)
-        } else {
-            let previous = Level(rawValue: max(level.rawValue - 1, Level.new.rawValue)) ?? .new
-            return (previous, 0)
+            return (next, run)
         }
+        // A miss. The first one is remembered; the second in a row drops.
+        guard consecutiveCorrect < 0 else { return (level, -1) }
+        if level == .familiar { return (.recognition, 0) }
+        let previous = Level(rawValue: max(level.rawValue - 1, Level.new.rawValue)) ?? .new
+        return (previous, 0)
     }
 }

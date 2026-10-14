@@ -89,8 +89,18 @@ struct PipChange: View {
             }
             .transition(.opacity)
         } else {
-            PipMeter(state: after, size: .card, showsWord: true)
-                .transition(.opacity)
+            VStack(spacing: 6) {
+                PipMeter(state: after, size: .card, showsWord: true)
+                // A first miss does not drop the card; say so, so it
+                // doesn't look like nothing happened.
+                if after.missedOnce {
+                    Text("Missed once. Miss it again in a row and it drops a level.")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .transition(.opacity)
         }
     }
 }
