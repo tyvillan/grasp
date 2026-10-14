@@ -263,6 +263,36 @@ public protocol CardGenerator: Sendable {
     /// chunks against. Words rather than tokens because nothing in this
     /// codebase has a tokenizer, and `NoteText.wordCount` is already stored.
     var overviewContextWordBudget: Int { get }
+
+    /// How many cards one context-check call may carry. 1 asks about one
+    /// card per call, which is what a small local model is trusted with;
+    /// the cloud model takes several at once, so the note is sent once
+    /// per call instead of once per card.
+    var contextCheckBatchSize: Int { get }
+
+    /// How many independent calls the caller may have in flight at once.
+    /// 1 on a local model and on a free cloud plan, where requests are
+    /// paced one at a time anyway.
+    var maxConcurrentCalls: Int { get }
+
+    /// The context check for several cards of one note in one call.
+    /// Returns a verdict only for the cards the reply answered validly;
+    /// a card missing from the result was not judged, and the caller asks
+    /// about it on its own. Empty when the reply was unusable.
+    func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation]
+}
+
+/// One card in a batched context check.
+public struct ContextCheckItem: Sendable, Equatable {
+    public var id: String
+    public var front: String
+    public var back: String
+
+    public init(id: String, front: String, back: String) {
+        self.id = id; self.front = front; self.back = back
+    }
 }
 
 /// How one note's "additional cards" request ended.
@@ -319,6 +349,14 @@ public extension CardGenerator {
     /// 7-8B model's 8k window comfortable room for the prompt and a full
     /// answer. `FoundationModelsGenerator` overrides this downward.
     var overviewContextWordBudget: Int { 1_200 }
+
+    var contextCheckBatchSize: Int { 1 }
+
+    var maxConcurrentCalls: Int { 1 }
+
+    func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] { [:] }
 
     /// The second pass over a written section: corrections for statements
     /// the note contradicts or that are simply wrong. Empty by default --

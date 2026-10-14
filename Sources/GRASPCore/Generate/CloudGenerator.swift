@@ -43,6 +43,18 @@ public struct CloudGenerator: CardGenerator {
 
     public var overviewContextWordBudget: Int { pipeline.overviewContextWordBudget }
 
+    /// A cloud model keeps five cards apart in one reply; a small local
+    /// one does not, so only this generator batches.
+    public var contextCheckBatchSize: Int { 5 }
+
+    public var maxConcurrentCalls: Int { AIPreferences.geminiPlan.concurrency }
+
+    public func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] {
+        await pipeline.validateContextBatch(items: items, noteContext: noteContext, courseName: courseName)
+    }
+
     public func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] {
         await pipeline.refine(candidates, noteContext: noteContext)
     }
@@ -291,6 +303,22 @@ public struct FallbackGenerator: CardGenerator {
 
     /// The local model's budget: a call that falls back must fit there too.
     public var overviewContextWordBudget: Int { local.overviewContextWordBudget }
+
+    public var contextCheckBatchSize: Int { cloud.contextCheckBatchSize }
+
+    public var maxConcurrentCalls: Int { cloud.maxConcurrentCalls }
+
+    /// Batches go to the cloud only. When the cloud can't take one, the
+    /// answer is empty and the caller asks card by card, which then falls
+    /// back to the local model the usual way.
+    public func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] {
+        await run(
+            cloud: { await cloud.validateContextBatch(items: items, noteContext: noteContext, courseName: courseName) },
+            local: { [:] }
+        )
+    }
 
     /// Runs on the cloud, then again locally if a cloud call failed in a way
     /// the cloud won't fix by itself. `keep` lets a partly written result

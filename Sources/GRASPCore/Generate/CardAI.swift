@@ -188,45 +188,85 @@ public enum CardAI {
                 continue
             }
             let courseName = courseNameByMaterial[materialId] ?? ""
-            for card in materialCards {
+            // Cards go to the model in batches that share one copy of the
+            // note (a batch of 1 is the plain one-call-per-card check), and
+            // up to `maxConcurrentCalls` batches are asked at once. Verdicts
+            // are applied in the cards' own order, a group at a time, so a
+            // stop keeps what was already applied.
+            let size = max(1, generator.contextCheckBatchSize)
+            let width = max(1, generator.maxConcurrentCalls)
+            let batches = stride(from: 0, to: materialCards.count, by: size).map {
+                Array(materialCards[$0..<min($0 + size, materialCards.count)])
+            }
+            for group in stride(from: 0, to: batches.count, by: width).map({ Array(batches[$0..<min($0 + width, batches.count)]) }) {
                 if Task.isCancelled { break noteLoop }
-                checked += 1
-                progress?.begin("Checking card \(checked) of \(candidates.count)")
-                let result = await generator.validateContext(
-                    front: card.front, back: card.back, noteContext: context, courseName: courseName)
-                progress?.advance()
-                if Task.isCancelled { break noteLoop }
-                do {
-                    switch result.verdict {
-                    case .valid:
-                        continue
-                    case .refine(let newBack):
-                        // "Not defined in the notes" is not a better answer.
-                        if CardQuality.isRefusal(newBack) { continue }
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            if updated.originalBack == nil { updated.originalBack = updated.back }
-                            updated.back = newBack
-                            updated.isContextRefined = true
-                            updated.updatedAt = Date()
-                            try updated.save(db)
+                let firstNumber = checked + 1
+                let groupCount = group.reduce(0) { $0 + $1.count }
+                progress?.begin(groupCount == 1
+                    ? "Checking card \(firstNumber) of \(candidates.count)"
+                    : "Checking cards \(firstNumber) to \(checked + groupCount) of \(candidates.count)")
+                let verdicts = await AIConcurrency.map(group, limit: width) { batch in
+                    await Self.contextVerdicts(for: batch, note: context, courseName: courseName, using: generator)
+                }
+                for (batch, batchVerdicts) in zip(group, verdicts) {
+                    guard let batchVerdicts else { break noteLoop }
+                    for card in batch {
+                        checked += 1
+                        progress?.advance()
+                        guard let result = batchVerdicts[card.id] else { continue }
+                        do {
+                            switch result.verdict {
+                            case .valid:
+                                continue
+                            case .refine(let newBack):
+                                // "Not defined in the notes" is not a better answer.
+                                if CardQuality.isRefusal(newBack) { continue }
+                                try await database.queue.write { db in
+                                    guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                                    if updated.originalBack == nil { updated.originalBack = updated.back }
+                                    updated.back = newBack
+                                    updated.isContextRefined = true
+                                    updated.updatedAt = Date()
+                                    try updated.save(db)
+                                }
+                                summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+                            case .reject:
+                                try await database.queue.write { db in
+                                    guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                                    updated.deletedAt = Date()
+                                    updated.updatedAt = Date()
+                                    try updated.save(db)
+                                }
+                                summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+                            }
+                        } catch {
+                            continue
                         }
-                        summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
-                    case .reject:
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            updated.deletedAt = Date()
-                            updated.updatedAt = Date()
-                            try updated.save(db)
-                        }
-                        summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
                     }
-                } catch {
-                    continue
                 }
             }
         }
         return summary
+    }
+
+    /// The verdicts for one batch of one note's cards. A batch of several
+    /// is one call; any card its reply left out, or all of them if the
+    /// reply was unusable, is asked about on its own. Keyed by card id.
+    static func contextVerdicts(
+        for cards: [Card], note: String, courseName: String, using generator: any CardGenerator
+    ) async -> [String: ContextValidation] {
+        var verdicts: [String: ContextValidation] = [:]
+        if cards.count > 1 {
+            verdicts = await generator.validateContextBatch(
+                items: cards.map { .init(id: $0.id, front: $0.front, back: $0.back) },
+                noteContext: note, courseName: courseName)
+        }
+        for card in cards where verdicts[card.id] == nil {
+            if Task.isCancelled { break }
+            verdicts[card.id] = await generator.validateContext(
+                front: card.front, back: card.back, noteContext: note, courseName: courseName)
+        }
+        return verdicts
     }
 
     /// Every live card in the library, checked against its note -- the

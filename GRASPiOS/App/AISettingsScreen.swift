@@ -9,6 +9,7 @@ struct AISettingsScreen: View {
     @State private var keyDraft = ""
     @State private var pendingMode: AIMode?
     @AppStorage(AIPreferences.cloudModelKey, store: .standard) private var cloudModel = ""
+    @AppStorage(AIPreferences.geminiPlanKey, store: .standard) private var geminiPlan = GeminiPlan.free.rawValue
 
     static let freeTierNotice = "Cloud mode sends the text of your notes to Google Gemini. Its free tier may use what you send to improve Google's products, and people at Google may read it."
 
@@ -54,6 +55,11 @@ struct AISettingsScreen: View {
                             Text(note).font(.graspFootnote).foregroundStyle(.secondary)
                         }
                     }
+                    Picker("Gemini plan", selection: $geminiPlan) {
+                        Text("Free").tag("free")
+                        Text("Paid").tag("paid")
+                    }
+                    Text(GeminiPlan.explanation(for: geminiPlan)).font(.graspFootnote).foregroundStyle(.secondary)
                     LabeledContent("Today", value: usageText)
                     Button("Remove Key", role: .destructive) { Task { await store.removeCloudKey() } }
                 } else {

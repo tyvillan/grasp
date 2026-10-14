@@ -71,6 +71,13 @@ public enum GeminiPlan: String, CaseIterable, Sendable {
     public var requestsPerMinute: Int { self == .paid ? 120 : 10 }
     /// How many independent calls may be in flight at once.
     public var concurrency: Int { self == .paid ? 4 : 1 }
+
+    /// The setting's explanation, in plain words.
+    public static func explanation(for raw: String) -> String {
+        raw == GeminiPlan.paid.rawValue
+            ? "Choose Paid if billing is turned on for your Google project. GRASP then sends requests faster and works on several things at once, so generating cards, overviews and study guides finishes sooner. If Google says it is going too fast, GRASP slows down and tries again."
+            : "Free is where every new Google AI Studio key starts. GRASP sends at most 10 requests a minute so Google does not turn requests away. Switch to Paid if billing is on for your project."
+    }
 }
 
 /// The student's AI choices. Machine-wide (`UserDefaults.standard`), like
