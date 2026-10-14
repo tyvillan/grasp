@@ -60,6 +60,11 @@ struct AIFeatureTimingHarness {
         var promptTokens: Double
         var outputTokens: Double
         var model: String
+        var failed: Double = 0
+        var failureKinds = ""
+        var firstByte: Double = 0
+        var connect: Double = 0
+        var reused: String = "-"
     }
 
     private func makeDeck() async throws -> (GRASPDatabase, deckId: String, cards: [Card], note: NoteText) {
@@ -109,11 +114,18 @@ struct AIFeatureTimingHarness {
         let flat = calls.flatMap { $0 }
         let n = Double(max(runs, 1))
         func avg(_ xs: [Double]) -> Double { xs.isEmpty ? 0 : xs.reduce(0, +) / Double(xs.count) }
-        return Row(feature: feature, backend: backend, runs: runs, calls: Double(flat.count) / n,
+        let good = flat.filter { $0.failure == nil }
+        let bad = flat.filter { $0.failure != nil }
+        let kinds = Dictionary(grouping: bad, by: { $0.failure ?? "" }).map { "\($0.key) x\($0.value.count)" }.sorted()
+        let reuse = good.compactMap(\.reusedConnection)
+        return Row(feature: feature, backend: backend, runs: runs, calls: Double(good.count) / n,
                    total: avg(totals), pacer: flat.map(\.pacerWait).reduce(0, +) / n,
                    request: flat.map(\.request).reduce(0, +) / n, firstResult: avg(firsts.filter { !$0.isNaN }),
-                   promptTokens: avg(flat.map { Double($0.promptChars) / 4 }),
-                   outputTokens: avg(flat.map { Double($0.outputChars) / 4 }), model: model)
+                   promptTokens: avg(good.map { Double($0.promptChars) / 4 }),
+                   outputTokens: avg(good.map { Double($0.outputChars) / 4 }), model: model,
+                   failed: Double(bad.count) / n, failureKinds: kinds.joined(separator: ", "),
+                   firstByte: avg(good.compactMap(\.firstByte)), connect: avg(good.compactMap(\.connect)),
+                   reused: reuse.isEmpty ? "-" : "\(reuse.filter { $0 }.count)/\(reuse.count)")
     }
 
     @Test("time every feature on the sample note",
@@ -162,11 +174,12 @@ struct AIFeatureTimingHarness {
                                                    noteContext: Self.note, cardTerms: cards.map(\.front), problemCount: 3)
             })
         }
-        var out = "feature | backend | runs | calls | total s | pacer wait s | request s | first result s | prompt tok | output tok | model\n"
+        var out = "feature | backend | runs | ok calls | failed calls | total s | pacer wait s | request s | first byte s | connect s | reused | first result s | prompt tok | output tok | model | failures\n"
         for r in rows {
-            out += String(format: "%@ | %@ | %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.0f | %.0f | %@\n",
-                          r.feature, r.backend, r.runs, r.calls, r.total, r.pacer, r.request, r.firstResult,
-                          r.promptTokens, r.outputTokens, r.model)
+            out += String(format: "%@ | %@ | %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.2f | %.2f | %@ | %.1f | %.0f | %.0f | %@ | %@\n",
+                          r.feature, r.backend, r.runs, r.calls, r.failed, r.total, r.pacer, r.request, r.firstByte,
+                          r.connect, r.reused, r.firstResult, r.promptTokens, r.outputTokens, r.model,
+                          r.failureKinds.isEmpty ? "-" : r.failureKinds)
         }
         try out.write(toFile: env["GRASP_TIMING_OUT"] ?? "/tmp/cloud-speed-timing.txt", atomically: true, encoding: .utf8)
         #expect(!rows.isEmpty)

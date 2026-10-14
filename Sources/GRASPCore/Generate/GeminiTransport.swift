@@ -142,11 +142,23 @@ public struct GeminiTransport: ChatTransport {
                 #if DEBUG
                 let started = Date()
                 let metrics = AITiming.Metrics()
-                let answer = try await AITiming.$metrics.withValue(metrics) {
-                    try await request(
-                        prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
-                        boost: boost, reasoning: useReasoning
-                    )
+                let answer: String
+                do {
+                    answer = try await AITiming.$metrics.withValue(metrics) {
+                        try await request(
+                            prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
+                            boost: boost, reasoning: useReasoning
+                        )
+                    }
+                } catch {
+                    // A failed call is a row too: its time is real, and the
+                    // kind of failure (never the body) says why.
+                    AITiming.record(.init(
+                        feature: AITiming.feature, model: current, promptChars: prompt.count, outputChars: 0,
+                        pacerWait: pacerWaited, request: Date().timeIntervalSince(started),
+                        firstByte: nil, connect: nil, reusedConnection: nil, status: 0,
+                        failure: AITiming.describeFailure(error)))
+                    throw error
                 }
                 let seen = metrics.snapshot
                 AITiming.record(.init(

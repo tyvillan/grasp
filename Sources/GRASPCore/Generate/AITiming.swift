@@ -26,11 +26,32 @@ public enum AITiming {
         public var connect: Double?
         public var reusedConnection: Bool?
         public var status: Int
+        /// Nil for a call that worked; otherwise the kind of failure, never a body.
+        public var failure: String? = nil
     }
 
     /// Names the feature a call belongs to, for the table. Set by the
     /// harness around a run; "unlabeled" otherwise.
     @TaskLocal public static var feature: String = "unlabeled"
+
+    /// The kind of an error, for the table: no message text from the server.
+    static func describeFailure(_ error: Error) -> String {
+        switch error {
+        case let e as AIBackendError:
+            switch e {
+            case .unauthorized: return "key rejected"
+            case .quotaExhausted: return "daily limit"
+            case .rateLimited: return "rate limited (429)"
+            case .overloaded(let status): return "overloaded (HTTP \(status))"
+            case .unreachable: return "unreachable"
+            case .badResponse(let body):
+                return body.lowercased().hasPrefix("empty_answer") ? "empty answer" : "bad response"
+            default: return "error"
+            }
+        case is CancellationError: return "cancelled"
+        default: return "error"
+        }
+    }
 
     #if DEBUG
     /// The collector for the request in flight on this task.
