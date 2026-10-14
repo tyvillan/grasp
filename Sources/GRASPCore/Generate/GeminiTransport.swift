@@ -38,14 +38,27 @@ actor RequestPacer {
     static let shared = RequestPacer(minimumInterval: 60.0 / Double(CloudProvider.requestsPerMinute))
 
     private var minimumInterval: TimeInterval
+    private let now: @Sendable () -> Date
+    private let sleep: @Sendable (TimeInterval) async throws -> Void
     private var sends: [Date] = []
     private var lastSend = Date.distantPast
     private var queue: [UInt64] = []
     private var nextTicket: UInt64 = 0
 
-    init(minimumInterval: TimeInterval) {
+    /// `now` and `sleep` are the clock, replaceable so a test can run the
+    /// pacer on a clock it moves by hand instead of waiting in real time.
+    init(minimumInterval: TimeInterval,
+         now: @escaping @Sendable () -> Date = { Date() },
+         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
+             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
+         }) {
         self.minimumInterval = minimumInterval
+        self.now = now
+        self.sleep = sleep
     }
+
+    /// Requests waiting for a turn (background ones), for tests.
+    var waitingCount: Int { queue.count }
 
     /// Follows the plan setting; takes effect for the next request.
     func setRequestsPerMinute(_ rate: Int) {
@@ -60,7 +73,7 @@ actor RequestPacer {
         defer { queue.removeAll { $0 == ticket } }
         while true {
             try Task.checkCancellation()
-            let now = Date()
+            let now = self.now()
             sends.removeAll { now.timeIntervalSince($0) >= 60 }
             let limit = max(1, Int((60 / minimumInterval).rounded()))
             let allowed = priority == .interactive ? limit + max(1, limit / 10) : limit
@@ -75,7 +88,7 @@ actor RequestPacer {
                 lastSend = now
                 return
             }
-            try await Task.sleep(nanoseconds: UInt64(max(wait, 0.025) * 1_000_000_000))
+            try await sleep(max(wait, 0.025))
         }
     }
 }

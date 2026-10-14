@@ -88,6 +88,13 @@ public enum AnswerLadder {
     static func withSendTimeout<T: Sendable>(
         _ limit: Duration, ceiling: Duration = .seconds(20), _ work: @escaping @Sendable () async -> T?
     ) async -> T? {
+        await withSendTimeout(limit, ceiling: ceiling, clock: ContinuousClock(), tick: .milliseconds(20), work)
+    }
+
+    /// The same on a clock the caller supplies (a test moves its own).
+    static func withSendTimeout<T: Sendable, C: Clock>(
+        _ limit: Duration, ceiling: Duration, clock: C, tick: Duration, _ work: @escaping @Sendable () async -> T?
+    ) async -> T? where C.Duration == Duration {
         let gate = SendGate()
         return await withTaskGroup(of: T?.self) { group in
             group.addTask {
@@ -96,13 +103,13 @@ public enum AnswerLadder {
                 }
             }
             group.addTask {
-                let begun = ContinuousClock.now
+                let begun = clock.now
                 var sent = begun
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(20))
-                    let now = ContinuousClock.now
+                    try? await clock.sleep(for: tick)
+                    let now = clock.now
                     if gate.isQueued { sent = now }
-                    if now - sent >= limit || now - begun >= ceiling { return nil }
+                    if sent.duration(to: now) >= limit || begun.duration(to: now) >= ceiling { return nil }
                 }
                 return nil
             }
