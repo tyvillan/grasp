@@ -258,7 +258,10 @@ public enum NoteTitle {
             let cleaned = text.trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "**", with: "")
                 .replacingOccurrences(of: "`", with: "")
-            if !cleaned.isEmpty { return cleaned }
+            // "2026-08-25 · Module 1" reads better as "Module 1".
+            let undated = cleaned.replacingOccurrences(
+                of: #"^\d{4}-\d{2}-\d{2}\s*[·:\-\u2013\u2014|]?\s*"#, with: "", options: .regularExpression)
+            if !undated.isEmpty { return undated }
         }
         return nil
     }

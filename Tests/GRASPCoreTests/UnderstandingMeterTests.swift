@@ -201,6 +201,7 @@ struct UnderstandingMeterTests {
     func titles() {
         let withHeading = "---\ncourse: x\n---\n\n# Module 5 \u{2014} Midterm Review Overview\n\ntext"
         #expect(NoteTitle.readable(raw: withHeading, fileName: "2026-10-06_Module-05_Midterm") == "Module 5 \u{2014} Midterm Review Overview")
+        #expect(NoteTitle.readable(raw: "# 2026-08-25 \u{00B7} Module 1 \u{2014} First Day", fileName: "x") == "Module 1 \u{2014} First Day")
         #expect(NoteTitle.readable(raw: "no heading here\n\n## Second level", fileName: "x") == "Second level")
         #expect(NoteTitle.readable(raw: "```\n# comment in code\n```\ntext", fileName: "2026-09-08_Module-03_C++-Basics-and-Functions.md")
                 == "Module 03 C++ Basics and Functions")

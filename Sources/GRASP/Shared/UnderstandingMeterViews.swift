@@ -143,7 +143,12 @@ struct UnderstandingSummary: View {
     var onOpenNote: (String?) -> Void
     var onPractice: ([String]) -> Void
 
+    #if DEBUG
+    /// `GRASP_OPEN_NOTES=1` starts the phone's disclosure open, for screenshots.
+    @State private var notesOpen = ProcessInfo.processInfo.environment["GRASP_OPEN_NOTES"] == "1"
+    #else
     @State private var notesOpen = false
+    #endif
 
     private var distribution: DeckUnderstanding.Distribution { DeckUnderstanding.distribution(of: cards) }
     private var weakest: [DeckUnderstanding.NoteGroup] { DeckUnderstanding.weakestNotes(of: cards) }
