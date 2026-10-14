@@ -47,6 +47,8 @@ struct DeckScreen: View {
     @State private var notice: String?
     @State private var generationFinished = 0
     @State private var confirmingApproveAll = false
+    @State private var confirmingSuspendDeck = false
+    @State private var confirmingReactivateDeck = false
     /// Shown when Test is tapped on a deck with no approved cards yet.
     @State private var approveFirstNotice = false
     /// Why the last "Generate Cards" run failed, shown with Retry
@@ -246,6 +248,26 @@ struct DeckScreen: View {
                 load()
             }
         }
+        .sheet(isPresented: $confirmingSuspendDeck) {
+            ConfirmationSheet(
+                icon: "pause.circle", title: "Suspend \(route.name)?",
+                message: "\(counts.active) card\(counts.active == 1 ? "" : "s") go back to drafts, so they won't come up in Study, Learn or Tests. Your progress is kept. Approve them again to bring them back.",
+                confirmTitle: "Suspend deck", isDestructive: false, isCompact: true
+            ) {
+                try? store.suspendDeck(inDecks: deckIds)
+                load()
+            }
+        }
+        .sheet(isPresented: $confirmingReactivateDeck) {
+            ConfirmationSheet(
+                icon: "play.circle", title: "Reactivate \(route.name)?",
+                message: "\(counts.drafts + counts.suspended) card\((counts.drafts + counts.suspended) == 1 ? "" : "s") become active again, so they come up in Study, Learn and Tests.",
+                confirmTitle: "Reactivate deck", isDestructive: false, isCompact: true
+            ) {
+                try? store.reactivateDeck(inDecks: deckIds)
+                load()
+            }
+        }
         .sheet(isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
             ResultSheet(icon: AIGlyph.symbol, title: "AI", leadText: aiMessage)
         }
@@ -259,6 +281,13 @@ struct DeckScreen: View {
     private var actionsMenu: some View {
         Menu {
             Button { creatingCard = true } label: { Label("New Card", systemImage: "plus") }
+            // Suspend: every approved card goes back to a draft, so the
+            // deck stops coming up in Study, Learn and Tests.
+            if counts.active > 0 {
+                Button { confirmingSuspendDeck = true } label: { Label("Suspend Deck", systemImage: "pause.circle") }
+            } else if counts.drafts + counts.suspended > 0 {
+                Button { confirmingReactivateDeck = true } label: { Label("Reactivate Deck", systemImage: "play.circle") }
+            }
             Section("AI") {
                 Button { refineDeck() } label: { Label("Refine Drafts with AI", systemImage: "checkmark.seal") }
                     .disabled(draftCount == 0)

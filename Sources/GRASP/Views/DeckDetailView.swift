@@ -204,6 +204,9 @@ struct DeckDetailView: View {
     /// overviews"); the Overview tab picks it up and asks before writing.
     @State private var overviewRequest: OverviewRewriteRequest?
     @State private var deletingDeck: Deck?
+    /// Suspending (or bringing back) the whole deck asks first.
+    @State private var confirmingSuspendDeck = false
+    @State private var confirmingReactivateDeck = false
     @State private var renamingDeck: Deck?
     @State private var datingDeck: Deck?
     /// While set, approving the previewed draft moves on to the next one.
@@ -751,6 +754,19 @@ struct DeckDetailView: View {
                 items.append(.action("Rename deck…", systemImage: "pencil") { renamingDeck = deck })
                 items.append(.action(deck.manualLessonDate == nil ? "Set lecture date…" : "Change lecture date…",
                                      systemImage: "calendar") { datingDeck = deck })
+                // Suspend: every approved card goes back to a draft, so the
+                // deck stops coming up in Study, Learn and Tests.
+                if counts.active > 0 {
+                    items.append(.action("Suspend deck…", systemImage: "pause.circle",
+                                         help: "Put its cards back to drafts so they stop coming up") {
+                        confirmingSuspendDeck = true
+                    })
+                } else if counts.drafts + counts.suspended > 0 {
+                    items.append(.action("Reactivate deck…", systemImage: "play.circle",
+                                         help: "Bring its cards back so they come up again") {
+                        confirmingReactivateDeck = true
+                    })
+                }
                 items.append(.divider)
                 items.append(.action("Delete deck…", systemImage: "trash", destructive: true) {
                     beginDeleteDeck(id)
@@ -766,6 +782,26 @@ struct DeckDetailView: View {
         }
         .sheet(isPresented: $showingDeckFiles) {
             DeckFilesSheet(deckIds: scopeDeckIds, scopeName: deckName, scopeNoun: noun.lowercased())
+        }
+        .sheet(isPresented: $confirmingSuspendDeck) {
+            ConfirmationSheet(
+                icon: "pause.circle", title: "Suspend \(deckName)?",
+                message: "\(counts.active) card\(counts.active == 1 ? "" : "s") go back to drafts, so they won't come up in Study, Learn or Tests. Your progress is kept. Approve them again to bring them back.",
+                confirmTitle: "Suspend deck", isDestructive: false
+            ) {
+                try? store.suspendDeck(inDecks: scopeDeckIds)
+                load()
+            }
+        }
+        .sheet(isPresented: $confirmingReactivateDeck) {
+            ConfirmationSheet(
+                icon: "play.circle", title: "Reactivate \(deckName)?",
+                message: "\(counts.drafts + counts.suspended) card\((counts.drafts + counts.suspended) == 1 ? "" : "s") become active again, so they come up in Study, Learn and Tests.",
+                confirmTitle: "Reactivate deck", isDestructive: false
+            ) {
+                try? store.reactivateDeck(inDecks: scopeDeckIds)
+                load()
+            }
         }
         .sheet(item: $deletingDeck) { deck in
             DeckDeleteSheet(deck: deck, siblings: siblingDecks) { targetId in
