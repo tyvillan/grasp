@@ -33,6 +33,7 @@ struct ChoiceVersionTests {
         #expect(!matrices.contains("[ 1  2 ]\n[ 3  4 ]"))
     }
 
+    #if os(macOS)
     @Test("a fill-in-the-blank question gets three wrong fills that really are wrong",
           .enabled(if: ProcessCodeExecutor().canRun(.python)))
     func runChecked() async {
@@ -51,6 +52,8 @@ struct ChoiceVersionTests {
         #expect(version?.choices?.contains("5") == true)
         #expect(version?.correctAnswer == "5")
     }
+
+    #endif
 
     @Test("a multiple-choice-only test takes only questions that have a choice version")
     func pickRoundModes() async throws {

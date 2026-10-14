@@ -364,7 +364,7 @@ private struct ResultRow: View {
                         .font(GRASPFont.body)
                         .foregroundColor(GRASPColor.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if !item.isCorrect && item.question.type == .written {
+                    if !item.isCorrect && item.question.allowsMarkCorrect {
                         QuietLink(title: "I actually got this right", action: override)
                     }
                 }

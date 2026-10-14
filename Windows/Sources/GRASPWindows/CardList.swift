@@ -29,6 +29,7 @@ struct CardList: View {
     var body: some View {
         let cards = library.cards(inDecks: scope.deckIds)
         let levels = library.learnLevels(inDecks: scope.deckIds)
+        let notes = library.reviewNotes(inDecks: scope.deckIds)
         let matching = sort.apply(cards.filter {
             filter.includes($0) && mastery.includes($0, levels: levels) && matches($0)
                 && (focus?.contains($0.id) ?? true)
@@ -92,6 +93,7 @@ struct CardList: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(matching.prefix(shown)), id: \.id) { card in
                         CardRowView(card: card, understood: levels[card.id] == .mastered, familiar: levels[card.id] == .familiar,
+                                    reviewNote: notes[card.id],
                                     selected: selection.map { $0.contains(card.id) }) {
                             if var picked = selection {
                                 if picked.contains(card.id) { picked.remove(card.id) } else { picked.insert(card.id) }
@@ -264,6 +266,8 @@ private struct CardRowView: View {
     let card: Card
     let understood: Bool
     var familiar = false
+    /// A flag on a parser-made draft; shown, never acted on.
+    var reviewNote: String?
     /// nil when not selecting.
     let selected: Bool?
     let open: () -> Void
@@ -286,6 +290,9 @@ private struct CardRowView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(card.front).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
                     Text(card.back).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary).lineLimit(2)
+                    if let reviewNote {
+                        Text(reviewNote).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(1)
+                    }
                 }
                 Spacer()
                 if let label = statusLabel {

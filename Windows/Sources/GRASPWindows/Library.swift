@@ -409,6 +409,20 @@ final class Library {
     /// The last card list read, for the same reason as `overviewCache`.
     @ObservationIgnored private var cardsCache: (key: String, value: [Card])?
 
+    /// The review flags on parser-made drafts ("Looks like a duplicate of
+    /// ...", "This front looks like a heading."), by card id. Worked out
+    /// once per library revision: it compares every draft with the cards
+    /// before it, which a list redraw mustn't repeat.
+    func reviewNotes(inDecks deckIds: [String]) -> [String: String] {
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = reviewNotesCache, cached.key == key { return cached.value }
+        let value = CardQuality.reviewNotes(for: cards(inDecks: deckIds))
+        reviewNotesCache = (key, value)
+        return value
+    }
+
+    @ObservationIgnored private var reviewNotesCache: (key: String, value: [String: String])?
+
     func card(_ id: String) -> Card? {
         try? database.queue.read { try Card.fetchOne($0, key: id) }
     }
