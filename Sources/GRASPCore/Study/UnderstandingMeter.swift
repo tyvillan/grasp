@@ -233,6 +233,30 @@ extension Study {
         }
     }
 
+    /// Suspended cards' states, for their rows: they are not in the deck
+    /// bar (only active cards are), but a row still shows how far the card
+    /// had got, in red.
+    public static func suspendedUnderstanding(forDecks deckIds: [String], db: Database) throws -> [String: UnderstandingState] {
+        guard !deckIds.isEmpty else { return [:] }
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT DISTINCT card.id AS id, learnState.level AS level,
+                   learnState.consecutiveCorrect AS run, learnState.lastSeenAt AS seen
+            FROM card
+            JOIN deckCard ON deckCard.cardId = card.id
+            LEFT JOIN learnState ON learnState.cardId = card.id
+            WHERE deckCard.deckId IN (\(databaseQuestionMarks(count: deckIds.count)))
+            AND card.deletedAt IS NULL AND card.status = 'suspended'
+            """, arguments: StatementArguments(deckIds))
+        var result: [String: UnderstandingState] = [:]
+        for row in rows {
+            let level: Int? = row["level"]
+            let seen: Date? = row["seen"]
+            result[row["id"]] = .of(level: level.flatMap { LearnEngine.Level(rawValue: $0) }, asked: seen != nil,
+                                    consecutiveCorrect: row["run"] ?? 0)
+        }
+        return result
+    }
+
     /// The meter state of every card in these decks, by card id.
     public static func understandingStates(forDecks deckIds: [String], db: Database) throws -> [String: UnderstandingState] {
         Dictionary(uniqueKeysWithValues: try understanding(forDecks: deckIds, db: db).map { ($0.id, $0.state) })

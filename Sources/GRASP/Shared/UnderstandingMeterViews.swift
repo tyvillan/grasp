@@ -7,6 +7,22 @@ import GRASPCore
 /// and shown, a dashed one was claimed ("I Know This") and not yet shown,
 /// an outline is not reached. Shape carries the meaning; the last one
 /// turning green only reinforces it. No yellow.
+/// The colour of each stage: recognition a light gray (lighter than a
+/// draft's rail), recall yellow, understood green, self-rated a dashed
+/// gray, a suspended card red. The whole meter takes the colour of the
+/// stage reached, so the colour alone says how far along a card is.
+extension UnderstandingState {
+    var stageColor: Color {
+        switch level {
+        case .new: return GRASPColor.textTertiary
+        case .recognition: return GRASPColor.textSecondary
+        case .recall: return GRASPColor.accent
+        case .mastered: return GRASPColor.success
+        case .familiar: return GRASPColor.textSecondary
+        }
+    }
+}
+
 struct PipMeter: View {
     enum Size {
         case row, card, large
@@ -19,6 +35,10 @@ struct PipMeter: View {
     var size: Size = .row
     /// The short word beside the pips ("Recall"), for the card and large sizes.
     var showsWord = false
+    /// A suspended card reads in red, whatever stage it had reached.
+    var isSuspended = false
+
+    private var tint: Color { isSuspended ? GRASPColor.rejected : state.stageColor }
 
     var body: some View {
         HStack(spacing: size == .large ? 10 : 8) {
@@ -28,7 +48,7 @@ struct PipMeter: View {
             if showsWord {
                 Text(state.word)
                     .font(.graspUI(size: size == .large ? 13 : 12, weight: .medium))
-                    .foregroundStyle(state.isMastered ? GRASPColor.success : GRASPColor.textSecondary)
+                    .foregroundStyle(isSuspended ? GRASPColor.rejected : state.stageColor)
                     .lineLimit(1)
             }
         }
@@ -38,19 +58,21 @@ struct PipMeter: View {
     }
 
     @ViewBuilder private func pip(_ index: Int) -> some View {
-        let green = state.isMastered && index == 2
         switch state.pips[index] {
         case .solid:
-            Capsule().fill(green ? GRASPColor.success : GRASPColor.textPrimary)
+            Capsule().fill(tint)
                 .frame(width: size.width, height: size.height)
         case .dotted:
-            Capsule().strokeBorder(GRASPColor.textSecondary, style: StrokeStyle(lineWidth: 1, dash: [2.2, 1.6]))
+            Capsule().strokeBorder(isSuspended ? GRASPColor.rejected : GRASPColor.textSecondary,
+                                   style: StrokeStyle(lineWidth: 1, dash: [2.2, 1.6]))
                 .frame(width: size.width, height: size.height)
         case .empty:
             // Never asked: a hairline outline, stronger than before and
             // still quieter than text. A card asked and missed is a touch firmer.
-            Capsule().strokeBorder(state.asked ? GRASPColor.textTertiary.opacity(0.7) : GRASPColor.hairlineStrong,
-                                   lineWidth: 1.25)
+            Capsule().strokeBorder(
+                isSuspended ? GRASPColor.rejected.opacity(0.5)
+                    : (state.asked ? GRASPColor.textTertiary.opacity(0.7) : GRASPColor.hairlineStrong),
+                lineWidth: 1.25)
                 .frame(width: size.width, height: size.height)
         }
     }
@@ -79,7 +101,7 @@ struct PipChange: View {
                 }
                 Text(caption)
                     .font(.graspUI(size: 12.5, weight: .medium))
-                    .foregroundStyle(after.isMastered ? GRASPColor.success : GRASPColor.textSecondary)
+                    .foregroundStyle(after.stageColor)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(caption + ". " + after.accessibilityLabel)
@@ -123,9 +145,9 @@ struct UnderstandingBar: View {
                 Capsule().strokeBorder(GRASPColor.hairlineStrong, lineWidth: 1)
                 HStack(spacing: 0) {
                     Rectangle().fill(GRASPColor.success).frame(width: segment(distribution.solid, of: geo.size.width))
-                    Rectangle().fill(GRASPColor.textPrimary.opacity(0.7))
+                    Rectangle().fill(GRASPColor.accent)
                         .frame(width: segment(distribution.recall, of: geo.size.width))
-                    Rectangle().fill(GRASPColor.textPrimary.opacity(0.35))
+                    Rectangle().fill(GRASPColor.textSecondary)
                         .frame(width: segment(distribution.recognition, of: geo.size.width))
                     Rectangle().fill(GRASPColor.textSecondary.opacity(0.18))
                         .overlay(Rectangle().strokeBorder(GRASPColor.textSecondary,

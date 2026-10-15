@@ -122,10 +122,13 @@ struct DeckDetailView: View {
     /// notes" row sets (nil: not filtering; `.some(nil)` is the "Other" group).
     @State private var understanding: [DeckUnderstanding.Card] = []
     @State private var noteFilter: String??
+    /// Suspended cards' states, so their rows can show the meter in red.
+    @State private var suspendedStates: [String: UnderstandingState] = [:]
     /// Readable titles for the weakest-notes rows.
     @State private var noteTitles: [String: String] = [:]
     private var understandingById: [String: UnderstandingState] {
         Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+            .merging(suspendedStates) { first, _ in first }
     }
     @State private var masteryFilter: MasteryFilter = .all
     @AppStorage("cardSortOption") private var cardSortOption: CardSortOption = .deckOrder
@@ -1677,6 +1680,7 @@ struct DeckDetailView: View {
         learnLevels = (try? store.learnLevels(forDecks: scopeDeckIds)) ?? [:]
         understanding = (try? store.understanding(forDecks: scopeDeckIds)) ?? []
         noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
+        suspendedStates = store.suspendedUnderstanding(forDecks: scopeDeckIds)
         hasLoaded = true
         loadSourceTitles()
         // A Drafts filter with no drafts left would show an empty list.
@@ -2240,8 +2244,8 @@ private struct CardRow: View {
             // card keeps the 2 pt rail (hairline, or coral). Fixed width so
             // every row's text lines up.
             Group {
-                if card.status == .active {
-                    PipMeter(state: understanding, size: .row)
+                if card.status == .active || card.status == .suspended {
+                    PipMeter(state: understanding, size: .row, isSuspended: card.status == .suspended)
                         .padding(.top, 5)
                         .help(understanding.accessibilityLabel)
                 } else {

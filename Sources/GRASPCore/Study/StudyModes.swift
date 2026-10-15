@@ -340,9 +340,18 @@ extension Study {
             .filter(Column("ordinal") == ordinal)
             .fetchOne(db)
         else { return }
+        // The first answer to a card question also moves the card on the
+        // Learn ladder, by the same rules as a Learn answer (a miss is
+        // remembered, a second in a row drops). Changing an answer already
+        // given does not count twice. AI-written and bank questions have
+        // no card and no ladder.
+        let isFirstAnswer = item.isCorrect == nil
         item.givenAnswer = given
         item.isCorrect = isCorrect
         try item.save(db)
+        if isFirstAnswer, let cardId = item.cardId, !item.isAIGenerated {
+            try recordLearnAnswer(cardId: cardId, wasCorrect: isCorrect, db: db)
+        }
     }
 
     /// Scores the attempt, then rewards every card you got right with a
@@ -382,6 +391,12 @@ extension Study {
         else { return }
         item.isCorrect = true
         try item.save(db)
+        // The answer was right after all, so the ladder hears a right
+        // answer (the miss it already counted stays counted; a right
+        // answer clears a remembered miss and climbs).
+        if let cardId, !item.isAIGenerated {
+            try recordLearnAnswer(cardId: cardId, wasCorrect: true, db: db)
+        }
         guard var attempt = try TestAttempt.fetchOne(db, key: attemptId), attempt.finishedAt != nil else { return }
         attempt.scoreNumerator = min((attempt.scoreNumerator ?? 0) + 1, attempt.scoreDenominator ?? .max)
         try attempt.save(db)

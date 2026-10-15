@@ -936,6 +936,11 @@ final class AppStore {
         (try? database.queue.read { db in try Study.noteTitles(forMaterials: ids, db: db) }) ?? [:]
     }
 
+    /// Suspended cards' meter states, for their rows.
+    func suspendedUnderstanding(forDecks deckIds: [String]) -> [String: UnderstandingState] {
+        (try? database.queue.read { db in try Study.suspendedUnderstanding(forDecks: deckIds, db: db) }) ?? [:]
+    }
+
     /// One card's meter state, right after it was answered.
     func understandingState(forCard cardId: String) -> UnderstandingState {
         let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }
