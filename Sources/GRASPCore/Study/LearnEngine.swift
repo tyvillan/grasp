@@ -38,6 +38,8 @@ public enum LearnEngine {
         /// Why the answer is right, for an AI-written question that came
         /// with one (the code and problem kinds carry theirs inside).
         public var explanation: String?
+        /// An understood card brought back to check it is still known.
+        public var isComeback = false
         /// The explanation to show under "Why", whichever kind this is.
         public var whyText: String? { explanation ?? code?.explanation ?? problem?.explanation }
 
@@ -72,10 +74,44 @@ public enum LearnEngine {
         public var front: String
         public var back: String
         public var level: Level
+        /// When the card was last answered, and its signed run (rights in a
+        /// row, or a remembered miss). Together they say when an understood
+        /// card is due to be checked again.
+        public var lastSeenAt: Date?
+        public var consecutiveCorrect: Int
 
-        public init(cardId: String, front: String, back: String, level: Level) {
+        public init(cardId: String, front: String, back: String, level: Level,
+                    lastSeenAt: Date? = nil, consecutiveCorrect: Int = 0) {
             self.cardId = cardId; self.front = front; self.back = back; self.level = level
+            self.lastSeenAt = lastSeenAt; self.consecutiveCorrect = consecutiveCorrect
         }
+    }
+
+    // MARK: - Comebacks
+
+    /// How many of a round's questions are reserved for understood cards
+    /// that are due to be checked again.
+    public static let comebackSlots = 2
+
+    /// How long an understood card may rest before it is checked: a day,
+    /// then 3, 7 and 14 as it keeps passing. A remembered miss counts as
+    /// the shortest rest.
+    public static func checkInterval(run: Int) -> TimeInterval {
+        let days: Double
+        switch max(run, 0) {
+        case 0, 1: days = 1
+        case 2: days = 3
+        case 3: days = 7
+        default: days = 14
+        }
+        return days * 86_400
+    }
+
+    /// An understood card is due for a check once its rest is over. A card
+    /// with no recorded answer is never due (nothing to measure from).
+    public static func isDueForCheck(_ candidate: Candidate, now: Date) -> Bool {
+        guard candidate.level == .mastered, let seen = candidate.lastSeenAt else { return false }
+        return now >= seen.addingTimeInterval(checkInterval(run: candidate.consecutiveCorrect))
     }
 
     public static let roundSize = 7
@@ -96,20 +132,45 @@ public enum LearnEngine {
     /// Question type still escalates with each card's own level. A missed
     /// question is the caller's job to requeue within the live session --
     /// this only builds the initial set.
+    ///
+    /// Comebacks: up to `comebackSlots` of the round's questions are
+    /// understood cards that are due for a check (see `isDueForCheck`),
+    /// most overdue first, mixed in at random places. A right answer on one
+    /// pushes its next check further out; a miss follows the two-misses
+    /// rule. This is how an individual card keeps advancing and is
+    /// re-verified without waiting for the whole deck.
     public static func buildRound<R: RandomNumberGenerator>(
-        from candidates: [Candidate], using rng: inout R
+        from candidates: [Candidate], using rng: inout R,
+        now: Date = Date(), comebackSlots: Int = LearnEngine.comebackSlots
     ) -> [RoundQuestion] {
+        let due = comebackSlots <= 0 ? [] : candidates
+            .filter { isDueForCheck($0, now: now) }
+            .sorted { a, b in
+                let da = a.lastSeenAt!.addingTimeInterval(checkInterval(run: a.consecutiveCorrect))
+                let db = b.lastSeenAt!.addingTimeInterval(checkInterval(run: b.consecutiveCorrect))
+                return da < db
+            }
+        let comebacks = Array(due.prefix(comebackSlots))
+        let comebackIds = Set(comebacks.map(\.cardId))
+
         let unmastered = candidates.filter { $0.level != .mastered }
-        let pool: [Candidate]
+        var pool: [Candidate]
         if !candidates.isEmpty && Double(unmastered.count) / Double(candidates.count) <= randomReinforcementThreshold {
             pool = candidates.shuffled(using: &rng)
         } else {
             pool = unmastered
         }
-        let selected = Array(pool.prefix(roundSize))
-        return selected.enumerated().map { index, candidate in
+        pool.removeAll { comebackIds.contains($0.cardId) }
+        let selected = Array(pool.prefix(max(roundSize - comebacks.count, 0)))
+        var questions = selected.enumerated().map { index, candidate in
             question(for: candidate, allCandidates: candidates, ordinal: index, using: &rng)
         }
+        for candidate in comebacks {
+            var q = question(for: candidate, allCandidates: candidates, ordinal: 0, using: &rng)
+            q.isComeback = true
+            questions.insert(q, at: Int.random(in: 0...questions.count, using: &rng))
+        }
+        return questions
     }
 
     private static func question<R: RandomNumberGenerator>(
