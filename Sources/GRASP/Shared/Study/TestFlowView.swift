@@ -150,9 +150,9 @@ struct TestSetupSheet: View {
     let onStart: (String, [LearnEngine.RoundQuestion], String?) -> Void
     @State private var unfinished: Study.UnfinishedTest?
 
-    @State private var questionCount = 20
+    @State private var questionCount = 10
     @State private var allowMultipleChoice = true
-    @State private var allowWritten = true
+    @State private var allowWritten = false
     @State private var allowTrueFalse = true
     // Fixed defaults: tests shuffle, and ask about every card.
     private let shuffle = true
