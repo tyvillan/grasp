@@ -28,9 +28,12 @@ struct DeckScreen: View {
     /// filters to (nil: not filtering; `.some(nil)` is the "Other" group).
     @State private var understanding: [DeckUnderstanding.Card] = []
     @State private var noteFilter: String??
+    /// Suspended cards' states, so their rows can show the meter in red.
+    @State private var suspendedStates: [String: UnderstandingState] = [:]
     @State private var noteTitles: [String: String] = [:]
     private var understandingById: [String: UnderstandingState] {
         Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+            .merging(suspendedStates) { first, _ in first }
     }
     @State private var filter: CardFilter = .all
     @State private var editMode: EditMode = .inactive
@@ -565,6 +568,7 @@ struct DeckScreen: View {
         learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
         understanding = (try? store.understanding(forDecks: ids)) ?? []
         noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
+        suspendedStates = store.suspendedUnderstanding(forDecks: ids)
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
         hasLoaded = true
@@ -802,8 +806,8 @@ private struct CardRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Group {
-                if card.status == .active {
-                    PipMeter(state: understanding, size: .row)
+                if card.status == .active || card.status == .suspended {
+                    PipMeter(state: understanding, size: .row, isSuspended: card.status == .suspended)
                         .padding(.top, 5)
                 } else {
                     RoundedRectangle(cornerRadius: 1, style: .continuous)
