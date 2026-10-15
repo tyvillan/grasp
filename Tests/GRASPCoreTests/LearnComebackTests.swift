@@ -32,11 +32,29 @@ struct LearnComebackTests {
         #expect(!LearnEngine.isDueForCheck(card("b", .mastered, seenDaysAgo: 0.5, run: 1), now: now))
         #expect(!LearnEngine.isDueForCheck(card("c", .mastered, seenDaysAgo: 5, run: 3), now: now))
         #expect(LearnEngine.isDueForCheck(card("d", .mastered, seenDaysAgo: 8, run: 3), now: now))
-        #expect(!LearnEngine.isDueForCheck(card("e", .recall, seenDaysAgo: 30, run: 5), now: now))
         #expect(!LearnEngine.isDueForCheck(card("f", .mastered, seenDaysAgo: nil), now: now))
     }
 
-    @Test("a round carries up to two comebacks, most overdue first chosen, among the cards still being learned")
+    @Test("a card still being learned comes back after a short rest that grows: 20 minutes, a day, 3 days")
+    func learningRest() {
+        #expect(LearnEngine.learningRest(run: 1) == 20 * 60)
+        #expect(LearnEngine.learningRest(run: 2) == day(1))
+        #expect(LearnEngine.learningRest(run: 3) == day(3))
+        #expect(LearnEngine.learningRest(run: -1) == 10 * 60)
+        let minutes = 1.0 / 1_440
+        // Answered right 10 minutes ago: not yet. 30 minutes ago: due.
+        #expect(!LearnEngine.isDueForCheck(card("a", .recognition, seenDaysAgo: 10 * minutes, run: 1), now: now))
+        #expect(LearnEngine.isDueForCheck(card("b", .recognition, seenDaysAgo: 30 * minutes, run: 1), now: now))
+        // A recall card on its second right answer rests a day.
+        #expect(!LearnEngine.isDueForCheck(card("c", .recall, seenDaysAgo: 0.5, run: 2), now: now))
+        #expect(LearnEngine.isDueForCheck(card("d", .recall, seenDaysAgo: 2, run: 2), now: now))
+        // A card missed and put back to the start is due soon too.
+        #expect(LearnEngine.isDueForCheck(card("e", .new, seenDaysAgo: 30 * minutes, run: -1), now: now))
+        // Never answered: nothing to measure from.
+        #expect(!LearnEngine.isDueForCheck(card("f", .recognition, seenDaysAgo: nil), now: now))
+    }
+
+    @Test("a round carries up to three comebacks, the most overdue chosen, among the cards still being learned")
     func roundHasComebacks() {
         var candidates = (0..<10).map { card("n\($0)", .recognition) }
         candidates += [card("m1", .mastered, seenDaysAgo: 2, run: 1),   // 1 day overdue
@@ -47,13 +65,28 @@ struct LearnComebackTests {
         let round = LearnEngine.buildRound(from: candidates, using: &rng, now: now)
         #expect(round.count == LearnEngine.roundSize)
         let comebacks = round.filter(\.isComeback)
-        #expect(comebacks.count == 2)
+        #expect(comebacks.count == 3)
         let ids = Set(comebacks.compactMap(\.cardId))
-        #expect(ids == ["m3", "m2"] || ids == ["m2", "m3"])
+        #expect(ids == ["m1", "m2", "m3"])
         #expect(!ids.contains("m4"))
+        #expect(comebacks.allSatisfy { $0.comebackWasUnderstood })
         // A checked card is asked as a typed answer, and not asked twice.
         #expect(comebacks.allSatisfy { $0.type == .written })
         #expect(Set(round.compactMap(\.cardId)).count == round.count)
+    }
+
+    @Test("a cards answered before, still being learned, comes back ahead of cards never asked")
+    func learningCardsComeBack() {
+        var candidates = (0..<20).map { card("never\($0)", .new) }
+        candidates += [card("seen1", .recognition, seenDaysAgo: 0.1, run: 1),
+                       card("seen2", .recall, seenDaysAgo: 2, run: 2),
+                       card("seen3", .recognition, seenDaysAgo: 0.001, run: 1)]  // 1.4 min ago, not due
+        var rng = SystemRandomNumberGenerator()
+        let round = LearnEngine.buildRound(from: candidates, using: &rng, now: now)
+        let comebacks = round.filter(\.isComeback)
+        #expect(Set(comebacks.compactMap(\.cardId)) == ["seen1", "seen2"])
+        #expect(comebacks.allSatisfy { !$0.comebackWasUnderstood })
+        #expect(round.count == LearnEngine.roundSize)
     }
 
     @Test("with nothing due the round is what it was")
@@ -81,7 +114,7 @@ struct LearnComebackTests {
         var rng = SystemRandomNumberGenerator()
         let round = LearnEngine.buildRound(from: candidates, using: &rng, now: now)
         #expect(!round.isEmpty)
-        #expect(round.filter(\.isComeback).count == 2)
+        #expect(round.filter(\.isComeback).count == 3)
     }
 
     @Test("a comeback that is answered right is pushed further out, and a miss is only remembered")
