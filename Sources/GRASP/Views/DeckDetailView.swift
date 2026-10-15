@@ -2019,18 +2019,9 @@ private struct CardPreviewPane: View {
         }
     }
 
+    /// The same meter and colours as the card rows, with its word.
     private var masteryChip: some View {
-        Group {
-            // The same definition as the pips: only mastered is understood;
-            // a self-rated card is not.
-            if mastery == .mastered {
-                PreviewChip(text: "Understood", tint: GRASPColor.success, tintSoft: GRASPColor.successSoft)
-            } else if mastery == .familiar {
-                PreviewChip(text: "Self-rated", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
-            } else {
-                PreviewChip(text: "Needs review", tint: GRASPColor.textSecondary, tintSoft: GRASPColor.inset)
-            }
-        }
+        PipMeter(state: .of(level: mastery, asked: mastery != .new), size: .card, showsWord: true)
     }
 
     /// Permanent, not tied to `.draft` status -- this is the fact worth

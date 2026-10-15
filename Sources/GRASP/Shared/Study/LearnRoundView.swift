@@ -36,6 +36,8 @@ struct LearnRoundView: View {
     @State private var roundCorrect = 0
     @State private var roundIncorrect = 0
     @State private var deckMastery: (mastered: Int, total: Int) = (0, 0)
+    /// The deck's cards by stage, for the coloured progress bar.
+    @State private var deckDistribution = DeckUnderstanding.Distribution()
     @State private var selectedChoice: String?
     @State private var writtenAnswer = ""
     @State private var verdict: AnswerGrading.Verdict?
@@ -135,10 +137,7 @@ struct LearnRoundView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 8) {
-                        ProgressBar(
-                            value: deckMastery.mastered, total: deckMastery.total,
-                            tint: GRASPColor.success, height: 5
-                        )
+                        UnderstandingBar(distribution: deckDistribution, height: 5)
                         Text("\(deckMastery.mastered)/\(deckMastery.total) understood")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
@@ -176,10 +175,7 @@ struct LearnRoundView: View {
             .padding(.top, 26)
 
             VStack(spacing: 7) {
-                ProgressBar(
-                    value: deckMastery.mastered, total: deckMastery.total,
-                    tint: GRASPColor.success
-                )
+                UnderstandingBar(distribution: deckDistribution, height: 8)
                 Text("\(deckMastery.mastered) of \(deckMastery.total) cards in this deck understood")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
@@ -237,6 +233,7 @@ struct LearnRoundView: View {
 
     private func refreshMastery() {
         deckMastery = (try? store.deckMastery(deckIds: deckIds)) ?? (0, 0)
+        deckDistribution = DeckUnderstanding.distribution(of: (try? store.understanding(forDecks: deckIds)) ?? [])
     }
 
     /// One centred column that starts at the top: the question, the answer
