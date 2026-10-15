@@ -246,7 +246,8 @@ struct LearnRoundView: View {
             VStack(spacing: 0) {
                 if question.isComeback {
                     // A card you understood, brought back to check it holds.
-                    Text("Checking a card you understood")
+                    Text(question.comebackWasUnderstood ? "Checking a card you understood"
+                                                        : "Coming back to a card you answered before")
                         .font(.graspUI(size: 12))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .padding(.bottom, 10)

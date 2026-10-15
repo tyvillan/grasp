@@ -40,6 +40,9 @@ public enum LearnEngine {
         public var explanation: String?
         /// An understood card brought back to check it is still known.
         public var isComeback = false
+        /// For a comeback: the card was understood (a check), as opposed
+        /// to one still being learned that you answered before.
+        public var comebackWasUnderstood = false
         /// The explanation to show under "Why", whichever kind this is.
         public var whyText: String? { explanation ?? code?.explanation ?? problem?.explanation }
 
@@ -89,9 +92,10 @@ public enum LearnEngine {
 
     // MARK: - Comebacks
 
-    /// How many of a round's questions are reserved for understood cards
-    /// that are due to be checked again.
-    public static let comebackSlots = 2
+    /// How many of a round's questions are reserved for cards that are due
+    /// to come back: understood cards due for a check, and cards still being
+    /// learned that you answered before and have rested long enough.
+    public static let comebackSlots = 3
 
     /// How long an understood card may rest before it is checked: a day,
     /// then 3, 7 and 14 as it keeps passing. A remembered miss counts as
@@ -107,11 +111,34 @@ public enum LearnEngine {
         return days * 86_400
     }
 
-    /// An understood card is due for a check once its rest is over. A card
-    /// with no recorded answer is never due (nothing to measure from).
+    /// The shorter rest for a card still being learned: 20 minutes after a
+    /// first right answer (so it comes back later in the same sitting), a day
+    /// after two in a row, 3 days after three. A remembered miss is back in
+    /// 10 minutes.
+    public static func learningRest(run: Int) -> TimeInterval {
+        switch run {
+        case ..<0: return 10 * 60
+        case 0, 1: return 20 * 60
+        case 2: return 86_400
+        default: return 3 * 86_400
+        }
+    }
+
+    /// When a card is due to come back, nil if it has no answer on record
+    /// (nothing to measure from).
+    public static func dueDate(of candidate: Candidate) -> Date? {
+        guard let seen = candidate.lastSeenAt else { return nil }
+        let rest = candidate.level == .mastered
+            ? checkInterval(run: candidate.consecutiveCorrect)
+            : learningRest(run: candidate.consecutiveCorrect)
+        return seen.addingTimeInterval(rest)
+    }
+
+    /// A card is due once its rest is over. A card with no recorded answer
+    /// is never due.
     public static func isDueForCheck(_ candidate: Candidate, now: Date) -> Bool {
-        guard candidate.level == .mastered, let seen = candidate.lastSeenAt else { return false }
-        return now >= seen.addingTimeInterval(checkInterval(run: candidate.consecutiveCorrect))
+        guard let due = dueDate(of: candidate) else { return false }
+        return now >= due
     }
 
     public static let roundSize = 7
@@ -134,7 +161,7 @@ public enum LearnEngine {
     /// this only builds the initial set.
     ///
     /// Comebacks: up to `comebackSlots` of the round's questions are
-    /// understood cards that are due for a check (see `isDueForCheck`),
+    /// cards you answered before that are due again (see `isDueForCheck`),
     /// most overdue first, mixed in at random places. A right answer on one
     /// pushes its next check further out; a miss follows the two-misses
     /// rule. This is how an individual card keeps advancing and is
@@ -145,11 +172,7 @@ public enum LearnEngine {
     ) -> [RoundQuestion] {
         let due = comebackSlots <= 0 ? [] : candidates
             .filter { isDueForCheck($0, now: now) }
-            .sorted { a, b in
-                let da = a.lastSeenAt!.addingTimeInterval(checkInterval(run: a.consecutiveCorrect))
-                let db = b.lastSeenAt!.addingTimeInterval(checkInterval(run: b.consecutiveCorrect))
-                return da < db
-            }
+            .sorted { (dueDate(of: $0) ?? .distantFuture) < (dueDate(of: $1) ?? .distantFuture) }
         let comebacks = Array(due.prefix(comebackSlots))
         let comebackIds = Set(comebacks.map(\.cardId))
 
@@ -168,6 +191,7 @@ public enum LearnEngine {
         for candidate in comebacks {
             var q = question(for: candidate, allCandidates: candidates, ordinal: 0, using: &rng)
             q.isComeback = true
+            q.comebackWasUnderstood = candidate.level == .mastered
             questions.insert(q, at: Int.random(in: 0...questions.count, using: &rng))
         }
         return questions

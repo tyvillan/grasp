@@ -144,7 +144,7 @@ A view that uses the tokens needs no check of its own.
   4 pt bar under the name), the card preview pane, and each card question on the
   Test results. VoiceOver reads "Recall, 2 of 3 steps", "Understood, 3 of 3 steps",
   "Self-rated, not yet tested", "New".
-- **Learn comebacks.** Two of a round's seven questions can be an understood card due for a check (a day, then 3, 7, 14 days of rest as it keeps passing). Such a question has one muted line above the prompt, "Checking a card you understood"; it is asked as a typed answer like any understood card, and moves the card by the usual rules.
+- **Learn comebacks.** Up to three of a round's seven questions bring back a card you answered before once it has rested: an understood card after a day, then 3, 7 and 14 days as it keeps passing; a card still being learned after 20 minutes, then a day, then 3 days (a remembered miss, 10 minutes). Such a question has one muted line above the prompt ("Checking a card you understood" or "Coming back to a card you answered before"), is asked at the card's own level, and moves the card by the usual rules.
 - **Selection.** Any selected row gives every row a round checkbox on its left
   (yellow check / empty ring); selected rows are `surfaceRaised`. One floating bar:
   Approve N, Suspend, Move to…, Delete (coral), clear.
