@@ -108,7 +108,8 @@ struct DeckListView: View {
                         DeckListRow(isSelected: selectedDeckId == deck.id, namespace: selection,
                                     isDropTarget: dropTargetDeckId == deck.id) {
                             DeckRow(name: deck.name, kicker: kickers[deck.id],
-                                    cardCount: counts.cardCount, dueCount: counts.dueCount)
+                                    cardCount: counts.cardCount, dueCount: counts.dueCount,
+                                    understanding: store.deckUnderstanding[deck.id])
                         } action: { selectedDeckId = deck.id }
                         .rowActions(inline: true) {
                             DeckContextMenu(
@@ -265,6 +266,7 @@ private struct DeckRow: View {
     let kicker: String?
     let cardCount: Int
     let dueCount: Int
+    var understanding: DeckUnderstanding.Distribution? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -277,6 +279,10 @@ private struct DeckRow: View {
                 Text(name)
                     .graspType(.rowTitle)
                     .lineLimit(1)
+                if let understanding, understanding.total > 0 {
+                    UnderstandingBar(distribution: understanding, height: 4)
+                        .padding(.top, 3)
+                }
             }
             Spacer(minLength: 4)
             DeckCountLabel(cardCount: cardCount, dueCount: dueCount)

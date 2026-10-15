@@ -18,6 +18,9 @@ final class AppStore {
     private(set) var semesters: [Semester] = []
     private(set) var coursesBySemester: [String?: [Course]] = [:]
     private(set) var deckCounts: [String: (cardCount: Int, dueCount: Int)] = [:]
+    /// Each deck's cards by understanding stage, for the coloured bar on
+    /// its row. Recomputed with `deckCounts`.
+    private(set) var deckUnderstanding: [String: DeckUnderstanding.Distribution] = [:]
     /// Which courses have at least one live deck -- computed for free from
     /// the same `decks` fetch `reload()` already does for `deckCounts`, so
     /// the layout can tell "no deck selected yet" apart from "this course
@@ -467,6 +470,32 @@ final class AppStore {
 
     /// Cards and due cards per deck, in one grouped query. Suspended cards
     /// are not counted; drafts are.
+    /// One grouped query: active, non-deleted cards by deck and learn level.
+    nonisolated static func deckDistributions(_ db: Database) throws -> [String: DeckUnderstanding.Distribution] {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT deckCard.deckId AS deckId, COALESCE(learnState.level, 0) AS level, COUNT(DISTINCT card.id) AS n
+            FROM card
+            JOIN deckCard ON deckCard.cardId = card.id
+            LEFT JOIN learnState ON learnState.cardId = card.id
+            WHERE card.deletedAt IS NULL AND card.status = 'active'
+            GROUP BY deckCard.deckId, COALESCE(learnState.level, 0)
+            """)
+        var result: [String: DeckUnderstanding.Distribution] = [:]
+        for row in rows {
+            let id: String = row["deckId"], level: Int = row["level"], n: Int = row["n"]
+            var d = result[id] ?? DeckUnderstanding.Distribution()
+            switch LearnEngine.Level(rawValue: level) ?? .new {
+            case .new: d.notAsked += n
+            case .recognition: d.recognition += n
+            case .recall: d.recall += n
+            case .mastered: d.solid += n
+            case .familiar: d.selfRated += n
+            }
+            result[id] = d
+        }
+        return result
+    }
+
     nonisolated static func deckCounts(for decks: [Deck], _ db: Database) throws -> [String: (cardCount: Int, dueCount: Int)] {
         var counts = Dictionary(uniqueKeysWithValues: decks.map { ($0.id, (0, 0)) })
         let rows = try Row.fetchAll(db, sql: """
@@ -490,11 +519,11 @@ final class AppStore {
     /// each batch lands, so the deck list keeps pace without the full
     /// `reload()` (which also re-reads courses and wakes sync).
     func refreshDeckCounts() {
-        let fresh = try? database.queue.read { db -> [String: (cardCount: Int, dueCount: Int)] in
+        let fresh = try? database.queue.read { db -> ([String: (cardCount: Int, dueCount: Int)], [String: DeckUnderstanding.Distribution]) in
             let decks = try Deck.filter(Column("deletedAt") == nil).fetchAll(db)
-            return try Self.deckCounts(for: decks, db)
+            return (try Self.deckCounts(for: decks, db), try Self.deckDistributions(db))
         }
-        if let fresh { deckCounts = fresh }
+        if let fresh { deckCounts = fresh.0; deckUnderstanding = fresh.1 }
     }
 
     func reload() {
@@ -521,6 +550,7 @@ final class AppStore {
                 // edited, and it used to be two queries per deck -- over a
                 // hundred for this vault -- loading full card rows each time.
                 deckCounts = try Self.deckCounts(for: decks, db)
+                deckUnderstanding = try Self.deckDistributions(db)
             }
         } catch {
             NSLog("GRASP: couldn't read the database: %@", String(describing: error))

@@ -138,7 +138,11 @@ A view that uses the tokens needs no check of its own.
   its humanized file name; mini bar under the name, "3 of 14 understood" on the
   right; tapping one filters the list) and an outlined "Practice weakest"
   button. On the iPhone the notes list sits behind a disclosure, closed by
-  default. VoiceOver reads "Recall, 2 of 3 steps", "Understood, 3 of 3 steps",
+  default. The same colours appear everywhere a card or deck shows how well it
+  is known: card rows, the Study corner, the Learn feedback and its progress bars
+  (the stacked bar, not a single teal bar), each deck's row in the deck list (a
+  4 pt bar under the name), the card preview pane, and each card question on the
+  Test results. VoiceOver reads "Recall, 2 of 3 steps", "Understood, 3 of 3 steps",
   "Self-rated, not yet tested", "New".
 - **Selection.** Any selected row gives every row a round checkbox on its left
   (yellow check / empty ring); selected rows are `surfaceRaised`. One floating bar:

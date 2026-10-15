@@ -864,6 +864,8 @@ struct TestResultsView: View {
     let onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)?
     let deckIds: [String]
     @State private var graded: [GradedQuestion]
+    /// Each card's stage after this test, read as its row appears.
+    @State private var cardStates: [String: UnderstandingState] = [:]
 
     init(deckName: String, attemptId: String, graded: [GradedQuestion], deckIds: [String] = [],
          onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
@@ -1002,6 +1004,16 @@ struct TestResultsView: View {
 
                     WhyBlock(text: item.question.whyText)
                         .padding(.top, 2)
+                    // Where this card stands now, in its stage colour.
+                    if let cardId = item.question.cardId, let state = cardStates[cardId] {
+                        HStack(spacing: 8) {
+                            PipMeter(state: state, size: .card, showsWord: true)
+                            Text("Now")
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        .padding(.top, 2)
+                    }
                     if !item.isCorrect {
                         ExplainThisBlock(question: item.question, given: item.givenAnswer)
                             .padding(.top, 4)
@@ -1027,6 +1039,11 @@ struct TestResultsView: View {
                     }
                 }
                 .padding(.vertical, 5)
+                .onAppear {
+                    if let id = item.question.cardId, cardStates[id] == nil {
+                        cardStates[id] = store.understandingState(forCard: id)
+                    }
+                }
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
