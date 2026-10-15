@@ -244,6 +244,13 @@ struct LearnRoundView: View {
     private func questionView(_ question: LearnEngine.RoundQuestion) -> some View {
         ScrollView {
             VStack(spacing: 0) {
+                if question.isComeback {
+                    // A card you understood, brought back to check it holds.
+                    Text("Checking a card you understood")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .padding(.bottom, 10)
+                }
                 Text(question.prompt)
                     .graspType(.studyPrompt)
                     .foregroundStyle(GRASPColor.textPrimary)

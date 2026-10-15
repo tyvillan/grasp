@@ -48,7 +48,9 @@ extension Study {
         return cards.map { card in
             let state = stateByCard[card.id]
             let level = LearnEngine.Level(rawValue: state?.level ?? 0) ?? .new
-            let candidate = LearnEngine.Candidate(cardId: card.id, front: card.front, back: card.back, level: level)
+            let candidate = LearnEngine.Candidate(cardId: card.id, front: card.front, back: card.back, level: level,
+                                                  lastSeenAt: state?.lastSeenAt,
+                                                  consecutiveCorrect: state?.consecutiveCorrect ?? 0)
             return (candidate, state?.lastSeenAt)
         }
     }

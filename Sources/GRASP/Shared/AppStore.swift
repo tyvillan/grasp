@@ -919,7 +919,7 @@ final class AppStore {
             var rng = SystemRandomNumberGenerator()
             let all = try Study.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
             let focus = all.filter { focusCardIds.contains($0.cardId) }
-            var round = LearnEngine.buildRound(from: focus, using: &rng)
+            var round = LearnEngine.buildRound(from: focus, using: &rng, comebackSlots: 0)
             for index in round.indices where round[index].type == .multipleChoice && (round[index].choices?.count ?? 0) < 4 {
                 guard let card = focus.first(where: { $0.cardId == round[index].cardId }) else { continue }
                 var choices = LearnEngine.distractors(for: card, in: all, count: 3, using: &rng)
