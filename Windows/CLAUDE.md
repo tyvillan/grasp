@@ -349,4 +349,4 @@ Update (2026-10-15): comebacks now include cards still being learned, not only u
 
 ## Learn streak (Mac session note, 2026-10-16)
 New core type `Sources/GRASPCore/Study/LearnStreak.swift` (count, `after(correct:)`, `isOn` from 3, `headline`, `endedCaption`). Nothing stored or synced. Windows Learn can show a flame banner and header chip from the third right answer in a row, ending at the first miss. See DESIGN.md "Learn streak".
-Update: the streak now persists between Learn visits via `LearnStreakStore` (UserDefaults key `learnStreak.count`, per device, not synced, no schema). Windows can keep its own count in local settings the same way.
+Update: the streak is now a synced table, migration `v18_learn_streak`: `learnStreak(id TEXT PK, count INTEGER, updatedAt DATETIME)`, one row with id `current`, registered in `SyncSchema.tables` (newest write wins; no Supabase change, `sync_rows` is generic). Windows needs the same migration and table entry to read and write it; until then it ignores the rows. Core: `LearnStreakRow`, `Study.learnStreak(db:)`, `Study.saveLearnStreak(_:db:)`.

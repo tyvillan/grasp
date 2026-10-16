@@ -48,9 +48,9 @@ struct LearnRoundView: View {
     @State private var isAnswered = false
     @State private var isAtCheckpoint = false
     @State private var isEmpty = false
-    /// Right answers in a row, up to the question on screen. Kept between
-    /// visits to Learn, so it only ends on a miss.
-    @State private var streak = LearnStreakStore().load()
+    /// Right answers in a row, up to the question on screen. Saved and
+    /// synced, so it carries over between visits and devices and only ends on a miss.
+    @State private var streak = LearnStreak()
     /// Fixed when the round starts: every card was already marked
     /// understood, so Learn is reinforcing at random rather than teaching.
     @State private var isPracticeRound = false
@@ -75,7 +75,10 @@ struct LearnRoundView: View {
         .background(GRASPColor.canvas)
         .adaptiveStudySheet()
         .dimsWindowBehind()
-        .task { startRound() }
+        .task {
+            streak = store.learnStreak()
+            startRound()
+        }
     }
 
     /// One progress bar: how much of the deck is understood (the long
@@ -596,7 +599,7 @@ struct LearnRoundView: View {
         guard let cardId = question.cardId else { return }
         try? store.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect)
         streak = streak.after(correct: wasCorrect)
-        LearnStreakStore().save(streak)
+        store.saveLearnStreak(streak)
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         refreshMastery()
 
