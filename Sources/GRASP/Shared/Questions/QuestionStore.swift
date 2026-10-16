@@ -17,6 +17,13 @@ extension AppStore {
         (try? database.queue.read { try QuestionBank.activeCount(inDecks: deckIds, db: $0) }) ?? 0
     }
 
+    /// How many questions a test with these settings can really ask, for Test setup.
+    func matchingTestQuestionCount(deckIds: [String], config: TestBuilder.Config, includeQuestions: Bool) -> Int {
+        (try? database.queue.read {
+            try Study.matchingTestQuestionCount(deckIds: deckIds, config: config, includeQuestions: includeQuestions, db: $0)
+        }) ?? 0
+    }
+
     func saveQuestion(_ input: UserQuestionInput, deckId: String) throws {
         try database.queue.write { _ = try QuestionBank.create(input, deckId: deckId, db: $0) }
         reload()

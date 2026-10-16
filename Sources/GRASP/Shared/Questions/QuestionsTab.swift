@@ -117,7 +117,9 @@ struct QuestionsTab: View {
         .sheet(isPresented: $showingDrops) {
             if let run { DroppedQuestionsSheet(drops: run.outcome.drops) }
         }
-        .sheet(item: $editing) { question in QuestionEditorSheet(decks: decks, editing: question) }
+        .sheet(item: $editing, onDismiss: { notApproved = [:] }) { question in
+            QuestionEditorSheet(decks: decks, editing: question)
+        }
         .sheet(item: $pendingDelete) { question in
             ConfirmationSheet(
                 icon: "trash", title: "Delete This Question?",
@@ -160,8 +162,10 @@ struct QuestionsTab: View {
 
     private func approve(_ question: TestQuestion) {
         if let why = store.approveQuestion(question.id) {
-            approveMessage = "Not approved. " + why + " Edit it, or delete it."
+            // The reason sits on the row itself, the same as after Approve all.
             notApproved[question.id] = why
+        } else {
+            notApproved[question.id] = nil
         }
     }
 
@@ -341,7 +345,8 @@ private struct QuestionRow: View {
                 Text(question.promptText.isEmpty ? "(No text)" : question.promptText)
                     .font(.graspUI(size: 14, weight: .medium))
                     .foregroundStyle(isSuspended ? GRASPColor.textTertiary : GRASPColor.textPrimary)
-                    .lineLimit(2)
+                    // A draft is read in full before it is approved.
+                    .lineLimit(isDraft ? nil : 2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 // The same two lines for every row, at any width: where it
@@ -366,7 +371,6 @@ private struct QuestionRow: View {
                             Text(noteTitle.map { "From \($0)" } ?? "Draft")
                                 .font(.graspUI(size: 12))
                                 .foregroundStyle(GRASPColor.textTertiary)
-                                .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text(history?.line ?? "Not asked yet")

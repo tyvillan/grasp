@@ -71,7 +71,9 @@ struct AIProgressStrip: View {
                 Text(activity.detail(at: context.date))
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
-                    .lineLimit(1)
+                    // Wraps rather than cutting a note's title mid-word.
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.numericText())
             }
         }

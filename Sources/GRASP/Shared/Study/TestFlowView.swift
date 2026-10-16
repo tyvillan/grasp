@@ -175,6 +175,8 @@ struct TestSetupSheet: View {
     /// The deck's approved cards, so a deck with none starts a test from its
     /// saved questions alone. -1 until counted.
     @State private var cardCount = -1
+    /// How many questions these settings can really ask. -1 until counted.
+    @State private var matching = -1
     /// "Include questions" for a deck with no cards, which is on until turned off here.
     @State private var questionsWithoutCards = true
 
@@ -227,6 +229,13 @@ struct TestSetupSheet: View {
                             .foregroundStyle(GRASPColor.textPrimary)
                         Stepper("", value: $questionCount.animation(Motion.snappy), in: 5...100, step: 5)
                             .labelsHidden()
+                    }
+                    if guide == nil, matching >= 0, matching < questionCount {
+                        Text(matching == 0 ? "No questions match these types."
+                             : "\(matching) question\(matching == 1 ? "" : "s") match these types. The test will have \(matching).")
+                            .graspType(.meta)
+                            .foregroundStyle(matching == 0 ? GRASPColor.rejected : GRASPColor.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Rectangle().fill(GRASPColor.hairline).frame(height: 1)
                     FieldLabel("Question types")
@@ -311,7 +320,7 @@ struct TestSetupSheet: View {
             Button("Start test") { start() }
                 .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
-                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse)
+                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse) || (guide == nil && matching == 0)
                           || (guide == nil && Study.testSourcesProblem(includeFlashcards: useFlashcards,
                                                                        includeQuestions: useQuestions) != nil))
         }
@@ -321,6 +330,21 @@ struct TestSetupSheet: View {
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
         }
+        .task(id: matchKey) { recount() }
+    }
+
+    /// What changes the count of questions that can be asked.
+    private var matchKey: String {
+        "\(questionCount)\(allowMultipleChoice)\(allowWritten)\(allowTrueFalse)\(useFlashcards)\(useQuestions)\(cardCount)\(store.revision)"
+    }
+
+    private func recount() {
+        guard guide == nil, cardCount >= 0 else { return }
+        let config = TestBuilder.Config(
+            questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
+            allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
+            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly, includeFlashcards: useFlashcards)
+        matching = store.matchingTestQuestionCount(deckIds: deckIds, config: config, includeQuestions: useQuestions)
     }
 
     /// "Add fresh AI questions": part of the flashcard side, so it sits under

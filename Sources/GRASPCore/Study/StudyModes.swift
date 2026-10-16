@@ -141,6 +141,35 @@ extension Study {
         withFlashcards ? max(0, questionCount / 3) : max(0, questionCount)
     }
 
+    /// How many questions a test with these settings can really ask: the saved
+    /// questions that fit the chosen types (up to their share), then cards for
+    /// the rest, never more than `config.questionCount`. Fresh AI questions
+    /// are not counted: they are optional and only fill room already in the test.
+    public static func matchingTestQuestionCount(
+        deckIds: [String], config: TestBuilder.Config, includeQuestions: Bool, db: Database
+    ) throws -> Int {
+        var rng = SystemRandomNumberGenerator()
+        var bank = 0
+        if includeQuestions {
+            let share = savedQuestionShare(for: config.questionCount, withFlashcards: config.includeFlashcards)
+            bank = try CodeQuestionBank.pickRound(
+                count: share, inDecks: deckIds, allowWritten: config.allowWritten,
+                allowMultipleChoice: config.allowMultipleChoice, allowTrueFalse: config.allowTrueFalse,
+                using: &rng, db: db).count
+        }
+        var cards = config.includeFlashcards ? try learnCandidates(forDecks: deckIds, db: db).map(\.candidate) : []
+        if config.excludeMastered { cards = cards.filter { $0.level != .mastered } }
+        if config.weakSpotsOnly {
+            let weak = try weakCardIds(forDecks: deckIds, db: db)
+            cards = cards.filter { weak.contains($0.cardId) }
+        }
+        var cardConfig = config
+        cardConfig.questionCount = max(0, config.questionCount - bank)
+        let built = TestBuilder.build(from: cards.map { (cardId: $0.cardId, front: $0.front, back: $0.back) },
+                                      config: cardConfig, using: &rng).count
+        return bank + built
+    }
+
     /// Builds a test from the decks' active cards plus any AI questions the
     /// caller already has, and writes the attempt and one item per question
     /// up front (answers are filled in as they're given). Returns an empty

@@ -196,6 +196,39 @@ struct QuestionsTabTests {
         #expect(tf.type == .trueFalse && tf.statementIsTrue == false && tf.correctAnswer == "False")
     }
 
+    @Test("Test setup counts the questions the chosen types really match")
+    func matchingCount() throws {
+        let lib = try makeLibrary(cards: 0)
+        try lib.db.queue.write { db in
+            try QuestionBank.create(mc("mc?"), deckId: lib.deckId, db: db)
+            try QuestionBank.create(UserQuestionInput(kind: .written, prompt: "w?", answer: "ans"), deckId: lib.deckId, db: db)
+            try QuestionBank.create(UserQuestionInput(kind: .trueFalse, prompt: "tf statement", isTrue: false), deckId: lib.deckId, db: db)
+        }
+        func count(mc: Bool, written: Bool, tf: Bool, n: Int = 10, questions: Bool = true) throws -> Int {
+            let config = TestBuilder.Config(questionCount: n, allowMultipleChoice: mc, allowWritten: written, allowTrueFalse: tf,
+                                            shuffle: true, excludeMastered: false, weakSpotsOnly: false, includeFlashcards: false)
+            return try lib.db.queue.read {
+                try Study.matchingTestQuestionCount(deckIds: [lib.deckId], config: config, includeQuestions: questions, db: $0)
+            }
+        }
+        #expect(try count(mc: true, written: true, tf: true) == 3)
+        #expect(try count(mc: true, written: false, tf: false) == 1)
+        #expect(try count(mc: false, written: false, tf: true) == 1)
+        #expect(try count(mc: true, written: true, tf: true, n: 2) == 2)
+        #expect(try count(mc: true, written: true, tf: true, questions: false) == 0)
+        // With cards, the saved share is a third and cards fill the rest.
+        let withCards = try makeLibrary(cards: 12)
+        try withCards.db.queue.write { db in
+            for index in 0..<4 { try QuestionBank.create(mc("mc \(index)?"), deckId: withCards.deckId, db: db) }
+        }
+        let config = TestBuilder.Config(questionCount: 30, allowMultipleChoice: true, allowWritten: false, allowTrueFalse: false,
+                                        shuffle: true, excludeMastered: false, weakSpotsOnly: false, includeFlashcards: true)
+        // 4 saved (share is 10) plus 12 cards, short of the 30 asked for.
+        #expect(try withCards.db.queue.read {
+            try Study.matchingTestQuestionCount(deckIds: [withCards.deckId], config: config, includeQuestions: true, db: $0)
+        } == 16)
+    }
+
     // MARK: Test switches
 
     @Test("neither switch on is refused in plain words")

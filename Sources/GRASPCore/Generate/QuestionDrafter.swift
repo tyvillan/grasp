@@ -192,6 +192,8 @@ public enum QuestionDrafter {
                 """, arguments: StatementArguments(deckIds)).map(\.front)
         }) ?? []
 
+        // The note's readable title ("Module 2 · Ch. 3 — ..."), not its file name.
+        let titles = (try? await database.queue.read { try Study.noteTitles(forMaterials: usable.map(\.material.id), db: $0) }) ?? [:]
         progress?.expect(usable.count)
         let perNote = max(2, Int((Double(request.count) / Double(usable.count)).rounded(.up)))
         let tally = Tally(known: known)
@@ -203,7 +205,7 @@ public enum QuestionDrafter {
             func start(_ source: PracticeBuilder.Source) {
                 group.addTask {
                     if Task.isCancelled { return }
-                    progress?.begin("Writing questions from \(source.material.title)")
+                    progress?.begin("Writing questions from \(titles[source.material.id] ?? source.material.title)")
                     defer { progress?.advance() }
                     let cards = (try? await database.queue.read { db in
                         try Card.filter(Column("materialId") == source.material.id).filter(Column("deletedAt") == nil).fetchAll(db)

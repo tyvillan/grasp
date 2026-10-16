@@ -53,7 +53,9 @@ extension AppStore {
     /// Approves one draft; returns why it was not approved, or nil.
     @discardableResult
     func approveQuestion(_ id: String) -> String? {
-        let why = (try? database.queue.write { try QuestionBank.approve(id, db: $0) }) ?? "It couldn't be saved."
+        // `try?` would turn "approved" (nil) into "couldn't be saved", so catch instead.
+        let why: String?
+        do { why = try database.queue.write { try QuestionBank.approve(id, db: $0) } } catch { why = "It couldn't be saved." }
         reload()
         return why
     }

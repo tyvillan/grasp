@@ -231,6 +231,25 @@ struct QuestionDraftTests {
         #expect(try await lib.db.queue.read { try TestQuestion.fetchOne($0, key: ids[1])?.status } == "draft")
     }
 
+    @Test("a row's own Approve refuses a failing draft with the same reason, keeps it, and works once it is edited")
+    func rowApproveRefusesThenAcceptsAfterEdit() async throws {
+        let lib = try makeLibrary()
+        let problem = ProblemQuestion(kind: .written, subject: .concepts, prompt: "What is DNA?", answer: "The molecule that carries genes.")
+        let record = TestQuestion(courseId: lib.courseId, deckId: lib.deckId, materialId: lib.materialId, problem: problem,
+                                  bodyJSON: problem.encoded() ?? "{}", verifiedBy: "test", source: .ai, status: .draft)
+        try await lib.db.queue.write { try record.insert($0) }
+        let why = try await lib.db.queue.write { try QuestionBank.approve(record.id, db: $0) }
+        #expect(why == "It is too short to be a clear question.")
+        #expect(try await lib.db.queue.read { try TestQuestion.fetchOne($0, key: record.id)?.status } == "draft")
+        // Editing keeps it a draft; once it passes, Approve works.
+        let edited = UserQuestionInput(kind: .written, prompt: "What is DNA and what does it carry?",
+                                       answer: "The molecule that carries genes.")
+        try await lib.db.queue.write { try QuestionBank.update(record.id, with: edited, db: $0) }
+        #expect(try await lib.db.queue.read { try TestQuestion.fetchOne($0, key: record.id)?.status } == "draft")
+        #expect(try await lib.db.queue.write { try QuestionBank.approve(record.id, db: $0) } == nil)
+        #expect(try await lib.db.queue.read { try TestQuestion.fetchOne($0, key: record.id)?.status } == "active")
+    }
+
     @Test("a draft is never asked in a test until it is approved")
     func draftsAreNotAsked() async throws {
         let lib = try makeLibrary()
