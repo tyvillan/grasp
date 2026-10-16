@@ -27,3 +27,15 @@ public struct LearnStreak: Equatable, Sendable {
         return "Streak ended at \(count). Start a new one."
     }
 }
+
+/// Keeps the streak between visits to Learn. On this device only (it is not
+/// synced), so it needs no schema; it ends at the first miss, not at a clock.
+public struct LearnStreakStore {
+    private let defaults: UserDefaults
+    private let key = "learnStreak.count"
+
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    public func load() -> LearnStreak { LearnStreak(count: defaults.integer(forKey: key)) }
+    public func save(_ streak: LearnStreak) { defaults.set(streak.count, forKey: key) }
+}
