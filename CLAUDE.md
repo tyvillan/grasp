@@ -3,11 +3,16 @@
 Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
 
 ## Workflow
-- One branch per task, off `study-guides`. Report back before merging.
+- One branch per task, off `main` (it equals `study-guides` for now). Report back before merging.
 - Never change `Sources/GRASPCore` without asking.
 - Run `GRASP_SKIP_OCR=1 swift test 2>&1 | tee <log>` and put the log path in your report.
 - Build Mac (`./build.sh`) and iPhone (`GRASPiOS`) before reporting.
-- `study-guides` is the main line. `windows-app` only fast-forwards to it.
+- `main` is the main line. `study-guides` is kept at the same commit. `windows-app` only fast-forwards to it.
+
+## Branches (as of 2026-10-16)
+- `main` = `study-guides` = `questions-tab`, all at the same commit (fast-forwarded, no merge commits). It contains the study guides, understanding meter, Test feeds the meter, Learn streak (synced), comebacks, two-miss drop, test defaults, suspend deck, stage colours, generation quality and the Questions tab (migration v19). Tag `main-before-questions-tab` marks the old `main`.
+- Not in `main`, each its own branch: `cloud-speed` (call timing, pacing, batched checks; conflicts with `AIKeyStore.swift` and `AnswerJudge.swift`, and adds required `CardGenerator` methods), `cpp-question-rules` (merges clean), `windows-app` (Windows session; `Windows/CLAUDE.md` will conflict, keep both sections). `cloud-speed-baseline` is a measurement copy, never merged.
+- The real library is at schema v19 only after the merged app is installed; before that it is v18.
 
 ## Real data is off limits
 - Screenshots and UI tests must NEVER create real data. Use a copy of the
