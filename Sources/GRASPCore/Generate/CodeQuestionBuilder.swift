@@ -243,9 +243,9 @@ public enum CodeQuestionBank {
             .fetchAll(db)
     }
 
+    /// How many questions a test could draw from these decks: the active ones.
     public static func count(inDecks deckIds: [String], db: Database) throws -> Int {
-        guard !deckIds.isEmpty else { return 0 }
-        return try TestQuestion.filter(deckIds.contains(Column("deckId"))).filter(Column("deletedAt") == nil).fetchCount(db)
+        try QuestionBank.activeCount(inDecks: deckIds, db: db)
     }
 
     /// Soft delete, like cards: a deleted question stays as a tombstone so
@@ -269,12 +269,20 @@ public enum CodeQuestionBank {
     /// version is left out of a multiple-choice-only test.
     public static func pickRound<R: RandomNumberGenerator>(
         count: Int, inDecks deckIds: [String], allowWritten: Bool = true, allowMultipleChoice: Bool = false,
-        using rng: inout R, db: Database
+        allowTrueFalse: Bool = false, using rng: inout R, db: Database
     ) throws -> [LearnEngine.RoundQuestion] {
-        guard allowWritten || allowMultipleChoice else { return [] }
-        var pool = try questions(inDecks: deckIds, db: db)
+        guard allowWritten || allowMultipleChoice || allowTrueFalse else { return [] }
+        // Only active questions: a draft is not approved yet and a
+        // suspended question has been set aside.
+        var pool = try QuestionBank.active(inDecks: deckIds, db: db)
         pool.shuffle(using: &rng)
         var result: [LearnEngine.RoundQuestion] = []
+        func add(_ question: LearnEngine.RoundQuestion, from record: TestQuestion) {
+            var tagged = question
+            tagged.bankQuestionId = record.id
+            tagged.bankSource = record.source
+            result.append(tagged)
+        }
         for record in pool {
             guard result.count < count else { break }
             let choice: LearnEngine.RoundQuestion?
@@ -288,7 +296,17 @@ public enum CodeQuestionBank {
             } else if let problem = record.problem {
                 if problem.kind == .multipleChoice {
                     // Already multiple choice: it fits either kind of test.
-                    result.append(problem.roundQuestion(using: &rng))
+                    guard allowWritten || allowMultipleChoice else { continue }
+                    add(problem.roundQuestion(using: &rng), from: record)
+                    continue
+                }
+                if problem.kind == .trueFalse {
+                    if allowTrueFalse { add(problem.roundQuestion(using: &rng), from: record) }
+                    continue
+                }
+                if problem.kind == .written {
+                    // A typed answer, so only when written answers are on.
+                    if allowWritten { add(problem.roundQuestion(using: &rng), from: record) }
                     continue
                 }
                 choice = allowMultipleChoice ? ChoiceVersions.problemVersion(problem, using: &rng) : nil
@@ -297,9 +315,9 @@ public enum CodeQuestionBank {
                 continue
             }
             switch (typed, choice) {
-            case let (typed?, choice?): result.append(Bool.random(using: &rng) ? typed : choice)
-            case let (typed?, nil): result.append(typed)
-            case let (nil, choice?): result.append(choice)
+            case let (typed?, choice?): add(Bool.random(using: &rng) ? typed : choice, from: record)
+            case let (typed?, nil): add(typed, from: record)
+            case let (nil, choice?): add(choice, from: record)
             case (nil, nil): break
             }
         }

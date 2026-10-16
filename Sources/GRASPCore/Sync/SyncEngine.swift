@@ -156,6 +156,7 @@ public struct SyncEngine: Sendable {
                     SELECT ?, \(SyncSchema.keyExpression(table, row: "\"\(table.name)\"")),
                            ? + ROW_NUMBER() OVER ()
                     FROM "\(table.name)"
+                    WHERE NOT (\(table.localOnlySQL(row: "\"\(table.name)\"")))
                     """, arguments: [table.name, base])
             }
         }
@@ -203,6 +204,9 @@ public struct SyncEngine: Sendable {
                     let rowKey: String = entry["rowKey"]
                     sent.append((tableName, rowKey, entry["seq"]))
                     guard let table = SyncSchema.table(named: tableName) else { continue }
+                    // A row that stays on this device (a draft) is never sent,
+                    // even if it was queued before it became one.
+                    if try Self.staysLocal(table, key: rowKey, db: db) { continue }
                     records.append(SyncRecord(
                         table: tableName, rowKey: rowKey,
                         data: try Self.rowData(table, key: rowKey, db: db),
@@ -227,6 +231,15 @@ public struct SyncEngine: Sendable {
             pushed += batch.count
         }
         return pushed
+    }
+
+    /// Whether this row is one that never leaves the device (see `SyncSchema.Table.localOnly`).
+    static func staysLocal(_ table: SyncSchema.Table, key: String, db: Database) throws -> Bool {
+        guard let local = table.localOnly, table.primaryKey.count == 1 else { return false }
+        let value = try String.fetchOne(
+            db, sql: "SELECT \"\(local.column)\" FROM \"\(table.name)\" WHERE \"\(table.primaryKey[0])\" = ?",
+            arguments: [key])
+        return value == local.value
     }
 
     /// The row's current contents, or nil when it no longer exists.

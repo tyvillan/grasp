@@ -180,8 +180,8 @@ struct TestSetupSheet: View {
                 ? "Built from what the exam will ask: this guide's worked examples (code answers become "
                   + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
                   + "problems saved for the lectures it covers."
-                : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
-                  + "Worked problems with code or calculations live under Problems instead.",
+                : "A graded quiz on this deck's flashcards, its saved questions, or both: multiple choice, "
+                  + "written, and true / false.",
             icon: "checklist", width: 460
         ) {
             VStack(alignment: .leading, spacing: 14) {
@@ -233,6 +233,31 @@ struct TestSetupSheet: View {
                 historyBlock
 
                 if guide == nil {
+                    // Two independent sources. Flashcards are what Test has
+                    // always asked about; questions are the ones saved on the
+                    // deck's Questions tab.
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Quiz me on flashcards", isOn: Binding(
+                                get: { store.isFlashcardQuizEnabled }, set: { store.isFlashcardQuizEnabled = $0 }
+                            ))
+                            .toggleStyle(GRASPSwitchStyle())
+                            Text("Questions made from this deck's cards.")
+                                .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Include questions", isOn: Binding(
+                                get: { store.isSavedQuestionsEnabled }, set: { store.isSavedQuestionsEnabled = $0 }
+                            ))
+                            .toggleStyle(GRASPSwitchStyle())
+                            Text(savedQuestionsCaption)
+                                .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .popupGroup()
+
                     VStack(alignment: .leading, spacing: 6) {
                         Toggle(isOn: Binding(
                             get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
@@ -245,27 +270,26 @@ struct TestSetupSheet: View {
                             }
                         }
                         .toggleStyle(GRASPSwitchStyle())
-                        Text("Fresh questions written by AI for this test only. They aren't saved as cards.")
+                        .disabled(!store.isFlashcardQuizEnabled)
+                        Text(store.isFlashcardQuizEnabled
+                             ? "Fresh questions written by AI for this test only, alongside the flashcards. They aren't saved. Needs Written on."
+                             : "Goes with the flashcards, so it is off while flashcards are off.")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
-                        if store.isAITestQuestionsEnabled {
-                            let saved = store.codeQuestionCount(inDecks: deckIds)
-                            Text(saved > 0
-                                 ? "Also mixes in some of this deck's \(saved) saved practice problem\(saved == 1 ? "" : "s"), up to a third of the test."
-                                 : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
-                                .graspType(.meta)
-                                .foregroundStyle(GRASPColor.textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
                     }
                     .popupGroup()
                 }
 
-                if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
+                if let problem = Study.testSourcesProblem(includeFlashcards: guide != nil || store.isFlashcardQuizEnabled,
+                                                          includeQuestions: guide != nil || store.isSavedQuestionsEnabled) {
+                    Text(problem).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                } else if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                     Text("Turn on at least one question type.").graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 } else if noQuestions {
-                    Text("No cards match these settings, so there's nothing to test.")
+                    Text(store.isFlashcardQuizEnabled
+                         ? "No cards or saved questions match these settings, so there's nothing to test."
+                         : "No saved questions match these settings, so there's nothing to test.")
                         .graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 }
 
@@ -284,7 +308,7 @@ struct TestSetupSheet: View {
         } footer: {
             if isStarting, aiActivity == nil {
                 ProgressView().controlSize(.small)
-                Text(store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
+                Text(store.isFlashcardQuizEnabled && store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             }
@@ -294,7 +318,9 @@ struct TestSetupSheet: View {
             Button("Start test") { start() }
                 .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
-                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse))
+                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse)
+                          || (guide == nil && Study.testSourcesProblem(includeFlashcards: store.isFlashcardQuizEnabled,
+                                                                       includeQuestions: store.isSavedQuestionsEnabled) != nil))
         }
         .task {
             store.addMissingChoicesInBackground()
@@ -304,16 +330,27 @@ struct TestSetupSheet: View {
         }
     }
 
+    /// What "Include questions" will do, in a line.
+    private var savedQuestionsCaption: String {
+        let saved = store.activeQuestionCount(inDecks: deckIds)
+        guard saved > 0 else { return "No saved questions yet. Add some on the deck's Questions tab." }
+        let noun = "\(saved) saved question\(saved == 1 ? "" : "s")"
+        return store.isFlashcardQuizEnabled
+            ? "\(noun) from this deck's Questions tab. About a third of the test."
+            : "\(noun) from this deck's Questions tab. The whole test comes from them."
+    }
+
     private func start() {
         let config = TestBuilder.Config(
             questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
             allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
-            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
+            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly,
+            includeFlashcards: guide != nil || store.isFlashcardQuizEnabled
         )
         isStarting = true
         noQuestions = false
         let run = guide != nil ? nil
-            : (store.isAITestQuestionsEnabled && allowWritten)
+            : (store.isFlashcardQuizEnabled && store.isAITestQuestionsEnabled && allowWritten)
             ? AIActivity(headline: "Writing AI questions from your notes")
             : nil
         aiActivity = run
@@ -539,7 +576,7 @@ struct TestRunView: View {
                         ExplainThisBlock(question: question, given: graded.last?.givenAnswer ?? "")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if isAnswered, question.cardId == nil {
+                    if isAnswered, question.cardId == nil, question.bankSource != QuestionSource.yours.rawValue {
                         FlagQuestionButton { flagCurrent(question) }
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -556,7 +593,11 @@ struct TestRunView: View {
 
     @ViewBuilder
     private func questionLabel(_ question: LearnEngine.RoundQuestion) -> some View {
-        if let code = question.code {
+        if question.bankSource == QuestionSource.yours.rawValue {
+            Label("Your question", systemImage: "pencil")
+                .font(.graspUI(size: 11, weight: .medium))
+                .foregroundStyle(GRASPColor.textTertiary)
+        } else if let code = question.code {
             Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
                 .font(.graspUI(size: 11, weight: .medium))
                 .foregroundStyle(GRASPColor.accent)

@@ -48,7 +48,9 @@ struct ProblemQuestionView: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(GRASPColor.hairlineStrong))
                     .disabled(isAnswered)
                     .frame(maxWidth: 360)
-            case .multipleChoice:
+            case .multipleChoice, .written, .trueFalse:
+                // Never drawn here: choices, typed answers and true/false
+                // use the ordinary test screens.
                 EmptyView()
             }
             if !isAnswered {

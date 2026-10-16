@@ -95,6 +95,27 @@ A view that uses the tokens needs no check of its own.
   (outlined, sparkle), then Add (Cards) or Edit (Overview), then ⋯. Under about 640 pt
   of pane width every button becomes an icon with a tooltip. Under 1000 pt of window
   the deck list collapses.
+- **Deck tabs.** Overview, Cards, Questions, in that order, as one segmented
+  control (Mac: capsule buttons that become icons under about 640 pt of pane; iPhone:
+  full-width segments). Overview appears only for a deck with source notes. The last
+  tab used is remembered across decks and launches; Cards the first time.
+- **Questions tab.** Cards are for remembering, questions are for practicing like
+  the exam; the empty state says so in one line and offers one quiet "Write a
+  question" button. A row is the prompt (two lines), then a source badge, the
+  question's type, and its history ("Right 2 of the last 3", or "Not asked yet").
+  The badge is "Yours", "From a photo" or "AI", and only AI carries the sparkle.
+  Suspended rows sink to the bottom with a red "Suspended"; a draft says "Draft".
+  No Learn ladder or understanding meter on a question: a question linked to a card
+  moves that card's meter when it is answered in a test, and never its flashcard
+  schedule. The Add menu is an outlined button (Study stays the one yellow button):
+  Write a question, then two disabled items marked "(coming soon)", with no sparkle
+  while they cannot be used.
+- **Test sources.** Test setup has two independent switches under the question
+  types: "Quiz me on flashcards" and "Include questions". With both on, saved
+  questions are about a third of the test; with only questions on, the whole test.
+  Neither on says "Turn on flashcards or questions to start a test." and disables
+  Start. "Include AI-written questions" stays as a sparkle option that goes with
+  the flashcards.
 - **Menus** are GRASP's own panel (`PillMenu`, `IconMenu`), never the system menu.
   Popups are `GRASPSheet`; confirmations are `ConfirmationSheet`; no system alerts.
 - **Status strip.** One rounded `surface` strip at the top of the list: drafts to

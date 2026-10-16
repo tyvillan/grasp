@@ -34,10 +34,14 @@ public enum ProblemSubject: String, Codable, CaseIterable, Sendable {
 
 public enum ProblemKind: String, Codable, CaseIterable, Sendable {
     case multipleChoice, number, matrix
+    /// Questions a student writes: a typed answer, and true or false.
+    case written, trueFalse
 
     public var label: String {
         switch self {
         case .multipleChoice: return "Multiple choice"
+        case .written: return "Written"
+        case .trueFalse: return "True / False"
         case .number: return "Type a number"
         case .matrix: return "Type a matrix"
         }
@@ -62,10 +66,16 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
     public var matrix: [[Double]]?
     /// How to get there, a sentence or two.
     public var explanation: String?
+    /// `written`: the answer, and other wordings that count as right.
+    public var answer: String?
+    public var accepted: [String]?
+    /// `trueFalse`: whether the statement (the prompt) is true.
+    public var isTrue: Bool?
 
     public init(kind: ProblemKind, subject: ProblemSubject, prompt: String, choices: [String]? = nil,
                 correct: Int? = nil, number: Double? = nil, unit: String? = nil, matrix: [[Double]]? = nil,
-                explanation: String? = nil) {
+                explanation: String? = nil, answer: String? = nil, accepted: [String]? = nil, isTrue: Bool? = nil) {
+        self.answer = answer; self.accepted = accepted; self.isTrue = isTrue
         self.kind = kind; self.subject = subject; self.prompt = prompt; self.choices = choices
         self.correct = correct; self.number = number; self.unit = unit; self.matrix = matrix
         self.explanation = explanation
@@ -98,6 +108,10 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
         case .matrix:
             return (matrix ?? []).map { "[ " + $0.map(ProblemAnswerGrading.format).joined(separator: "  ") + " ]" }
                 .joined(separator: "\n")
+        case .written:
+            return answer ?? ""
+        case .trueFalse:
+            return isTrue == true ? "True" : "False"
         }
     }
 
@@ -109,6 +123,20 @@ public struct ProblemQuestion: Codable, Sendable, Equatable {
             return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: choices[correct],
                                              type: .multipleChoice, choices: choices.shuffled(using: &rng),
                                              problem: self)
+        }
+        // A student's own written and true/false questions are ordinary test
+        // questions: they use the same typed-answer and true/false screens
+        // as a card's, with no `problem` payload to draw differently.
+        if kind == .written {
+            var question = LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: answerText,
+                                                     type: .written, explanation: explanation)
+            question.acceptedAnswers = accepted ?? []
+            return question
+        }
+        if kind == .trueFalse {
+            return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: answerText,
+                                             type: .trueFalse, statement: prompt, statementIsTrue: isTrue ?? true,
+                                             explanation: explanation)
         }
         return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: prompt, correctAnswer: answerText,
                                          type: .written, problem: self)
@@ -198,7 +226,7 @@ public enum ProblemAnswerGrading {
         switch problem.kind {
         case .number: return problem.number.map { gradeNumber(given, expected: $0) }
         case .matrix: return problem.matrix.map { gradeMatrix(given, expected: $0) }
-        case .multipleChoice: return nil
+        case .multipleChoice, .written, .trueFalse: return nil
         }
     }
 }

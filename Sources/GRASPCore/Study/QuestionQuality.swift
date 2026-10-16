@@ -323,10 +323,20 @@ public enum QuestionFlags {
 /// older clients are unaffected.
 public struct PlainQuestionPayload: Codable, Sendable, Equatable {
     public var explanation: String?
+    /// A written question's other right wordings, kept with the test item so
+    /// an unfinished test still grades them.
+    public var accepted: [String]?
 
     public init?(explanation: String?) {
         guard let explanation, !explanation.isEmpty else { return nil }
         self.explanation = explanation
+    }
+
+    public init?(explanation: String?, accepted: [String]) {
+        let why = (explanation?.isEmpty ?? true) ? nil : explanation
+        guard why != nil || !accepted.isEmpty else { return nil }
+        self.explanation = why
+        self.accepted = accepted.isEmpty ? nil : accepted
     }
 
     public func encoded() -> String? {

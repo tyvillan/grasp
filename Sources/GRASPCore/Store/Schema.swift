@@ -501,6 +501,25 @@ enum Schema {
             try SyncSchema.installTriggers(db)
         }
 
+        // Questions as their own feature. Additive only: every column is
+        // nullable or defaulted, so all existing rows keep working (source
+        // "ai", status "active"). `cardId` is a soft link with no foreign key,
+        // so a pulled question can never fail on a card this device lacks.
+        // `imageId` is for photo import (Stage 3) and has no table yet.
+        migrator.registerMigration("v19_questions") { db in
+            try db.alter(table: "testQuestion") { t in
+                t.add(column: "source", .text).notNull().defaults(to: "ai")
+                t.add(column: "status", .text).notNull().defaults(to: "active")
+                t.add(column: "cardId", .text)
+                t.add(column: "imageId", .text)
+            }
+            try db.alter(table: "testItem") { t in
+                t.add(column: "questionId", .text)
+            }
+            try db.create(index: "ix_testitem_question", on: "testItem", columns: ["questionId"])
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 

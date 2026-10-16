@@ -7,9 +7,12 @@ struct DeckScreen: View {
     @Environment(AppStore.self) private var store
     let route: DeckRoute
 
-    private enum Tab: String, CaseIterable { case cards = "Cards", overview = "Overview" }
+    private enum Tab: String, CaseIterable { case overview = "Overview", cards = "Cards", questions = "Questions" }
 
-    @State private var tab: Tab = .cards
+    /// The last tab used, across decks and launches; Cards the first time.
+    @State private var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "deckContentTab") ?? "") ?? .cards
+    /// Opens the editor for a new question on the Questions tab.
+    @State private var writingQuestion = false
     @State private var cards: [Card] = []
     @State private var dueCount = 0
     @State private var studying = false
@@ -115,7 +118,7 @@ struct DeckScreen: View {
         return recentAIIds.compactMap { byId[$0] } + base.filter { !recent.contains($0.id) }
     }
 
-    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards }
+    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards && tab == .cards }
     private var isGeneratingCards: Bool { runningJob?.activity.purpose == "add" }
     private var selectedDrafts: [String] {
         shownCards.filter { selection.contains($0.id) && $0.status == .draft }.map(\.id)
@@ -156,6 +159,13 @@ struct DeckScreen: View {
             switch tab {
             case .cards: cardSections
             case .overview: OverviewSection(deckIds: deckIds)
+            case .questions:
+                Section {
+                    QuestionsTab(deckIds: deckIds, query: query, isWriting: $writingQuestion, decks: deckChoices)
+                        .listRowInsets(EdgeInsets())
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             }
         }
@@ -168,7 +178,8 @@ struct DeckScreen: View {
         .graspList()
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search cards")
+        .searchable(text: $query, prompt: tab == .questions ? "Search questions" : "Search cards")
+        .onChange(of: tab) { _, new in UserDefaults.standard.set(new.rawValue, forKey: "deckContentTab") }
         .task(id: store.revision) { load() }
         .onAppear {
             if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {
@@ -187,6 +198,8 @@ struct DeckScreen: View {
             case "learn": learning = true
             case "test": testPhase = .setup
             case "overview": tab = .overview
+            case "questions": tab = .questions
+            case "writequestion": tab = .questions; writingQuestion = true
             default: break
             }
         }
@@ -229,6 +242,9 @@ struct DeckScreen: View {
                     }
                     .tint(GRASPColor.textPrimary)
                 }
+            }
+            if tab == .questions {
+                ToolbarItem(placement: .topBarTrailing) { questionsAddMenu.tint(GRASPColor.textPrimary) }
             }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu.tint(GRASPColor.textPrimary) }
         }
@@ -279,6 +295,20 @@ struct DeckScreen: View {
 
     private var deckChoices: [Deck] {
         deckIds.compactMap { (try? store.deck($0)) ?? nil }
+    }
+
+    /// Questions tab: write a question now; the other two ways in are coming.
+    private var questionsAddMenu: some View {
+        Menu {
+            Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
+            Button("Generate questions with AI (coming soon)") {}
+                .disabled(true)
+            Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
+                .disabled(true)
+        } label: {
+            Label("Add", systemImage: "plus")
+        }
+        .accessibilityLabel("Add a question")
     }
 
     private var actionsMenu: some View {

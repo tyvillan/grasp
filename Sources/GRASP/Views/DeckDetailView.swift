@@ -163,12 +163,30 @@ struct DeckDetailView: View {
     /// Which half of the deck is on screen. The deck header, the draft
     /// notice and the duplicate notice sit above this and are shared by
     /// both -- they're facts about the deck, not about either view of it.
-    @State private var contentTab: ContentTab = .cards
+    /// The last tab used, across decks and launches; Cards the first time.
+    @State private var contentTab: ContentTab = ContentTab(
+        rawValue: UserDefaults.standard.string(forKey: "deckContentTab") ?? "") ?? .cards
     @Namespace private var tabSwitch
+    /// Opens the editor for a new question on the Questions tab.
+    @State private var isWritingQuestion = false
 
     private enum ContentTab: String, CaseIterable, Identifiable {
-        case cards = "Cards", overview = "Overview"
+        case overview = "Overview", cards = "Cards", questions = "Questions"
         var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .overview: return "doc.text.fill"
+            case .cards: return "rectangle.stack.fill"
+            case .questions: return "list.bullet.clipboard"
+            }
+        }
+    }
+
+    /// Overview needs source notes to summarise, so a deck without any
+    /// shows Cards and Questions only.
+    private var availableTabs: [ContentTab] {
+        ContentTab.allCases.filter { $0 != .overview || hasSourceNotes }
     }
 
     /// Free -- `cards` is already loaded. A deck whose cards were all typed
@@ -395,6 +413,12 @@ struct DeckDetailView: View {
                     selectedCardIds = [cardId]
                     previewCardId = cardId
                 }
+            case .questions:
+                ScrollView {
+                    QuestionsTab(deckIds: scopeDeckIds, isWriting: $isWritingQuestion,
+                                 decks: scopeDecksForQuestions)
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
         .background(GRASPColor.canvas)
@@ -406,9 +430,15 @@ struct DeckDetailView: View {
         // But a deck with no source notes hides the picker, and a hidden
         // picker can't be used to get back out of a tab with nothing in it.
         // The toolbar's menus belong to the view they were opened in.
-        .onChange(of: contentTab) { MenuAnchor.closeOpenMenu() }
+        .onChange(of: contentTab) { _, tab in
+            MenuAnchor.closeOpenMenu()
+            UserDefaults.standard.set(tab.rawValue, forKey: "deckContentTab")
+        }
         .onChange(of: hasSourceNotes) { _, hasNotes in
-            if !hasNotes { contentTab = .cards }
+            if !hasNotes, contentTab == .overview { contentTab = .cards }
+        }
+        .onChange(of: hasLoaded) { _, loaded in
+            if loaded, !hasSourceNotes, contentTab == .overview { contentTab = .cards }
         }
         // A card that scrolls out of view because the filter changed must
         // also drop out of the selection -- a batch action must never
@@ -589,9 +619,7 @@ struct DeckDetailView: View {
                 // does from the same position. The filter row is also gated
                 // on having cards, and Overview has to stay reachable for a
                 // deck whose cards are all still drafts.
-                if hasSourceNotes {
-                    contentTabSwitch
-                }
+                contentTabSwitch
             }
 
             // Study modes on the left; on the right, what this view can do
@@ -685,8 +713,13 @@ struct DeckDetailView: View {
     @ViewBuilder
     private var viewActions: some View {
         // The empty deck's own button is the one way to generate there.
-        if !showsEmptyDeck { aiButton }
-        if contentTab == .cards { addMenuButton } else { editMenuButton }
+        // Questions has no AI button: its generation sits in its Add menu.
+        if !showsEmptyDeck, contentTab != .questions { aiButton }
+        switch contentTab {
+        case .cards: addMenuButton
+        case .overview: editMenuButton
+        case .questions: questionsAddMenuButton
+        }
         overflowMenu
     }
 
@@ -854,6 +887,27 @@ struct DeckDetailView: View {
         .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
+    /// Questions view: write a question now; the other two ways in are coming.
+    /// Outlined like the other Add menus (Study stays the one yellow button).
+    private var questionsAddMenuButton: some View {
+        PillMenu(title: "Add", systemImage: "plus", showsTitle: !isCompact) {
+            [
+                .action("Write a question", systemImage: "square.and.pencil",
+                        help: "Multiple choice, written or true / false") { isWritingQuestion = true },
+                .divider,
+                .action("Generate questions with AI (coming soon)", disabled: true, help: "Coming soon") {},
+                .action("From a photo (coming soon)", systemImage: "camera", disabled: true, help: "Coming soon") {},
+            ]
+        }
+        .help("Write a question")
+    }
+
+    /// The decks a new question can go in: this deck, or every deck of an
+    /// "All Cards" view.
+    private var scopeDecksForQuestions: [Deck] {
+        scopeDeckIds.compactMap { (try? store.deck($0)) ?? nil }
+    }
+
     /// Overview view: rewriting the overviews, and adding sources.
     private var editMenuButton: some View {
         PillMenu(title: "Edit", systemImage: "pencil", isBusy: store.isImporting, showsTitle: !isCompact) {
@@ -894,13 +948,13 @@ struct DeckDetailView: View {
     /// a small segmented control, since it changes what the whole pane is.
     private var contentTabSwitch: some View {
         HStack(spacing: 4) {
-            ForEach(ContentTab.allCases) { tab in
+            ForEach(availableTabs) { tab in
                 let selected = contentTab == tab
                 Button {
                     withAnimation(Motion.thumb) { contentTab = tab }
                 } label: {
                     HStack(spacing: 7) {
-                        Image(systemName: tab == .cards ? "rectangle.stack.fill" : "doc.text.fill")
+                        Image(systemName: tab.symbol)
                             .font(.graspUI(size: 13))
                         if !isCompact {
                             Text(tab.rawValue)

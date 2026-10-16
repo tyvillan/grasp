@@ -38,6 +38,13 @@ public enum LearnEngine {
         /// Why the answer is right, for an AI-written question that came
         /// with one (the code and problem kinds carry theirs inside).
         public var explanation: String?
+        /// The saved question (`TestQuestion`) this came from, for its own
+        /// history, and who made it ("yours", "photo", "ai"). nil for a
+        /// question made from a card or written for one test.
+        public var bankQuestionId: String?
+        public var bankSource: String?
+        /// A written question's other right wordings.
+        public var acceptedAnswers: [String] = []
         /// An understood card brought back to check it is still known.
         public var isComeback = false
         /// For a comeback: the card was understood (a check), as opposed

@@ -65,6 +65,17 @@ final class AppStore {
         didSet { UserDefaults.standard.set(isAITestQuestionsEnabled, forKey: Self.aiTestQuestionsKey(for: profile)) }
     }
 
+    /// Test setup's two sources, per profile and kept on this device.
+    /// "Quiz me on flashcards" (default on) and "Include questions": the
+    /// questions saved on each deck's Questions tab. A profile that had
+    /// "Include AI-written questions" on gets both on (see `init`).
+    var isFlashcardQuizEnabled: Bool {
+        didSet { UserDefaults.standard.set(isFlashcardQuizEnabled, forKey: Self.flashcardQuizKey(for: profile)) }
+    }
+    var isSavedQuestionsEnabled: Bool {
+        didSet { UserDefaults.standard.set(isSavedQuestionsEnabled, forKey: Self.savedQuestionsKey(for: profile)) }
+    }
+
     private(set) var lastImportSummary: ImportSummary?
     private(set) var isImporting = false
     private(set) var importError: String?
@@ -184,6 +195,11 @@ final class AppStore {
     /// one person's vault path into another's settings.
     private static func vaultPathKey(for profile: Profile) -> String { "\(vaultPathKey).\(profile.id)" }
 
+    private static let flashcardQuizKey = "testFlashcardsEnabled"
+    private static func flashcardQuizKey(for profile: Profile) -> String { "\(flashcardQuizKey).\(profile.id)" }
+    private static let savedQuestionsKey = "testQuestionsEnabled"
+    private static func savedQuestionsKey(for profile: Profile) -> String { "\(savedQuestionsKey).\(profile.id)" }
+
     private static let aiTestQuestionsKey = "aiTestQuestionsEnabled"
     private static func aiTestQuestionsKey(for profile: Profile) -> String { "\(aiTestQuestionsKey).\(profile.id)" }
 
@@ -218,7 +234,14 @@ final class AppStore {
         // vault meant a second person's first Import pulled the owner's
         // notes into their profile -- the mixing profiles exist to prevent.
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? ""
-        self.isAITestQuestionsEnabled = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
+        let oldAIToggle = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
+        self.isAITestQuestionsEnabled = oldAIToggle
+        // The two switches are new. Until one has been set, it reads from
+        // what the old toggle did: flashcards were always on; saved
+        // questions were mixed in only when the old toggle was on.
+        let defaults = UserDefaults.standard
+        self.isFlashcardQuizEnabled = defaults.object(forKey: Self.flashcardQuizKey(for: profile)) as? Bool ?? true
+        self.isSavedQuestionsEnabled = defaults.object(forKey: Self.savedQuestionsKey(for: profile)) as? Bool ?? oldAIToggle
         // The same guide imported twice (e.g. from the Desktop and again from
         // the vault) is one guide.
         _ = try? db.queue.write { try StudyGuideActions.mergeDuplicateGuides(db: $0) }
@@ -1121,25 +1144,30 @@ final class AppStore {
         // Its own task, so "Skip" can cancel just the AI questions and still
         // start the test -- cancelling the caller would also cancel the
         // database writes below that create the attempt.
-        // Saved code questions come first: they were checked by running
-        // them, which the one-line questions written on the spot weren't.
-        var codeQuestions: [LearnEngine.RoundQuestion] = []
-        var codeBudgetUsed = 0
-        if isAITestQuestionsEnabled && (config.allowWritten || config.allowMultipleChoice) {
-            let budget = Study.aiQuestionBudget(for: config.questionCount)
-            codeQuestions = (try? await database.queue.read { db in
+        // Saved questions come first: they were checked or written by hand,
+        // which the one-line questions written on the spot weren't. With
+        // flashcards on they are about a third of the test; with questions
+        // alone, the whole test (as many as exist).
+        var savedQuestions: [LearnEngine.RoundQuestion] = []
+        let flashcards = config.includeFlashcards
+        if isSavedQuestionsEnabled {
+            let share = Study.savedQuestionShare(for: config.questionCount, withFlashcards: flashcards)
+            savedQuestions = (try? await database.queue.read { db in
                 var rng = SystemRandomNumberGenerator()
-                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds,
+                return try CodeQuestionBank.pickRound(count: share, inDecks: deckIds,
                                                       allowWritten: config.allowWritten,
                                                       allowMultipleChoice: config.allowMultipleChoice,
+                                                      allowTrueFalse: config.allowTrueFalse,
                                                       using: &rng, db: db)
             }) ?? []
-            codeBudgetUsed = codeQuestions.count
         }
+        // One-line AI questions stay with the flashcard side: only when
+        // flashcards are on, Written is on, and the AI setting is on, and only
+        // for the room left in the usual third.
         let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)
-        if config.allowWritten && isAITestQuestionsEnabled,
-           Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed > 0 {
-            let budget = Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed
+        let aiRoom = Study.aiQuestionBudget(for: config.questionCount) - savedQuestions.count
+        if flashcards && config.allowWritten && isAITestQuestionsEnabled && aiRoom > 0 {
+            let budget = aiRoom
             let database = database
             let flagged = flaggedQuestionKeys
             let skipped = aiTestQuestionsSkipped
@@ -1156,7 +1184,7 @@ final class AppStore {
             aiResult = ([], nil)
         }
 
-        let aiQuestions = aiResult.questions + codeQuestions
+        let aiQuestions = aiResult.questions + savedQuestions
         let started = try await database.queue.write { db in
             var rng = SystemRandomNumberGenerator()
             return try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions,
@@ -1278,7 +1306,9 @@ final class AppStore {
     /// few seconds. The AI sees the question, the card's answer and this
     /// answer, in whichever mode (Local, Cloud, Automatic) is set.
     func judgeTypedAnswer(question: LearnEngine.RoundQuestion, given: String) async -> JudgedAnswer {
-        let accepted = question.cardId.map { acceptedAnswers(forCard: $0) } ?? []
+        // A card's remembered wordings, or the ones written with a saved question.
+        let accepted = question.cardId.map { acceptedAnswers(forCard: $0) }
+            ?? question.acceptedAnswers.map(AnswerGrading.normalize)
         // A canned judge for screenshots and demos when no model is
         // reachable: GRASP_STUB_JUDGE=1 with -GRASPAllowStubs 1, debug builds only.
         let stub = StubHooks.enabled("GRASP_STUB_JUDGE")

@@ -17,6 +17,24 @@ public enum SyncSchema {
     public struct Table: Sendable {
         public let name: String
         public let primaryKey: [String]
+        /// Rows where `column` equals `value` stay on this device: no
+        /// trigger queues them, an upload of existing rows skips them, and a
+        /// push drops them. A saved question is a draft until it is approved,
+        /// and a draft never leaves the device that wrote it; approving it
+        /// (an update that changes the column) is what sends it.
+        public let localOnly: (column: String, value: String)?
+
+        public init(name: String, primaryKey: [String], localOnly: (column: String, value: String)? = nil) {
+            self.name = name
+            self.primaryKey = primaryKey
+            self.localOnly = localOnly
+        }
+
+        /// SQL that is true when the row (`NEW`, `OLD` or a table alias) stays local.
+        func localOnlySQL(row: String) -> String {
+            guard let localOnly else { return "0" }
+            return "\(row).\"\(localOnly.column)\" = '\(localOnly.value)'"
+        }
     }
 
     /// In dependency order -- parents before children -- which is the
@@ -33,7 +51,7 @@ public enum SyncSchema {
         Table(name: "deck", primaryKey: ["id"]),
         Table(name: "card", primaryKey: ["id"]),
         Table(name: "deckCard", primaryKey: ["deckId", "cardId"]),
-        Table(name: "testQuestion", primaryKey: ["id"]),
+        Table(name: "testQuestion", primaryKey: ["id"], localOnly: (column: "status", value: "draft")),
         Table(name: "review", primaryKey: ["id"]),
         Table(name: "learnState", primaryKey: ["cardId"]),
         Table(name: "testAttempt", primaryKey: ["id"]),
@@ -100,13 +118,20 @@ public enum SyncSchema {
     /// their own tables' triggers when they call this again.
     public static func installTriggers(_ db: Database) throws {
         let guardClause = "(SELECT enabled = 1 AND applyingRemote = 0 FROM syncState WHERE id = 1)"
-        for table in tables where try db.tableExists(table.name) {
+        for declared in tables where try db.tableExists(declared.name) {
+            // An earlier migration may install triggers before the column a
+            // local-only rule reads exists; the last migration reinstalls them.
+            var table = declared
+            if let local = declared.localOnly,
+               try !db.columns(in: declared.name).contains(where: { $0.name == local.column }) {
+                table = Table(name: declared.name, primaryKey: declared.primaryKey)
+            }
             for (event, row) in [("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")] {
                 let trigger = "sync_\(table.name)_\(event.lowercased())"
                 try db.execute(sql: "DROP TRIGGER IF EXISTS \(trigger)")
                 try db.execute(sql: """
                     CREATE TRIGGER \(trigger) AFTER \(event) ON "\(table.name)"
-                    WHEN \(guardClause)
+                    WHEN \(guardClause) AND NOT (\(table.localOnlySQL(row: row)))
                     BEGIN
                         INSERT OR REPLACE INTO syncOutbox (tableName, rowKey, seq)
                         VALUES ('\(table.name)', \(keyExpression(table, row: row)),

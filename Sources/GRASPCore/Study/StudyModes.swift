@@ -97,6 +97,19 @@ extension Study {
     /// questions on -- roughly a third of the requested count, capped.
     public static func aiQuestionBudget(for questionCount: Int) -> Int { max(0, min(questionCount / 3, 10)) }
 
+    /// Why a test cannot start from these two switches, in plain words, or nil.
+    public static func testSourcesProblem(includeFlashcards: Bool, includeQuestions: Bool) -> String? {
+        includeFlashcards || includeQuestions ? nil
+            : "Turn on flashcards or questions to start a test."
+    }
+
+    /// How many saved questions a test takes: about a third when it also
+    /// asks about flashcards, as many as exist (up to the test's length)
+    /// when it is saved questions alone.
+    public static func savedQuestionShare(for questionCount: Int, withFlashcards: Bool) -> Int {
+        withFlashcards ? max(0, questionCount / 3) : max(0, questionCount)
+    }
+
     /// Builds a test from the decks' active cards plus any AI questions the
     /// caller already has, and writes the attempt and one item per question
     /// up front (answers are filled in as they're given). Returns an empty
@@ -105,7 +118,7 @@ extension Study {
         deckIds: [String], config: TestBuilder.Config, aiQuestions: [LearnEngine.RoundQuestion] = [],
         using rng: inout R, db: Database
     ) throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion]) {
-        var cards = try learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
+        var cards = config.includeFlashcards ? try learnCandidates(forDecks: deckIds, db: db).map(\.candidate) : []
         if config.excludeMastered {
             cards = cards.filter { $0.level != .mastered }
         }
@@ -145,9 +158,12 @@ extension Study {
                 questionType: question.code != nil ? "code" : (question.problem != nil ? "problem" : question.type.rawValue),
                 promptText: question.prompt,
                 choicesJSON: options.flatMap { try? String(data: JSONEncoder().encode($0), encoding: .utf8) },
-                correctAnswer: question.correctAnswer, isAIGenerated: question.cardId == nil,
+                correctAnswer: question.correctAnswer,
+                isAIGenerated: question.cardId == nil && question.bankSource != QuestionSource.yours.rawValue,
                 payloadJSON: question.code?.encoded() ?? question.problem?.encoded()
-                    ?? PlainQuestionPayload(explanation: question.explanation)?.encoded()
+                    ?? PlainQuestionPayload(explanation: question.explanation,
+                                            accepted: question.acceptedAnswers)?.encoded(),
+                questionId: question.bankQuestionId
             ).insert(db)
         }
         return attempt.id
@@ -232,6 +248,11 @@ extension Study {
                     choices: type == .multipleChoice ? options : nil, statement: statement,
                     statementIsTrue: statement == nil ? nil : item.correctAnswer == "True",
                     explanation: PlainQuestionPayload.decode(item.payloadJSON)?.explanation)
+            }
+            if let questionId = item.questionId {
+                question.bankQuestionId = questionId
+                question.bankSource = try TestQuestion.fetchOne(db, key: questionId)?.source
+                question.acceptedAnswers = PlainQuestionPayload.decode(item.payloadJSON)?.accepted ?? []
             }
             questions.append(question)
             // Answers are given in order, so the first unanswered one is
@@ -353,6 +374,12 @@ extension Study {
         try item.save(db)
         if isFirstAnswer, let cardId = item.cardId, !item.isAIGenerated {
             try recordLearnAnswer(cardId: cardId, wasCorrect: isCorrect, db: db)
+        } else if isFirstAnswer, item.cardId == nil, let questionId = item.questionId,
+                  let cardId = try QuestionBank.linkedCardId(ofQuestion: questionId, db: db) {
+            // A saved question linked to a card moves that card's meter, and
+            // only the meter: the test item has no `cardId`, so finishing
+            // the test never reaches the card's flashcard schedule.
+            try recordLearnAnswer(cardId: cardId, wasCorrect: isCorrect, db: db)
         }
     }
 
@@ -398,6 +425,9 @@ extension Study {
         // answer clears a remembered miss and climbs).
         if let cardId, !item.isAIGenerated {
             try recordLearnAnswer(cardId: cardId, wasCorrect: true, db: db)
+        } else if cardId == nil, let questionId = item.questionId,
+                  let linked = try QuestionBank.linkedCardId(ofQuestion: questionId, db: db) {
+            try recordLearnAnswer(cardId: linked, wasCorrect: true, db: db)
         }
         guard var attempt = try TestAttempt.fetchOne(db, key: attemptId), attempt.finishedAt != nil else { return }
         attempt.scoreNumerator = min((attempt.scoreNumerator ?? 0) + 1, attempt.scoreDenominator ?? .max)

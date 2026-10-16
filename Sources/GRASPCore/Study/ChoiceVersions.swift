@@ -226,6 +226,9 @@ public enum ChoiceVersions {
         case .matrix:
             guard let rows = problem.matrix else { return nil }
             candidates = matrixCandidates(rows)
+        case .written, .trueFalse:
+            // A student's own question has no worked wrong options to offer.
+            return nil
         }
         guard !correct.isEmpty, let wrong = pickThree(candidates, using: &rng) else { return nil }
         return LearnEngine.RoundQuestion(id: id, cardId: nil, prompt: problem.prompt, correctAnswer: correct,

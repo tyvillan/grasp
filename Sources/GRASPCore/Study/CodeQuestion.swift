@@ -196,6 +196,26 @@ public struct CodeQuestion: Codable, Sendable, Equatable {
 // MARK: - The saved question bank
 
 /// A verified question saved against a deck (see `CodeQuestionBuilder`).
+/// Who made a saved question.
+public enum QuestionSource: String, Codable, CaseIterable, Sendable {
+    case yours, photo, ai
+
+    public var label: String {
+        switch self {
+        case .yours: return "Yours"
+        case .photo: return "From a photo"
+        case .ai: return "AI"
+        }
+    }
+}
+
+/// Whether a saved question can be asked. A draft is waiting for approval
+/// and never leaves the device that wrote it; only active and suspended
+/// questions sync. Only active questions reach a test.
+public enum QuestionStatus: String, Codable, CaseIterable, Sendable {
+    case draft, active, suspended
+}
+
 public struct TestQuestion: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
     public static let databaseTableName = "testQuestion"
     public var id: String
@@ -213,10 +233,25 @@ public struct TestQuestion: Codable, FetchableRecord, PersistableRecord, Identif
     public var model: String?
     public var createdAt: Date
     public var deletedAt: Date?
+    /// "yours", "photo" or "ai"; rows saved before questions became a
+    /// feature read as "ai".
+    public var source: String
+    /// "draft", "active" or "suspended"; older rows read as "active".
+    public var status: String
+    /// A card this question helps: answering it moves that card's meter,
+    /// never its flashcard schedule. A soft link (no foreign key).
+    public var cardId: String?
+    /// A picture the question shows (photo import).
+    public var imageId: String?
+
+    public var sourceKind: QuestionSource { QuestionSource(rawValue: source) ?? .ai }
+    public var statusKind: QuestionStatus { QuestionStatus(rawValue: status) ?? .active }
 
     public init(id: String = UUID().uuidString, courseId: String, deckId: String, materialId: String? = nil,
                 kind: CodeQuestionKind, language: CodeLanguage, bodyJSON: String, sourceContentHash: String? = nil,
-                verifiedBy: String, model: String? = nil, createdAt: Date = Date(), deletedAt: Date? = nil) {
+                verifiedBy: String, model: String? = nil, createdAt: Date = Date(), deletedAt: Date? = nil,
+                source: QuestionSource = .ai, status: QuestionStatus = .active, cardId: String? = nil) {
+        self.source = source.rawValue; self.status = status.rawValue; self.cardId = cardId; self.imageId = nil
         self.id = id; self.courseId = courseId; self.deckId = deckId; self.materialId = materialId
         self.kind = kind.rawValue; self.language = language.rawValue; self.bodyJSON = bodyJSON
         self.sourceContentHash = sourceContentHash; self.verifiedBy = verifiedBy; self.model = model
@@ -226,7 +261,9 @@ public struct TestQuestion: Codable, FetchableRecord, PersistableRecord, Identif
     /// A bank row for a non-code problem; `language` holds its subject.
     public init(id: String = UUID().uuidString, courseId: String, deckId: String, materialId: String? = nil,
                 problem: ProblemQuestion, bodyJSON: String, sourceContentHash: String? = nil,
-                verifiedBy: String, model: String? = nil, createdAt: Date = Date()) {
+                verifiedBy: String, model: String? = nil, createdAt: Date = Date(),
+                source: QuestionSource = .ai, status: QuestionStatus = .active, cardId: String? = nil) {
+        self.source = source.rawValue; self.status = status.rawValue; self.cardId = cardId; self.imageId = nil
         self.id = id; self.courseId = courseId; self.deckId = deckId; self.materialId = materialId
         self.kind = problem.kind.rawValue; self.language = problem.subject.rawValue; self.bodyJSON = bodyJSON
         self.sourceContentHash = sourceContentHash; self.verifiedBy = verifiedBy; self.model = model
