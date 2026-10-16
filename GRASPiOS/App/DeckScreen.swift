@@ -13,6 +13,11 @@ struct DeckScreen: View {
     @State private var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "deckContentTab") ?? "") ?? .cards
     /// Opens the editor for a new question on the Questions tab.
     @State private var writingQuestion = false
+    /// Opens "Generate questions with AI" on the Questions tab.
+    @State private var generatingQuestions = false
+    /// Saved questions a test could ask, and drafts waiting for review.
+    @State private var activeQuestionCount = 0
+    @State private var draftQuestionCount = 0
     /// DEBUG screenshots only: the Add menu's items in a popover (see `DebugLaunch.showAddMenu`).
     @State private var showingAddItemsPreview = false
     @State private var cards: [Card] = []
@@ -58,7 +63,6 @@ struct DeckScreen: View {
     @State private var confirmingSuspendDeck = false
     @State private var confirmingReactivateDeck = false
     /// Shown when Test is tapped on a deck with no approved cards yet.
-    @State private var approveFirstNotice = false
     /// Why the last "Generate Cards" run failed, shown with Retry
     /// instead of the "no new cards" message.
     @State private var additionFailure: String?
@@ -152,7 +156,10 @@ struct DeckScreen: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 4, trailing: 0))
                 }
                 GRASPSegmented(
-                    selection: $tab, options: Tab.allCases.map { ($0, $0.rawValue) }, fillsWidth: true
+                    selection: $tab,
+                    options: Tab.allCases.map { ($0, $0 == .questions && draftQuestionCount > 0
+                                                    ? "\($0.rawValue) \(draftQuestionCount)" : $0.rawValue) },
+                    fillsWidth: true
                 )
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
@@ -163,7 +170,8 @@ struct DeckScreen: View {
             case .overview: OverviewSection(deckIds: deckIds)
             case .questions:
                 Section {
-                    QuestionsTab(deckIds: deckIds, query: query, isWriting: $writingQuestion, decks: deckChoices)
+                    QuestionsTab(deckIds: deckIds, courseId: courseId, query: query, isWriting: $writingQuestion,
+                                 isGenerating: $generatingQuestions, decks: deckChoices, scopeName: route.name)
                         .listRowInsets(EdgeInsets())
                 }
                 .listRowBackground(Color.clear)
@@ -202,6 +210,7 @@ struct DeckScreen: View {
             case "overview": tab = .overview
             case "questions": tab = .questions
             case "writequestion": tab = .questions; writingQuestion = true
+            case "generatequestions": tab = .questions; generatingQuestions = true
             case "addmenu": tab = .questions; showingAddItemsPreview = DebugLaunch.showAddMenu
             default: break
             }
@@ -250,12 +259,6 @@ struct DeckScreen: View {
                 ToolbarItem(placement: .topBarTrailing) { questionsAddMenu.tint(GRASPColor.textPrimary) }
             }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu.tint(GRASPColor.textPrimary) }
-        }
-        .sheet(isPresented: $approveFirstNotice) {
-            ResultSheet(
-                icon: "checklist", title: "Approve some cards first",
-                leadText: "A test asks about approved cards, and every card in this deck is still a draft. Approve the ones that look right, then come back."
-            )
         }
         .sheet(isPresented: $confirmingApproveAll) {
             let aiDrafts = cards.filter { $0.status == .draft && $0.origin == .aiGenerated }.count
@@ -322,8 +325,8 @@ struct DeckScreen: View {
     @ViewBuilder
     private var questionsAddItems: some View {
         Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
-        Button("Generate questions with AI (coming soon)") {}
-            .disabled(true)
+        Button { generatingQuestions = true } label: { Label("Generate questions with AI", systemImage: AIGlyph.symbol) }
+            .disabled(!store.isGeneratorAvailable || store.aiJob(store.questionDraftJobKey(courseId: courseId)) != nil)
         Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
             .disabled(true)
     }
@@ -414,8 +417,13 @@ struct DeckScreen: View {
     }
 
     /// One short line for why Study or Learn is dimmed, when it is.
+    private var testAvailability: Study.TestAvailability {
+        Study.testAvailability(activeCards: counts.active, activeQuestions: activeQuestionCount, draftCards: counts.drafts)
+    }
+
     private var studyUnavailableNote: String? {
         let c = counts
+        if case .unavailable(let why) = testAvailability, hasLoaded, tab != .cards || c.all == 0 { return why }
         if c.all == 0 { return nil }
         if c.active == 0 {
             return c.drafts > 0
@@ -438,14 +446,13 @@ struct DeckScreen: View {
                 .disabled(activeCount == 0)
             StudyPill(title: unfinishedTest == nil ? "Test" : "Continue test", icon: "checklist", style: .quiet,
                       detail: unfinishedTest.map { "\($0.answered)/\($0.total)" }) {
-                if activeCount == 0 {
-                    approveFirstNotice = true
-                } else if let unfinishedTest {
+                if let unfinishedTest {
                     testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
                 } else {
                     testPhase = .setup
                 }
             }
+            .disabled(!testAvailability.isAvailable && unfinishedTest == nil)
         }
     }
 
@@ -618,6 +625,8 @@ struct DeckScreen: View {
         suspendedStates = store.suspendedUnderstanding(forDecks: ids)
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
+        activeQuestionCount = store.activeQuestionCount(inDecks: ids)
+        draftQuestionCount = store.questionDraftCount(inDecks: ids)
         hasLoaded = true
         loadSourceTitles()
         if filter == .drafts, !cards.contains(where: { $0.status == .draft }) { filter = .all }

@@ -32,6 +32,11 @@ extension AppStore {
         reload()
     }
 
+    /// How many approved cards these decks have (what a test's flashcards come from).
+    func activeCardCount(inDecks deckIds: [String]) -> Int {
+        ((try? cards(inDecks: deckIds)) ?? []).filter { $0.status == .active }.count
+    }
+
     /// Active cards of these decks, for linking a question to one.
     func linkableCards(inDecks deckIds: [String]) -> [Card] {
         ((try? cards(inDecks: deckIds)) ?? []).filter { $0.status == .active }

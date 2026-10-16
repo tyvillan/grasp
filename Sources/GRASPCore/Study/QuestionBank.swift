@@ -150,6 +150,88 @@ public enum QuestionBank {
         try record.save(db)
     }
 
+    // MARK: Drafts
+
+    /// Drafts waiting for review, newest first.
+    public static func drafts(inDecks deckIds: [String], db: Database) throws -> [TestQuestion] {
+        try listing(inDecks: deckIds, db: db).filter { $0.statusKind == .draft }
+    }
+
+    public static func draftCount(inDecks deckIds: [String], db: Database) throws -> Int {
+        guard !deckIds.isEmpty else { return 0 }
+        return try TestQuestion
+            .filter(deckIds.contains(Column("deckId")))
+            .filter(Column("deletedAt") == nil)
+            .filter(Column("status") == QuestionStatus.draft.rawValue)
+            .fetchCount(db)
+    }
+
+    /// What is wrong with a question's wording or answer, as the end of a
+    /// sentence beginning "It ...", or nil when it passes. The same rules the
+    /// drafter applies, so a draft that was edited into something unclear
+    /// cannot be approved.
+    public static func qualityProblem(_ problem: ProblemQuestion) -> String? {
+        let words = problem.prompt.split(whereSeparator: { $0.isWhitespace }).count
+        if words < 4 { return "is too short to be a clear question" }
+        switch problem.kind {
+        case .multipleChoice:
+            guard let choices = problem.choices, choices.count >= 2 else { return "has fewer than two choices" }
+            if choices.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return "has an empty choice" }
+            if Set(choices.map { $0.lowercased() }).count != choices.count { return "repeats a choice" }
+            guard let correct = problem.correct, choices.indices.contains(correct) else { return "has no right answer marked" }
+        case .written:
+            if (problem.answer ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "has no answer" }
+        default:
+            break
+        }
+        // A multiple choice question's options are its choices, so "which of
+        // the following" is fine there.
+        switch CardQuality.problem(front: problem.prompt, back: problem.answerText) {
+        case .refusal?: return "has an answer that says the notes don't cover it"
+        case .placeholderFront?: return "reads like a placeholder"
+        case .missingOptions? where problem.kind != .multipleChoice: return "asks \"which of the following\" without showing the options"
+        default: return nil
+        }
+    }
+
+    /// Why this saved question may not be approved, or nil when it may.
+    public static func approvalProblem(_ record: TestQuestion) -> String? {
+        if let code = record.question { return CodeQuestionValidator.problem(in: code).map { "It " + $0 + "." } }
+        if let problem = record.problem { return qualityProblem(problem).map { "It " + $0 + "." } }
+        return "It can't be read."
+    }
+
+    /// Approves one draft: it becomes active, and from then on it syncs.
+    /// Returns why it was not approved, or nil on success. Nothing that fails
+    /// a check is approved.
+    @discardableResult
+    public static func approve(_ id: String, db: Database) throws -> String? {
+        guard let record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil,
+              record.statusKind == .draft else { return nil }
+        if let why = approvalProblem(record) { return why }
+        try setStatus(id, to: .active, db: db)
+        return nil
+    }
+
+    public struct ApproveAllResult: Sendable, Equatable {
+        public var approved = 0
+        /// Drafts that failed a check and were left for review, with why.
+        public var skipped: [(id: String, reason: String)] = []
+        public init() {}
+        public static func == (a: ApproveAllResult, b: ApproveAllResult) -> Bool {
+            a.approved == b.approved && a.skipped.map(\.id) == b.skipped.map(\.id)
+        }
+    }
+
+    /// Approves every draft of these decks that passes every check.
+    public static func approveAll(inDecks deckIds: [String], db: Database) throws -> ApproveAllResult {
+        var result = ApproveAllResult()
+        for draft in try drafts(inDecks: deckIds, db: db) {
+            if let why = try approve(draft.id, db: db) { result.skipped.append((draft.id, why)) } else { result.approved += 1 }
+        }
+        return result
+    }
+
     public static func setStatus(_ id: String, to status: QuestionStatus, db: Database) throws {
         guard var record = try TestQuestion.fetchOne(db, key: id), record.status != status.rawValue else { return }
         record.status = status.rawValue

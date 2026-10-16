@@ -97,6 +97,37 @@ extension Study {
     /// questions on -- roughly a third of the requested count, capped.
     public static func aiQuestionBudget(for questionCount: Int) -> Int { max(0, min(questionCount / 3, 10)) }
 
+    /// What a deck can offer a test.
+    public enum TestAvailability: Equatable, Sendable {
+        /// Cards and saved questions both exist.
+        case cardsAndQuestions
+        case cardsOnly
+        /// No cards: the test is saved questions alone, and the flashcards
+        /// switch is off and disabled.
+        case questionsOnly
+        /// Neither, with the reason in plain words.
+        case unavailable(String)
+
+        public var isAvailable: Bool {
+            if case .unavailable = self { return false }
+            return true
+        }
+    }
+
+    /// Test is available whenever the deck has approved cards or active
+    /// saved questions. Drafts and suspended items don't count.
+    public static func testAvailability(activeCards: Int, activeQuestions: Int, draftCards: Int = 0) -> TestAvailability {
+        switch (activeCards > 0, activeQuestions > 0) {
+        case (true, true): return .cardsAndQuestions
+        case (true, false): return .cardsOnly
+        case (false, true): return .questionsOnly
+        case (false, false):
+            return .unavailable(draftCards > 0
+                                ? "Approve some cards, or write questions, to take a test."
+                                : "Add cards or write questions to take a test.")
+        }
+    }
+
     /// Why a test cannot start from these two switches, in plain words, or nil.
     public static func testSourcesProblem(includeFlashcards: Bool, includeQuestions: Bool) -> String? {
         includeFlashcards || includeQuestions ? nil

@@ -1069,20 +1069,19 @@ final class AppStore {
         var failure: String?
     }
 
-    /// What the last code-question run did, for the bank sheet to report.
-    var lastCodeQuestionRun: CodeQuestionRunResult?
+    /// What the last "Generate questions with AI" run did, for the Questions
+    /// tab to report (kept here: an extension can't hold it).
+    var lastQuestionDraftRun: QuestionDraftRunResult?
 
     /// The batch writing a guide's skill explanations, and the skills still waiting on it.
     @ObservationIgnored var skillPrefetch: Task<Void, Never>?
     @ObservationIgnored var choiceUpgradeStarted = false
     @ObservationIgnored var skillPrefetchPending: Set<String> = []
-    struct CodeQuestionRunResult: Equatable {
-        var saved: Int
-        var rejected: Int
-        var wasStopped: Bool
+    struct QuestionDraftRunResult: Equatable {
+        var deckIds: [String]
+        var outcome: DraftOutcome
+        /// A plain sentence when nothing could be written, else nil.
         var failure: String?
-        /// The most common reason drafts were dropped.
-        var topReason: String?
     }
 
     func aiJob(_ key: String) -> AIJob? { aiJobs[key] }
@@ -1134,7 +1133,7 @@ final class AppStore {
     /// a course-wide attempt isn't attributable to any single deck, so it
     /// stores `nil` rather than picking one arbitrarily.
     func startTest(
-        deckIds: [String], config: TestBuilder.Config
+        deckIds: [String], config: TestBuilder.Config, includeQuestions: Bool? = nil
     ) async throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
         aiTestQuestionsSkipped.set(false)
 
@@ -1150,7 +1149,7 @@ final class AppStore {
         // alone, the whole test (as many as exist).
         var savedQuestions: [LearnEngine.RoundQuestion] = []
         let flashcards = config.includeFlashcards
-        if isSavedQuestionsEnabled {
+        if includeQuestions ?? isSavedQuestionsEnabled {
             let share = Study.savedQuestionShare(for: config.questionCount, withFlashcards: flashcards)
             savedQuestions = (try? await database.queue.read { db in
                 var rng = SystemRandomNumberGenerator()

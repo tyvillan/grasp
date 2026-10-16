@@ -116,7 +116,6 @@ struct DeckDetailView: View {
     private struct GenerationNotice { let message: String; let isError: Bool }
     private var reduceMotion: Bool { Motion.isReduced }
     @State private var showingGenerateSheet = false
-    @State private var showingCodeQuestions = false
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
     /// The meter's view of each card, and the note filter a "Weakest
     /// notes" row sets (nil: not filtering; `.some(nil)` is the "Other" group).
@@ -169,6 +168,8 @@ struct DeckDetailView: View {
     @Namespace private var tabSwitch
     /// Opens the editor for a new question on the Questions tab.
     @State private var isWritingQuestion = false
+    /// Opens "Generate questions with AI" on the Questions tab.
+    @State private var isGeneratingQuestions = false
 
     private enum ContentTab: String, CaseIterable, Identifiable {
         case overview = "Overview", cards = "Cards", questions = "Questions"
@@ -225,7 +226,9 @@ struct DeckDetailView: View {
     /// Refreshed in `load()`. As a computed property it ran the whole due
     /// query four times per render -- on every selection click.
     @State private var dueCount = 0
-    @State private var problemCount = 0
+    /// Saved questions a test could ask, and drafts waiting for review.
+    @State private var activeQuestionCount = 0
+    @State private var draftQuestionCount = 0
     /// Notes whose overview was written before the note last changed.
     @State private var staleOverviewCount = 0
     /// Notes in scope with an overview or one that could be written.
@@ -424,8 +427,8 @@ struct DeckDetailView: View {
                 }
             case .questions:
                 ScrollView {
-                    QuestionsTab(deckIds: scopeDeckIds, isWriting: $isWritingQuestion,
-                                 decks: scopeDecksForQuestions)
+                    QuestionsTab(deckIds: scopeDeckIds, courseId: courseId, isWriting: $isWritingQuestion,
+                                 isGenerating: $isGeneratingQuestions, decks: scopeDecksForQuestions, scopeName: deckName)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -556,9 +559,6 @@ struct DeckDetailView: View {
                 )
             }
         }
-        .sheet(isPresented: $showingCodeQuestions, onDismiss: load) {
-            PracticeProblemsSheet(deckIds: scopeDeckIds, scopeName: deckName, courseId: courseId)
-        }
         .sheet(item: $refineConfirmation) { scope in
             RefineDeckConfirmationSheet(
                 cardCount: refineCount(scope), includesApproved: scope == .everything,
@@ -659,7 +659,7 @@ struct DeckDetailView: View {
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true)
             }
-            if let why = studyUnavailableNote {
+            if let why = studyUnavailableNote ?? testUnavailableNote {
                 Text(why)
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
@@ -689,6 +689,21 @@ struct DeckDetailView: View {
         return nil
     }
 
+    private var testAvailability: Study.TestAvailability {
+        Study.testAvailability(activeCards: activeCount, activeQuestions: activeQuestionCount, draftCards: draftCount)
+    }
+
+    private var testHelp: String {
+        if case .unavailable(let why) = testAvailability { return why }
+        return "Take a test on this deck's flashcards, saved questions, or both"
+    }
+
+    /// The reason Test is dimmed, in one muted line, when it is.
+    private var testUnavailableNote: String? {
+        guard hasLoaded, case .unavailable(let why) = testAvailability else { return nil }
+        return why
+    }
+
     /// Only drafts, nothing approved: Study and Learn are dimmed because
     /// there is nothing to study yet, and approving is the one next step.
     private var isDraftsOnly: Bool { draftCount > 0 && activeCount == 0 }
@@ -707,18 +722,10 @@ struct DeckDetailView: View {
                 testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
             }
         }
-        // Test is never dimmed while the deck has cards. With none approved
-        // yet it explains itself instead of looking broken.
-        modeButton("Test", "checklist", prominent: false, help: "Take a test on this deck's flashcards, saved questions, or both") {
-            if activeCount == 0 {
-                cardRefineResult = CardRefineMessage(
-                    icon: "checklist", title: "Approve some cards first",
-                    lead: "A test asks about approved cards, and every card in this deck is still a draft or suspended. Approve the ones that look right, then come back.")
-            } else {
-                testPhase = .setup
-            }
-        }
-        .disabled(cards.isEmpty)
+        // Test is available whenever the deck has approved cards or active
+        // saved questions; with neither it says what to add.
+        modeButton("Test", "checklist", prominent: false, help: testHelp) { testPhase = .setup }
+            .disabled(!testAvailability.isAvailable)
     }
 
     /// The right side of the toolbar, which follows the Cards / Overview
@@ -785,9 +792,6 @@ struct DeckDetailView: View {
                 },
                 .action("Show files in this \(noun.lowercased())…", systemImage: "doc.on.doc") {
                     showingDeckFiles = true
-                },
-                .action(problemCount > 0 ? "Problems (\(problemCount))" : "Problems", systemImage: "function") {
-                    showingCodeQuestions = true
                 },
             ]
             if !duplicateGroups.isEmpty {
@@ -881,10 +885,6 @@ struct DeckDetailView: View {
                         help: "New draft cards for concepts this deck's notes mention that have no card yet") {
                     showingGenerateSheet = true
                 },
-                .action("Practice problems with AI…", ai: true,
-                        help: "Code, calculations and matrices from this deck's notes, checked before they're kept") {
-                    showingCodeQuestions = true
-                },
                 .action(isRefiningDeck ? "Refining…" : "Refine deck with AI", ai: true,
                         disabled: !isGeneratorAvailable || isRefiningDeck || aiBusy || refineCount(.everything) == 0,
                         help: "Checks every card against its own note and cleans up wording") {
@@ -907,13 +907,20 @@ struct DeckDetailView: View {
             [
                 .action("Write a question", systemImage: "square.and.pencil",
                         help: "Multiple choice, written or true / false") { isWritingQuestion = true },
+                .action("Generate questions with AI…", ai: true,
+                        disabled: !isGeneratorAvailable || questionJobRunning,
+                        help: isGeneratorAvailable ? "Draft questions written from this deck's notes, for you to review"
+                                                   : "Set up an AI model in Settings first") {
+                    isGeneratingQuestions = true
+                },
                 .divider,
-                .action("Generate questions with AI (coming soon)", disabled: true, help: "Coming soon") {},
                 .action("From a photo (coming soon)", systemImage: "camera", disabled: true, help: "Coming soon") {},
             ]
         }
         .help("Write a question")
     }
+
+    private var questionJobRunning: Bool { store.aiJob(store.questionDraftJobKey(courseId: courseId)) != nil }
 
     /// The decks a new question can go in: this deck, or every deck of an
     /// "All Cards" view.
@@ -974,6 +981,17 @@ struct DeckDetailView: View {
                                 .font(.graspUI(size: 14, weight: .semibold))
                                 .lineLimit(1)
                                 .fixedSize()
+                        }
+                        if tab == .questions, draftQuestionCount > 0 {
+                            // Drafts waiting for review.
+                            Text("\(draftQuestionCount)")
+                                .font(.graspUI(size: 11, weight: .bold))
+                                .monospacedDigit()
+                                .foregroundStyle(GRASPColor.textPrimary)
+                                .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 18)
+                                .background(GRASPColor.surfaceRaised, in: Capsule())
+                                .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
+                                .accessibilityLabel("\(draftQuestionCount) to review")
                         }
                     }
                     .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
@@ -1753,7 +1771,8 @@ struct DeckDetailView: View {
         // A Drafts filter with no drafts left would show an empty list.
         if masteryFilter == .drafts, !cards.contains(where: { $0.status == .draft }) { masteryFilter = .all }
         dueCount = (try? store.dueCards(inDecks: scopeDeckIds).count) ?? 0
-        problemCount = store.codeQuestionCount(inDecks: scopeDeckIds)
+        activeQuestionCount = store.activeQuestionCount(inDecks: scopeDeckIds)
+        draftQuestionCount = store.questionDraftCount(inDecks: scopeDeckIds)
         unfinishedTest = store.unfinishedTest(forDecks: scopeDeckIds)
         if let courseId {
             let allDecksInCourse = (try? store.decks(inCourse: courseId)) ?? []

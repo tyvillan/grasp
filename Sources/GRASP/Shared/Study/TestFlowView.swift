@@ -172,6 +172,16 @@ struct TestSetupSheet: View {
     /// Set when Start found nothing to ask, so the sheet says why instead
     /// of just not starting.
     @State private var noQuestions = false
+    /// The deck's approved cards, so a deck with none starts a test from its
+    /// saved questions alone. -1 until counted.
+    @State private var cardCount = -1
+    /// "Include questions" for a deck with no cards, which is on until turned off here.
+    @State private var questionsWithoutCards = true
+
+    private var hasCards: Bool { cardCount != 0 }
+    /// What the test will really use, whatever the saved switches say.
+    private var useFlashcards: Bool { guide != nil || (hasCards && store.isFlashcardQuizEnabled) }
+    private var useQuestions: Bool { guide != nil || (hasCards ? store.isSavedQuestionsEnabled : questionsWithoutCards) }
 
     var body: some View {
         GRASPSheet(
@@ -239,10 +249,11 @@ struct TestSetupSheet: View {
                     VStack(alignment: .leading, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Toggle("Quiz me on flashcards", isOn: Binding(
-                                get: { store.isFlashcardQuizEnabled }, set: { store.isFlashcardQuizEnabled = $0 }
+                                get: { useFlashcards }, set: { store.isFlashcardQuizEnabled = $0 }
                             ))
                             .toggleStyle(GRASPSwitchStyle())
-                            Text("Questions made from this deck's cards.")
+                            .disabled(!hasCards)
+                            Text(hasCards ? "Questions made from this deck's cards." : "This deck has no cards.")
                                 .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
                             aiOption
                                 .padding(.leading, 20)
@@ -251,7 +262,8 @@ struct TestSetupSheet: View {
                         Rectangle().fill(GRASPColor.hairline).frame(height: 1)
                         VStack(alignment: .leading, spacing: 4) {
                             Toggle("Include questions", isOn: Binding(
-                                get: { store.isSavedQuestionsEnabled }, set: { store.isSavedQuestionsEnabled = $0 }
+                                get: { useQuestions },
+                                set: { if hasCards { store.isSavedQuestionsEnabled = $0 } else { questionsWithoutCards = $0 } }
                             ))
                             .toggleStyle(GRASPSwitchStyle())
                             Text(savedQuestionsCaption)
@@ -263,13 +275,12 @@ struct TestSetupSheet: View {
 
                 }
 
-                if let problem = Study.testSourcesProblem(includeFlashcards: guide != nil || store.isFlashcardQuizEnabled,
-                                                          includeQuestions: guide != nil || store.isSavedQuestionsEnabled) {
+                if let problem = Study.testSourcesProblem(includeFlashcards: useFlashcards, includeQuestions: useQuestions) {
                     Text(problem).graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 } else if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                     Text("Turn on at least one question type.").graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 } else if noQuestions {
-                    Text(store.isFlashcardQuizEnabled
+                    Text(useFlashcards
                          ? "No cards or saved questions match these settings, so there's nothing to test."
                          : "No saved questions match these settings, so there's nothing to test.")
                         .graspType(.meta).foregroundStyle(GRASPColor.rejected)
@@ -290,7 +301,7 @@ struct TestSetupSheet: View {
         } footer: {
             if isStarting, aiActivity == nil {
                 ProgressView().controlSize(.small)
-                Text(store.isFlashcardQuizEnabled && store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
+                Text(useFlashcards && store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             }
@@ -301,11 +312,11 @@ struct TestSetupSheet: View {
                 .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse)
-                          || (guide == nil && Study.testSourcesProblem(includeFlashcards: store.isFlashcardQuizEnabled,
-                                                                       includeQuestions: store.isSavedQuestionsEnabled) != nil))
+                          || (guide == nil && Study.testSourcesProblem(includeFlashcards: useFlashcards,
+                                                                       includeQuestions: useQuestions) != nil))
         }
         .task {
-            store.addMissingChoicesInBackground()
+            cardCount = guide == nil ? store.activeCardCount(inDecks: deckIds) : -1
             unfinished = store.unfinishedTest(forDecks: deckIds, scopeKey: guide?.scopeKey)
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
@@ -317,7 +328,7 @@ struct TestSetupSheet: View {
     /// cannot do anything: flashcards off, or Written off (AI questions are
     /// typed answers).
     private var aiOption: some View {
-        let flashcards = store.isFlashcardQuizEnabled
+        let flashcards = useFlashcards
         let available = flashcards && allowWritten
         return VStack(alignment: .leading, spacing: 3) {
             Toggle(isOn: Binding(
@@ -348,7 +359,7 @@ struct TestSetupSheet: View {
         let saved = store.activeQuestionCount(inDecks: deckIds)
         guard saved > 0 else { return "No saved questions yet. Add some on the deck's Questions tab." }
         let noun = "\(saved) saved question\(saved == 1 ? "" : "s")"
-        return store.isFlashcardQuizEnabled
+        return useFlashcards
             ? "\(noun) from this deck's Questions tab. About a third of the test."
             : "\(noun) from this deck's Questions tab. The whole test comes from them."
     }
@@ -358,12 +369,12 @@ struct TestSetupSheet: View {
             questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
             allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
             excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly,
-            includeFlashcards: guide != nil || store.isFlashcardQuizEnabled
+            includeFlashcards: useFlashcards
         )
         isStarting = true
         noQuestions = false
         let run = guide != nil ? nil
-            : (store.isFlashcardQuizEnabled && store.isAITestQuestionsEnabled && allowWritten)
+            : (useFlashcards && store.isAITestQuestionsEnabled && allowWritten)
             ? AIActivity(headline: "Writing AI questions from your notes")
             : nil
         aiActivity = run
@@ -374,11 +385,12 @@ struct TestSetupSheet: View {
                 isStarting = false
             }
             let guide = self.guide
+            let useQuestionsForStart = useQuestions
             let start = {
                 if let guide {
                     return try await store.startGuideTest(page: guide.page, scopeKey: guide.scopeKey, config: config)
                 }
-                return try await store.startTest(deckIds: deckIds, config: config)
+                return try await store.startTest(deckIds: deckIds, config: config, includeQuestions: useQuestionsForStart)
             }
             let result = if let run {
                 try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }

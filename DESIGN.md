@@ -110,10 +110,25 @@ A view that uses the tokens needs no check of its own.
   schedule. The Add menu is an outlined button (Study stays the one yellow button):
   Write a question, then two disabled items marked "(coming soon)", with no sparkle
   while they cannot be used.
+- **Generate questions with AI.** Lives on the Questions tab only (the Add menu item,
+  the one place its sparkle appears there; disabled with a reason when no model is set
+  up). The sheet lists the deck's source notes (all on), how many (10), and the kinds:
+  multiple choice and written, true / false shown off with "Not written by AI yet", and
+  code or math kinds only for a note that is code or math and only where the Mac can
+  check them. It says in plain words when Cloud sends the notes' text to Google. Results
+  land as drafts, local to the device until approved: a "To review" filter with a count
+  (a number beside the tab on the Mac, "Questions 4" on the iPhone), each draft showing
+  "From <note>", with Approve, Edit and Delete, and "Approve all", which approves only
+  drafts that pass every check. A run ends with a banner ("Wrote 7 draft questions") and,
+  when something was dropped, "3 dropped: 2 repeats, 1 unclear" with "See why". Drafts
+  never count toward the card draft number.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.
-  Neither on says "Turn on flashcards or questions to start a test." and disables
+  A deck with no cards starts a questions-only test: the flashcards switch is off and
+  disabled with "This deck has no cards." Test is dimmed only when a deck has neither
+  cards nor saved questions, with the reason in the muted line under the pills.
+  Neither switch on says "Turn on flashcards or questions to start a test." and disables
   Start. "Include AI-written questions" stays as a sparkle option that goes with
   the flashcards.
 - **Menus** are GRASP's own panel (`PillMenu`, `IconMenu`), never the system menu.
