@@ -48,6 +48,8 @@ struct LearnRoundView: View {
     @State private var isAnswered = false
     @State private var isAtCheckpoint = false
     @State private var isEmpty = false
+    /// Right answers in a row, across rounds, up to the question on screen.
+    @State private var streak = LearnStreak()
     /// Fixed when the round starts: every card was already marked
     /// understood, so Learn is reinforcing at random rather than teaching.
     @State private var isPracticeRound = false
@@ -113,6 +115,10 @@ struct LearnRoundView: View {
 
                 Spacer(minLength: 12)
 
+                if streak.isOn && !isEmpty {
+                    StreakChip(streak: streak)
+                        .transition(.opacity)
+                }
                 if !isEmpty && !isAtCheckpoint {
                     Text(isReviewingMisses
                          ? "Reviewing missed \(min(reviewAnswered + 1, reviewTotal)) of \(reviewTotal)"
@@ -281,6 +287,16 @@ struct LearnRoundView: View {
                         // the level changed.
                         PipChange(before: before, after: before.afterAnswer(correct: lastAnswerCorrect))
                             .id("\(question.id)-\(lastAnswerCorrect)")
+                    }
+                    if isAnswered {
+                        let now = streak.after(correct: lastAnswerCorrect)
+                        if now.isOn {
+                            StreakBanner(streak: now).id("streak-\(now.count)")
+                        } else if let ended = streak.endedCaption(afterMiss: !lastAnswerCorrect) {
+                            Text(ended)
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
                     }
                     if isAnswered, let judged, judged.outcome == .notQuite, question.type == .written,
                        let cardId = question.cardId {
@@ -578,6 +594,7 @@ struct LearnRoundView: View {
         // `RoundQuestion` here has a real backing card.
         guard let cardId = question.cardId else { return }
         try? store.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect)
+        streak = streak.after(correct: wasCorrect)
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         refreshMastery()
 

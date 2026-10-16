@@ -168,6 +168,14 @@ A view that uses the tokens needs no check of its own.
 - **Study sheets** (Learn, Test, flashcards) sit on a near-black scrim, one progress
   bar, answers never replace the question.
 
+- **Learn streak.** From the third right answer in a row, a flame banner
+  ("3 correct in a row") appears under the answer and a flame chip with the count
+  sits in the header; each further right answer updates it, and the first miss
+  ends it ("Streak ended at N"). It carries across rounds in one Learn session.
+  One 0.32 s entrance (flame scales in, six embers rise once and fade); under
+  Reduce Motion the flame only fades in. Flame and embers use `accent` and
+  `brand`, no new colour. Rule lives in `LearnStreak` (core).
+
 **Naming AI actions.** Name an AI action by what it produces: cards, overview,
 study guide, test questions. Never "questions" for card generation. The deck
 toolbar button is "Generate cards", the empty deck's is "Generate cards from your
