@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 @testable import GRASPCore
 
@@ -36,29 +37,52 @@ import Testing
     }
 }
 
-@Suite struct LearnStreakStoreTests {
-    private func fresh() -> UserDefaults {
-        let name = "streak-test-\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: name)!
-        d.removePersistentDomain(forName: name)
-        return d
+@Suite struct LearnStreakSavedTests {
+    @Test func startsAtZero() throws {
+        let db = try GRASPDatabase.inMemory()
+        #expect(try db.queue.read { try Study.learnStreak(db: $0) }.count == 0)
     }
 
-    @Test func startsAtZero() {
-        #expect(LearnStreakStore(defaults: fresh()).load().count == 0)
+    @Test func savesAndReloads() throws {
+        let db = try GRASPDatabase.inMemory()
+        try db.queue.write { try Study.saveLearnStreak(LearnStreak(count: 6), db: $0) }
+        #expect(try db.queue.read { try Study.learnStreak(db: $0) } == LearnStreak(count: 6))
     }
 
-    @Test func survivesReopening() {
-        let d = fresh()
-        LearnStreakStore(defaults: d).save(LearnStreak(count: 6))
-        #expect(LearnStreakStore(defaults: d).load() == LearnStreak(count: 6))
+    @Test func aMissClearsIt() throws {
+        let db = try GRASPDatabase.inMemory()
+        try db.queue.write { try Study.saveLearnStreak(LearnStreak(count: 6), db: $0) }
+        try db.queue.write { try Study.saveLearnStreak(LearnStreak(count: 6).after(correct: false), db: $0) }
+        #expect(try db.queue.read { try Study.learnStreak(db: $0) }.count == 0)
     }
 
-    @Test func aMissClearsTheSavedStreak() {
-        let d = fresh()
-        let store = LearnStreakStore(defaults: d)
-        store.save(LearnStreak(count: 6))
-        store.save(store.load().after(correct: false))
-        #expect(LearnStreakStore(defaults: d).load().count == 0)
+    @Test func zeroOnAnEmptyLibraryWritesNothing() throws {
+        let db = try GRASPDatabase.inMemory()
+        try db.queue.write { try Study.saveLearnStreak(LearnStreak(count: 0), db: $0) }
+        #expect(try db.queue.read { try LearnStreakRow.fetchCount($0) } == 0)
+    }
+
+    @Test func theStreakIsASyncedTable() {
+        #expect(SyncSchema.table(named: "learnStreak")?.primaryKey == ["id"])
+    }
+
+    @Test func theStreakReachesTheOtherDevice() async throws {
+        let server = SyncEngineTests.MemoryServer()
+        let mac = try GRASPDatabase.inMemory(), phone = try GRASPDatabase.inMemory()
+        let macSync = SyncEngine(database: mac), phoneSync = SyncEngine(database: phone)
+        try macSync.enable(accountUserId: "u", uploadExisting: true)
+        try phoneSync.enable(accountUserId: "u", uploadExisting: false)
+
+        try await mac.queue.write { try Study.saveLearnStreak(LearnStreak(count: 4), db: $0) }
+        try await macSync.sync(using: server)
+        try await phoneSync.sync(using: server)
+        #expect(try await phone.queue.read { try Study.learnStreak(db: $0) }.count == 4)
+
+        // The phone carries on, then a miss there ends it on the Mac too.
+        try await phone.queue.write { try Study.saveLearnStreak(LearnStreak(count: 5), db: $0) }
+        try await phone.queue.write { try Study.saveLearnStreak(LearnStreak(count: 5).after(correct: false), db: $0) }
+        try await phoneSync.sync(using: server)
+        try await macSync.sync(using: server)
+        #expect(try await mac.queue.read { try Study.learnStreak(db: $0) }.count == 0)
     }
 }

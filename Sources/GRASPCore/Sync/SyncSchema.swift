@@ -43,6 +43,7 @@ public enum SyncSchema {
         Table(name: "studyGuidePartDeck", primaryKey: ["guideId", "partIndex", "deckId"]),
         Table(name: "skillRating", primaryKey: ["guideId", "skillId"]),
         Table(name: "excludedFolder", primaryKey: ["folderPath"]),
+        Table(name: "learnStreak", primaryKey: ["id"]),
     ]
 
     public static func table(named name: String) -> Table? {

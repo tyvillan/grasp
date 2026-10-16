@@ -939,6 +939,15 @@ final class AppStore {
         reload()
     }
 
+    /// The Learn streak, shared between devices.
+    func learnStreak() -> LearnStreak {
+        (try? database.queue.read { try Study.learnStreak(db: $0) }) ?? LearnStreak()
+    }
+
+    func saveLearnStreak(_ streak: LearnStreak) {
+        try? database.queue.write { try Study.saveLearnStreak(streak, db: $0) }
+    }
+
     /// How much of a deck has been proven understood -- the same
     /// `learnState.level == mastered` signal `markCard`, Learn mode, and
     /// test filtering all share, surfaced here for progress bars.

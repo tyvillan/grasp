@@ -171,7 +171,7 @@ A view that uses the tokens needs no check of its own.
 - **Learn streak.** From the third right answer in a row, a flame banner
   ("3 correct in a row") appears under the answer and a flame chip with the count
   sits in the header; each further right answer updates it, and the first miss
-  ends it ("Streak ended at N"). It is kept on the device between visits to Learn (`LearnStreakStore`, not synced) and ends only on a miss.
+  ends it ("Streak ended at N"). It is saved in the synced `learnStreak` row (newest write wins), so it carries between visits and between the Mac and iPhone, and ends only on a miss.
   One 0.32 s entrance (flame scales in, six embers rise once and fade); under
   Reduce Motion the flame only fades in. Flame and embers use `accent` and
   `brand`, no new colour. Rule lives in `LearnStreak` (core).

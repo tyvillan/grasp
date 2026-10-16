@@ -492,6 +492,15 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("v18_learn_streak") { db in
+            try db.create(table: "learnStreak") { t in
+                t.column("id", .text).primaryKey()
+                t.column("count", .integer).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 
