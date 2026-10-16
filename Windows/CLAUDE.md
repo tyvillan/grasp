@@ -349,3 +349,4 @@ Update (2026-10-15): comebacks now include cards still being learned, not only u
 
 ## Learn streak (Mac session note, 2026-10-16)
 New core type `Sources/GRASPCore/Study/LearnStreak.swift` (count, `after(correct:)`, `isOn` from 3, `headline`, `endedCaption`). Nothing stored or synced. Windows Learn can show a flame banner and header chip from the third right answer in a row, ending at the first miss. See DESIGN.md "Learn streak".
+Update: the streak now persists between Learn visits via `LearnStreakStore` (UserDefaults key `learnStreak.count`, per device, not synced, no schema). Windows can keep its own count in local settings the same way.

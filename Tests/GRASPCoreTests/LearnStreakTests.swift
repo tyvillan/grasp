@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import GRASPCore
 
@@ -32,5 +33,32 @@ import Testing
 
     @Test func negativeCountClampsToZero() {
         #expect(LearnStreak(count: -4).count == 0)
+    }
+}
+
+@Suite struct LearnStreakStoreTests {
+    private func fresh() -> UserDefaults {
+        let name = "streak-test-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    @Test func startsAtZero() {
+        #expect(LearnStreakStore(defaults: fresh()).load().count == 0)
+    }
+
+    @Test func survivesReopening() {
+        let d = fresh()
+        LearnStreakStore(defaults: d).save(LearnStreak(count: 6))
+        #expect(LearnStreakStore(defaults: d).load() == LearnStreak(count: 6))
+    }
+
+    @Test func aMissClearsTheSavedStreak() {
+        let d = fresh()
+        let store = LearnStreakStore(defaults: d)
+        store.save(LearnStreak(count: 6))
+        store.save(store.load().after(correct: false))
+        #expect(LearnStreakStore(defaults: d).load().count == 0)
     }
 }
