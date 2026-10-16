@@ -34,6 +34,11 @@ struct StubQuestionGenerator: CardGenerator {
         deckName: String, courseName: String, noteContext: String, cardTerms: [String],
         subject: ProblemSubject, kinds: [ProblemKind], count: Int
     ) async -> [GeneratedProblem] {
+        // `GRASP_STUB_DELAY=<seconds>` slows each request so the progress
+        // and Stop controls can be photographed.
+        if let text = ProcessInfo.processInfo.environment["GRASP_STUB_DELAY"], let seconds = Double(text), seconds > 0 {
+            try? await Task.sleep(for: .seconds(seconds))
+        }
         guard kinds.contains(.multipleChoice) else { return [] }
         if isEvolution(noteContext) {
             return [

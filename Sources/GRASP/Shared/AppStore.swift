@@ -255,6 +255,10 @@ final class AppStore {
     func refreshGeneratorStatus() async {
         let generator = await CardGenerators.select()
         isGeneratorAvailable = !(generator is NoGenerator)
+        #if DEBUG
+        // Screenshots only: `GRASP_STUB_NO_MODEL=1` shows the no-model wording.
+        if StubHooks.enabled("GRASP_STUB_NO_MODEL") { isGeneratorAvailable = false }
+        #endif
         let keyState = AIKeyStore.state()
         hasCloudKey = keyState == .ready
         cloudKeyProblem = Self.describe(keyState)

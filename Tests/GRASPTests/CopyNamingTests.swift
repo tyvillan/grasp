@@ -33,3 +33,27 @@ struct CopyNamingTests {
         #expect(!text.lowercased().contains("question"))
     }
 }
+
+@Suite("Background choice upgrade placement")
+struct ChoiceUpgradePlacementTests {
+    private func sources() throws -> [(name: String, text: String)] {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        var out: [(String, String)] = []
+        for dir in ["Sources/GRASP", "GRASPiOS/App"] {
+            guard let walker = FileManager.default.enumerator(at: root.appendingPathComponent(dir), includingPropertiesForKeys: nil) else { continue }
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                out.append((url.lastPathComponent, try String(contentsOf: url, encoding: .utf8)))
+            }
+        }
+        return out
+    }
+
+    @Test("the upgrade starts when the Questions tab opens and nowhere else, never from Test setup")
+    func startsOnlyFromQuestionsTab() throws {
+        let callers = try sources().filter { $0.text.contains("addMissingChoicesInBackground()") && $0.name != "CodeQuestionStore.swift" }
+        #expect(callers.map(\.name) == ["QuestionsTab.swift"])
+        let testSetup = try #require(sources().first { $0.name == "TestFlowView.swift" })
+        #expect(!testSetup.text.contains("addMissingChoices"))
+    }
+}

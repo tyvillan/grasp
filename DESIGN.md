@@ -121,7 +121,14 @@ A view that uses the tokens needs no check of its own.
   "From <note>", with Approve, Edit and Delete, and "Approve all", which approves only
   drafts that pass every check. A run ends with a banner ("Wrote 7 draft questions") and,
   when something was dropped, "3 dropped: 2 repeats, 1 unclear" with "See why". Drafts
-  never count toward the card draft number.
+  never count toward the card draft number. The model line and the Google line sit at
+  the top of the sheet, above the notes, so they are seen before the button. A draft
+  that fails a check on Approve all stays under To review with the reason on its row.
+  "What was dropped" scrolls inside its sheet. The deck tabs keep their words at 800 pt
+  even with the draft count (a tighter padding step before falling back to icons).
+  Debug builds with `-GRASPAllowStubs 1` and `GRASP_STUB_QUESTIONS=1` never read the
+  Keychain (`AIKeyStore.skipsKeychain`), so demo and screenshot runs cannot raise a
+  password prompt.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.

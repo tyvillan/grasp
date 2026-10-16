@@ -632,6 +632,9 @@ struct DeckDetailView: View {
                 // pane is too tight for the title and the words together.
                 ViewThatFits(in: .horizontal) {
                     contentTabSwitch(labeled: true)
+                    // The same words with less padding, for when the draft
+                    // count beside Questions takes the room.
+                    contentTabSwitch(labeled: true, tight: true)
                     contentTabSwitch(labeled: false)
                 }
             }
@@ -966,7 +969,7 @@ struct DeckDetailView: View {
 
     /// The Cards / Overview switch: two large, labelled buttons rather than
     /// a small segmented control, since it changes what the whole pane is.
-    private func contentTabSwitch(labeled: Bool) -> some View {
+    private func contentTabSwitch(labeled: Bool, tight: Bool = false) -> some View {
         HStack(spacing: 4) {
             ForEach(availableTabs) { tab in
                 let selected = contentTab == tab
@@ -995,7 +998,7 @@ struct DeckDetailView: View {
                         }
                     }
                     .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
-                    .padding(.horizontal, labeled ? 16 : 12)
+                    .padding(.horizontal, labeled ? (tight ? 9 : 16) : 12)
                     .frame(height: 32)
                     .background {
                         if selected {

@@ -29,6 +29,8 @@ struct QuestionsTab: View {
     @State private var editing: TestQuestion?
     @State private var pendingDelete: TestQuestion?
     @State private var approveMessage: String?
+    /// Why a draft stayed under To review after Approve all or Approve.
+    @State private var notApproved: [String: String] = [:]
     @State private var showingDrops = false
 
     #if DEBUG
@@ -72,6 +74,7 @@ struct QuestionsTab: View {
                         QuestionRow(
                             question: question, history: history[question.id],
                             noteTitle: question.materialId.flatMap { noteTitles[$0] },
+                            notApprovedReason: notApproved[question.id],
                             onEdit: { editing = question },
                             onApprove: { approve(question) },
                             onSetStatus: { store.setQuestionStatus(question.id, to: $0) },
@@ -96,8 +99,13 @@ struct QuestionsTab: View {
         #if DEBUG
         .task {
             // Screenshots only, with the canned writer on.
-            guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), debugShow == "approveall" else { return }
+            guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), debugShow == "approveall" || debugShow == "editdraft" else { return }
             try? await Task.sleep(for: .milliseconds(900))
+            if debugShow == "editdraft" {
+                filter = .review
+                editing = questions.first { $0.statusKind == .draft }
+                return
+            }
             filter = .review
             approveAll()
         }
@@ -153,11 +161,13 @@ struct QuestionsTab: View {
     private func approve(_ question: TestQuestion) {
         if let why = store.approveQuestion(question.id) {
             approveMessage = "Not approved. " + why + " Edit it, or delete it."
+            notApproved[question.id] = why
         }
     }
 
     private func approveAll() {
         let result = store.approveAllQuestions(inDecks: deckIds)
+        notApproved = Dictionary(uniqueKeysWithValues: result.skipped.map { ($0.id, $0.reason) })
         var text = "Approved \(result.approved) question\(result.approved == 1 ? "" : "s")."
         if !result.skipped.isEmpty {
             text += " \(result.skipped.count) stayed under To review because \(result.skipped.count == 1 ? "it" : "they") failed a check."
@@ -237,25 +247,44 @@ struct DroppedQuestionsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let drops: [DraftDrop]
 
+    /// A long list scrolls inside the sheet instead of growing past the
+    /// window it opened over.
+    private var sheetHeight: CGFloat? {
+        #if os(macOS)
+        let parent = NSApp.mainWindow?.contentLayoutRect.height ?? 820
+        return min(640, max(360, parent - 40))
+        #else
+        return nil
+        #endif
+    }
+
     var body: some View {
         GRASPSheet(eyebrow: "Generate with AI", title: "What was dropped",
                    message: "These were written but not kept. Each failed a check or repeated a question you already have.",
-                   icon: "tray", width: 520) {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(drops) { drop in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(drop.text).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(reasonLine(drop))
-                            .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .popupGroup(padding: 12)
-                }
-            }
+                   icon: "tray", width: 520, height: sheetHeight) {
+            #if os(macOS)
+            ScrollView { dropList }
+            #else
+            dropList
+            #endif
         } footer: {
             Spacer()
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }
+    }
+
+    private var dropList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(drops) { drop in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(drop.text).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(reasonLine(drop))
+                        .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .popupGroup(padding: 12)
+            }
         }
     }
 
@@ -296,6 +325,7 @@ private struct QuestionRow: View {
     let question: TestQuestion
     let history: QuestionHistory?
     let noteTitle: String?
+    var notApprovedReason: String? = nil
     let onEdit: () -> Void
     let onApprove: () -> Void
     let onSetStatus: (QuestionStatus) -> Void
@@ -325,12 +355,19 @@ private struct QuestionRow: View {
                             .foregroundStyle(GRASPColor.textTertiary)
                             .lineLimit(1)
                     }
+                    if isDraft, let notApprovedReason {
+                        Label("Not approved. " + notApprovedReason, systemImage: "exclamationmark.circle")
+                            .font(.graspUI(size: 12, weight: .medium))
+                            .foregroundStyle(GRASPColor.rejected)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     HStack(spacing: 8) {
                         if isDraft {
                             Text(noteTitle.map { "From \($0)" } ?? "Draft")
                                 .font(.graspUI(size: 12))
                                 .foregroundStyle(GRASPColor.textTertiary)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text(history?.line ?? "Not asked yet")
                                 .font(.graspUI(size: 12))

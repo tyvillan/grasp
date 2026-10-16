@@ -15,6 +15,22 @@ import Security
 /// `read()` returns nil there and Cloud mode stays unavailable.
 public enum AIKeyStore {
     static let service = "com.tyvillan.grasp.ai"
+
+    #if DEBUG
+    /// Debug builds only: screenshot and demo runs with a stand-in model
+    /// (`-GRASPAllowStubs 1` plus `GRASP_STUB_QUESTIONS=1`) never touch the
+    /// Keychain, so no password prompt can appear. Release builds have
+    /// neither this flag nor the counter, and every other run is unchanged.
+    nonisolated(unsafe) public static var skipsKeychain: Bool = fromEnvironment()
+    /// How many real Keychain calls were made, for the test that proves
+    /// the flag keeps this at zero.
+    nonisolated(unsafe) public static var keychainCalls = 0
+
+    private static func fromEnvironment() -> Bool {
+        UserDefaults.standard.bool(forKey: "GRASPAllowStubs")
+            && ProcessInfo.processInfo.environment["GRASP_STUB_QUESTIONS"] == "1"
+    }
+    #endif
     static let account = "gemini"
 
     /// Cleans up what was pasted and says what's wrong with it, if anything.
@@ -57,6 +73,9 @@ public enum AIKeyStore {
     public static func read() -> String? { fetch().key }
 
     public static func state() -> KeyState {
+        #if DEBUG
+        if skipsKeychain { return ProcessInfo.processInfo.environment["GRASP_STUB_KEY"] == "1" ? .ready : .missing }
+        #endif
         let (key, status, found) = fetch()
         if key != nil { return .ready }
         if found { return .empty }
@@ -69,6 +88,15 @@ public enum AIKeyStore {
 
     /// `found`: an item came back, whatever it held.
     private static func fetch() -> (key: String?, status: Int32, found: Bool) {
+        #if DEBUG
+        if skipsKeychain {
+            // `GRASP_STUB_KEY=1` pretends a key is saved, so Cloud mode's own
+            // wording can be photographed. It is not a key and goes nowhere.
+            return ProcessInfo.processInfo.environment["GRASP_STUB_KEY"] == "1"
+                ? ("stub-key-for-screenshots-only", 0, true) : (nil, -1, false)
+        }
+        keychainCalls += 1
+        #endif
         #if canImport(Security)
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -100,6 +128,9 @@ public enum AIKeyStore {
     /// was stored.
     @discardableResult
     public static func save(_ key: String) -> Bool {
+        #if DEBUG
+        if skipsKeychain { return true }
+        #endif
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         delete()
         guard !trimmed.isEmpty else { return true }
@@ -132,6 +163,10 @@ public enum AIKeyStore {
     }
 
     public static func delete() {
+        #if DEBUG
+        if skipsKeychain { return }
+        keychainCalls += 1
+        #endif
         #if canImport(Security)
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

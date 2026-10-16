@@ -41,6 +41,9 @@ struct GenerateQuestionsSheet: View {
             icon: AIGlyph.symbol, width: 500
         ) {
             VStack(alignment: .leading, spacing: 14) {
+                // Which model, the cost, and where the text goes come first,
+                // so they are seen before the button, not below the fold.
+                notices
                 notesGroup
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -78,7 +81,6 @@ struct GenerateQuestionsSheet: View {
                     }
                 }
                 .popupGroup()
-                notices
             }
         } footer: {
             Button("Cancel") { dismiss() }
