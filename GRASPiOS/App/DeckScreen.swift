@@ -13,6 +13,8 @@ struct DeckScreen: View {
     @State private var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "deckContentTab") ?? "") ?? .cards
     /// Opens the editor for a new question on the Questions tab.
     @State private var writingQuestion = false
+    /// DEBUG screenshots only: the Add menu's items in a popover (see `DebugLaunch.showAddMenu`).
+    @State private var showingAddItemsPreview = false
     @State private var cards: [Card] = []
     @State private var dueCount = 0
     @State private var studying = false
@@ -200,6 +202,7 @@ struct DeckScreen: View {
             case "overview": tab = .overview
             case "questions": tab = .questions
             case "writequestion": tab = .questions; writingQuestion = true
+            case "addmenu": tab = .questions; showingAddItemsPreview = DebugLaunch.showAddMenu
             default: break
             }
         }
@@ -300,15 +303,29 @@ struct DeckScreen: View {
     /// Questions tab: write a question now; the other two ways in are coming.
     private var questionsAddMenu: some View {
         Menu {
-            Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
-            Button("Generate questions with AI (coming soon)") {}
-                .disabled(true)
-            Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
-                .disabled(true)
+            questionsAddItems
         } label: {
             Label("Add", systemImage: "plus")
         }
         .accessibilityLabel("Add a question")
+        #if DEBUG
+        .popover(isPresented: $showingAddItemsPreview) {
+            VStack(alignment: .leading, spacing: 4) { questionsAddItems }
+                .buttonStyle(.plain)
+                .padding(16)
+                .presentationCompactAdaptation(.popover)
+        }
+        #endif
+    }
+
+    /// The three ways to add a question, as the menu lists them.
+    @ViewBuilder
+    private var questionsAddItems: some View {
+        Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
+        Button("Generate questions with AI (coming soon)") {}
+            .disabled(true)
+        Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
+            .disabled(true)
     }
 
     private var actionsMenu: some View {

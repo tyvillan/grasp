@@ -117,24 +117,30 @@ private struct QuestionRow: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                // The details wrap under the prompt on a narrow screen.
-                FlowLine {
-                    SourceBadge(source: question.sourceKind)
-                    Text(question.summaryLine)
-                        .font(.graspUI(size: 12))
-                        .foregroundStyle(GRASPColor.textTertiary)
-                    Text(history?.line ?? "Not asked yet")
-                        .font(.graspUI(size: 12))
-                        .foregroundStyle(GRASPColor.textTertiary)
-                        .monospacedDigit()
-                    if isSuspended {
-                        Label("Suspended", systemImage: "pause.circle")
-                            .font(.graspUI(size: 12, weight: .medium))
-                            .foregroundStyle(GRASPColor.rejected)
-                    } else if question.statusKind == .draft {
-                        Text("Draft")
-                            .font(.graspUI(size: 12, weight: .medium))
-                            .foregroundStyle(GRASPColor.textSecondary)
+                // The same two lines for every row, at any width: where it
+                // came from and what kind it is, then how it did lately.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        SourceBadge(source: question.sourceKind)
+                        Text(question.summaryLine)
+                            .font(.graspUI(size: 12))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .lineLimit(1)
+                    }
+                    HStack(spacing: 8) {
+                        Text(history?.line ?? "Not asked yet")
+                            .font(.graspUI(size: 12))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                            .monospacedDigit()
+                        if isSuspended {
+                            Label("Suspended", systemImage: "pause.circle")
+                                .font(.graspUI(size: 12, weight: .medium))
+                                .foregroundStyle(GRASPColor.rejected)
+                        } else if question.statusKind == .draft {
+                            Text("Draft")
+                                .font(.graspUI(size: 12, weight: .medium))
+                                .foregroundStyle(GRASPColor.textSecondary)
+                        }
                     }
                 }
             }
@@ -184,18 +190,6 @@ struct SourceBadge: View {
         .overlay(Capsule().strokeBorder(GRASPColor.hairline, lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Source: \(source.label)")
-    }
-}
-
-/// Items in a line that wraps when the row is narrow.
-private struct FlowLine<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { content() }
-            VStack(alignment: .leading, spacing: 5) { content() }
-        }
     }
 }
 

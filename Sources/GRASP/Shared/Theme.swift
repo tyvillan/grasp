@@ -564,13 +564,18 @@ extension View {
     @ViewBuilder
     func adaptiveStudySheet(minWidth: CGFloat = 680, minHeight: CGFloat = 560) -> some View {
         #if os(macOS)
+        // Opens at 1000 x 820, but never bigger than the window it opens
+        // over: at an 800 pt window a 1000 pt sheet hung 100 pt off each side.
+        let parent = NSApp.mainWindow?.contentLayoutRect.size ?? CGSize(width: 1000, height: 820)
+        let idealWidth = min(1000, max(minWidth, parent.width - 24))
+        let idealHeight = min(820, max(minHeight, parent.height - 24))
         if #available(macOS 15.0, *) {
-            self.frame(minWidth: minWidth, idealWidth: 1000, maxWidth: .infinity,
-                       minHeight: minHeight, idealHeight: 820, maxHeight: .infinity)
+            self.frame(minWidth: minWidth, idealWidth: idealWidth, maxWidth: .infinity,
+                       minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)
                 .presentationSizing(.page)
         } else {
-            self.frame(minWidth: minWidth, idealWidth: 1000, maxWidth: .infinity,
-                       minHeight: minHeight, idealHeight: 820, maxHeight: .infinity)
+            self.frame(minWidth: minWidth, idealWidth: idealWidth, maxWidth: .infinity,
+                       minHeight: minHeight, idealHeight: idealHeight, maxHeight: .infinity)
         }
         #else
         self

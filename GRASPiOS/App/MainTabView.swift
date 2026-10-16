@@ -33,18 +33,23 @@ struct MainTabView: View {
                     TodayView()
                         .navigationDestination(item: $widgetDeck) { DeckScreen(route: $0) }
                 }
+                .toolbarVisibility(.hidden, for: .tabBar)
             }
             Tab(value: "study") {
                 NavigationStack { CoursesView() }
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
             Tab(value: "calendar") {
                 NavigationStack { CalendarScreen() }
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
             Tab(value: "settings") {
                 NavigationStack { SettingsScreen(onSwitchProfile: onSwitchProfile) }
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
             Tab(value: "search") {
                 NavigationStack { SearchScreen() }
+                    .toolbarVisibility(.hidden, for: .tabBar)
             }
         }
         .toolbar(.hidden, for: .tabBar)

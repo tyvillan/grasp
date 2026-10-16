@@ -244,6 +244,9 @@ struct TestSetupSheet: View {
                             .toggleStyle(GRASPSwitchStyle())
                             Text("Questions made from this deck's cards.")
                                 .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                            aiOption
+                                .padding(.leading, 20)
+                                .padding(.top, 8)
                         }
                         Rectangle().fill(GRASPColor.hairline).frame(height: 1)
                         VStack(alignment: .leading, spacing: 4) {
@@ -258,27 +261,6 @@ struct TestSetupSheet: View {
                     }
                     .popupGroup()
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle(isOn: Binding(
-                            get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
-                        )) {
-                            HStack(spacing: 6) {
-                                Image(systemName: AIGlyph.symbol)
-                                    .font(.graspUI(size: 11, weight: .semibold))
-                                    .foregroundStyle(GRASPColor.accent)
-                                Text("Include AI-written questions")
-                            }
-                        }
-                        .toggleStyle(GRASPSwitchStyle())
-                        .disabled(!store.isFlashcardQuizEnabled)
-                        Text(store.isFlashcardQuizEnabled
-                             ? "Fresh questions written by AI for this test only, alongside the flashcards. They aren't saved. Needs Written on."
-                             : "Goes with the flashcards, so it is off while flashcards are off.")
-                            .graspType(.meta)
-                            .foregroundStyle(GRASPColor.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .popupGroup()
                 }
 
                 if let problem = Study.testSourcesProblem(includeFlashcards: guide != nil || store.isFlashcardQuizEnabled,
@@ -328,6 +310,37 @@ struct TestSetupSheet: View {
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
         }
+    }
+
+    /// "Add fresh AI questions": part of the flashcard side, so it sits under
+    /// "Quiz me on flashcards", indented. Dimmed, with the reason, when it
+    /// cannot do anything: flashcards off, or Written off (AI questions are
+    /// typed answers).
+    private var aiOption: some View {
+        let flashcards = store.isFlashcardQuizEnabled
+        let available = flashcards && allowWritten
+        return VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: Binding(
+                get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
+            )) {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol)
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                    Text("Add fresh AI questions")
+                }
+            }
+            .toggleStyle(GRASPSwitchStyle())
+            .disabled(!available)
+            Text(!flashcards ? "Turn on Quiz me on flashcards to use this."
+                 : !allowWritten ? "Turn on Written to use this."
+                 : "Written by AI for this test only. Not saved.")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .opacity(available ? 1 : 0.45)
+        .animation(Motion.fade, value: available)
     }
 
     /// What "Include questions" will do, in a line.
@@ -653,12 +666,16 @@ struct TestRunView: View {
             choiceList(question)
         case .trueFalse:
             VStack(spacing: 18) {
-                Text(question.statement ?? "")
-                    .graspType(.studyAnswer)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: 640)
+                // A saved true/false question's prompt is its statement;
+                // showing it again underneath read as a mistake.
+                if let statement = question.statement, statement != question.prompt {
+                    Text(statement)
+                        .graspType(.studyAnswer)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 640)
+                }
                 HStack(spacing: 10) {
                     trueFalseButton("True", question)
                     trueFalseButton("False", question)

@@ -174,6 +174,15 @@ struct DeckDetailView: View {
         case overview = "Overview", cards = "Cards", questions = "Questions"
         var id: String { rawValue }
 
+        /// The tooltip, which says what the tab holds.
+        var help: String {
+            switch self {
+            case .overview: return "Overview: a summary of the notes behind this deck"
+            case .cards: return "Cards: the flashcards in this deck"
+            case .questions: return "Questions: practice questions for tests"
+            }
+        }
+
         var symbol: String {
             switch self {
             case .overview: return "doc.text.fill"
@@ -619,7 +628,12 @@ struct DeckDetailView: View {
                 // does from the same position. The filter row is also gated
                 // on having cards, and Overview has to stay reachable for a
                 // deck whose cards are all still drafts.
-                contentTabSwitch
+                // Words when they fit (they do at 800 pt), icons when the
+                // pane is too tight for the title and the words together.
+                ViewThatFits(in: .horizontal) {
+                    contentTabSwitch(labeled: true)
+                    contentTabSwitch(labeled: false)
+                }
             }
 
             // Study modes on the left; on the right, what this view can do
@@ -681,21 +695,21 @@ struct DeckDetailView: View {
 
     @ViewBuilder
     private var studyModeButtons: some View {
-        modeButton("Study", "rectangle.stack.fill", prominent: true) { isStudying = true }
+        modeButton("Study", "rectangle.stack.fill", prominent: true, help: "Study the cards that are due, one at a time") { isStudying = true }
             .disabled(dueCount == 0)
-        modeButton("Learn", "graduationcap.fill", prominent: false) {
+        modeButton("Learn", "graduationcap.fill", prominent: false, help: "Learn this deck in short rounds") {
             isLearning = true
         }
         .disabled(activeCount == 0)
         if let unfinishedTest {
-            modeButton("Continue Test (\(unfinishedTest.answered)/\(unfinishedTest.total))", "play.fill", prominent: false) {
+            modeButton("Continue Test (\(unfinishedTest.answered)/\(unfinishedTest.total))", "play.fill", prominent: false,
+                       help: "Pick up the test you left, at the next question") {
                 testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
             }
-            .help("Pick up the test you left, at the next question")
         }
         // Test is never dimmed while the deck has cards. With none approved
         // yet it explains itself instead of looking broken.
-        modeButton("Test", "checklist", prominent: false) {
+        modeButton("Test", "checklist", prominent: false, help: "Take a test on this deck's flashcards, saved questions, or both") {
             if activeCount == 0 {
                 cardRefineResult = CardRefineMessage(
                     icon: "checklist", title: "Approve some cards first",
@@ -705,7 +719,6 @@ struct DeckDetailView: View {
             }
         }
         .disabled(cards.isEmpty)
-        .help("A graded quiz on this deck's cards")
     }
 
     /// The right side of the toolbar, which follows the Cards / Overview
@@ -946,7 +959,7 @@ struct DeckDetailView: View {
 
     /// The Cards / Overview switch: two large, labelled buttons rather than
     /// a small segmented control, since it changes what the whole pane is.
-    private var contentTabSwitch: some View {
+    private func contentTabSwitch(labeled: Bool) -> some View {
         HStack(spacing: 4) {
             ForEach(availableTabs) { tab in
                 let selected = contentTab == tab
@@ -956,7 +969,7 @@ struct DeckDetailView: View {
                     HStack(spacing: 7) {
                         Image(systemName: tab.symbol)
                             .font(.graspUI(size: 13))
-                        if !isCompact {
+                        if labeled {
                             Text(tab.rawValue)
                                 .font(.graspUI(size: 14, weight: .semibold))
                                 .lineLimit(1)
@@ -964,7 +977,7 @@ struct DeckDetailView: View {
                         }
                     }
                     .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
-                    .padding(.horizontal, isCompact ? 12 : 18)
+                    .padding(.horizontal, labeled ? 16 : 12)
                     .frame(height: 32)
                     .background {
                         if selected {
@@ -977,7 +990,7 @@ struct DeckDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.rawValue)
-                .help(tab.rawValue)
+                .help(tab.help)
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
@@ -988,7 +1001,7 @@ struct DeckDetailView: View {
 
     @ViewBuilder
     private func modeButton(
-        _ title: String, _ symbol: String, prominent: Bool, action: @escaping () -> Void
+        _ title: String, _ symbol: String, prominent: Bool, help: String, action: @escaping () -> Void
     ) -> some View {
         let label = HStack(spacing: 5) {
             Image(systemName: symbol).font(.graspUI(size: 11))
@@ -996,10 +1009,10 @@ struct DeckDetailView: View {
         }
         if prominent {
             Button(action: action) { label }.buttonStyle(GRASPProminentButton())
-                .accessibilityLabel(title).help(isCompact ? title : "")
+                .accessibilityLabel(title).accessibilityHint(help).help(help)
         } else {
             Button(action: action) { label }.buttonStyle(GRASPQuietButton())
-                .accessibilityLabel(title).help(isCompact ? title : "")
+                .accessibilityLabel(title).accessibilityHint(help).help(help)
         }
     }
 

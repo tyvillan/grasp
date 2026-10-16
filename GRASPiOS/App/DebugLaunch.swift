@@ -25,6 +25,10 @@ enum DebugLaunch {
     static var simulateGeneration: Bool { env["GRASP_SIM_GENERATE"] == "1" }
     /// Deck screen: open the Approve All confirmation (nothing is approved).
     static var confirmApproveAll: Bool { env["GRASP_CONFIRM_APPROVE"] == "1" }
+    /// Deck screen, Questions tab: show the Add menu's items in a popover,
+    /// because a menu cannot be opened without a tap and the headless
+    /// simulator has none. For screenshots only.
+    static var showAddMenu: Bool { env["GRASP_SHOW_ADD_MENU"] == "1" }
     #else
     static let skipWelcome = false
     static let course: String? = nil
@@ -35,5 +39,6 @@ enum DebugLaunch {
     static let select = false
     static let simulateGeneration = false
     static let confirmApproveAll = false
+    static let showAddMenu = false
     #endif
 }
