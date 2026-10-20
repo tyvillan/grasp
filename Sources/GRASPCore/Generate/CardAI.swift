@@ -178,64 +178,125 @@ public enum CardAI {
         }
 
         let progress = AIProgress.current
-        var checked = 0
         let byMaterial = Dictionary(grouping: candidates, by: { $0.materialId! })
-        noteLoop: for (materialId, materialCards) in byMaterial {
+        // Every card that has a note to be checked against, with that note's text.
+        var work: [(card: Card, context: String, courseName: String)] = []
+        var skipped = 0
+        for (materialId, materialCards) in byMaterial {
             guard let context = await noteText(materialId, database: database), !context.isEmpty else {
-                // No call made, but counted so the bar reaches the end.
-                checked += materialCards.count
-                progress?.advance(materialCards.count)
+                skipped += materialCards.count
                 continue
             }
             let courseName = courseNameByMaterial[materialId] ?? ""
-            for card in materialCards {
-                if Task.isCancelled { break noteLoop }
+            work += materialCards.map { ($0, context, courseName) }
+        }
+        // No call made for these, but counted so the bar reaches the end.
+        if skipped > 0 { progress?.advance(skipped) }
+
+        // Several cards are checked at once when the model is a cloud one; a local model answers
+        // one request at a time, so asking it for more only makes each take longer.
+        let width = contextCheckWidth(for: generator)
+        var checked = skipped
+        var next = 0
+        await withTaskGroup(of: (Int, ContextValidation?).self) { group in
+            func start() {
+                guard next < work.count, !Task.isCancelled else { return }
+                let index = next
+                next += 1
+                let item = work[index]
+                group.addTask {
+                    if Task.isCancelled { return (index, nil) }
+                    let result = await generator.validateContext(
+                        front: item.card.front, back: item.card.back, noteContext: item.context, courseName: item.courseName)
+                    return (index, Task.isCancelled ? nil : result)
+                }
+            }
+            for _ in 0..<width { start() }
+            while let (index, result) = await group.next() {
                 checked += 1
                 progress?.begin("Checking card \(checked) of \(candidates.count)")
-                let result = await generator.validateContext(
-                    front: card.front, back: card.back, noteContext: context, courseName: courseName)
                 progress?.advance()
-                if Task.isCancelled { break noteLoop }
-                do {
-                    switch result.verdict {
-                    case .valid:
-                        continue
-                    case .refine(let newBack):
-                        // "Not defined in the notes" is not a better answer.
-                        if CardQuality.isRefusal(newBack) { continue }
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            if updated.originalBack == nil { updated.originalBack = updated.back }
-                            updated.back = newBack
-                            updated.isContextRefined = true
-                            updated.updatedAt = Date()
-                            try updated.save(db)
-                        }
-                        summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
-                    case .reject:
-                        try await database.queue.write { db in
-                            guard var updated = try Card.fetchOne(db, key: card.id) else { return }
-                            updated.deletedAt = Date()
-                            updated.updatedAt = Date()
-                            try updated.save(db)
-                        }
-                        summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
-                    }
-                } catch {
-                    continue
+                if let result {
+                    let item = work[index]
+                    await apply(result, to: item.card, courseName: item.courseName, database: database, summary: &summary)
                 }
+                if Task.isCancelled { group.cancelAll() } else { start() }
             }
         }
         return summary
     }
 
+    /// How many cards are checked at the same time.
+    static func contextCheckWidth(for generator: any CardGenerator) -> Int {
+        (generator is CloudGenerator || generator is FallbackGenerator) ? 4 : 1
+    }
+
+    private static func apply(_ result: ContextValidation, to card: Card, courseName: String, database: GRASPDatabase,
+                              summary: inout ContextCheckSummary) async {
+        do {
+            switch result.verdict {
+            case .valid:
+                return
+            case .refine(let newBack):
+                // "Not defined in the notes" is not a better answer.
+                if CardQuality.isRefusal(newBack) { return }
+                try await database.queue.write { db in
+                    guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                    if updated.originalBack == nil { updated.originalBack = updated.back }
+                    updated.back = newBack
+                    updated.isContextRefined = true
+                    updated.updatedAt = Date()
+                    try updated.save(db)
+                }
+                summary.refined.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+            case .reject:
+                try await database.queue.write { db in
+                    guard var updated = try Card.fetchOne(db, key: card.id) else { return }
+                    updated.deletedAt = Date()
+                    updated.updatedAt = Date()
+                    try updated.save(db)
+                }
+                summary.removed.append(.init(cardId: card.id, front: card.front, courseName: courseName))
+            }
+        } catch {
+            return
+        }
+    }
+
+    /// Live cards that come from a note, by course: what the off-topic check would look at.
+    /// `unchecked` leaves out the ones the check already rewrote, which it does not look at again.
+    public static func cardCountsByCourse(unchecked: Bool = false, database: GRASPDatabase) async -> [String: Int] {
+        (try? await database.queue.read { db -> [String: Int] in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT material.courseId AS courseId, COUNT(*) AS n FROM card
+                JOIN material ON material.id = card.materialId
+                WHERE card.deletedAt IS NULL \(unchecked ? "AND card.isContextRefined = 0" : "")
+                GROUP BY material.courseId
+                """)
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0["courseId"] as String, $0["n"] as Int) })
+        }) ?? [:]
+    }
+
+    /// The off-topic check on these courses' cards only (every course when nil).
+    public static func sweepCards(inCourses courseIds: Set<String>?, using generator: any CardGenerator,
+                                  database: GRASPDatabase) async -> ContextCheckSummary {
+        guard let live = try? await database.queue.read({ db -> [Card] in
+            var cards = try Card.filter(Column("deletedAt") == nil).filter(Column("isContextRefined") == false).fetchAll(db)
+            if let courseIds {
+                let materials = try Material.filter(courseIds.contains(Column("courseId"))).fetchAll(db)
+                let allowed = Set(materials.map(\.id))
+                cards = cards.filter { $0.materialId.map(allowed.contains) ?? false }
+            }
+            return cards
+        }) else { return ContextCheckSummary() }
+        AIProgress.current?.expect(live.filter { $0.materialId != nil }.count)
+        return await verifyContext(of: live, using: generator, database: database)
+    }
+
     /// Every live card in the library, checked against its note -- the
     /// one-time sweep in Settings.
     public static func sweepAllCards(using generator: any CardGenerator, database: GRASPDatabase) async -> ContextCheckSummary {
-        guard let live = try? await database.queue.read({ try Card.filter(Column("deletedAt") == nil).fetchAll($0) })
-        else { return ContextCheckSummary() }
-        AIProgress.current?.expect(live.filter { $0.materialId != nil }.count)
-        return await verifyContext(of: live, using: generator, database: database)
+        await sweepCards(inCourses: nil, using: generator, database: database)
     }
 
     /// "Refine Deck with AI": the context check on every draft, then the

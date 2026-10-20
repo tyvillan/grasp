@@ -16,6 +16,8 @@ struct LibraryView: View {
     /// that found groups opens the review sheet instead.
     @State private var duplicateScanFoundNone = false
     @State private var contextSweepResult: AppStore.ContextCheckSummary?
+    @State private var choosingCourses = false
+    @State private var cardCounts: (all: [String: Int], unchecked: [String: Int]) = ([:], [:])
     private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
 
     private var totalCards: Int { store.deckCounts.values.reduce(0) { $0 + $1.cardCount } }
@@ -27,6 +29,8 @@ struct LibraryView: View {
                 header
                     .padding(.bottom, GRASPSpace.s)
                 vaultCard
+                    .revealOnAppear(index: 0)
+                coursesCard
                     .revealOnAppear(index: 0)
                 HStack(alignment: .top, spacing: GRASPSpace.l) {
                     LibraryHiddenTile(
@@ -51,6 +55,10 @@ struct LibraryView: View {
         }
         .background(GRASPColor.canvas)
         .navigationTitle("Library")
+        .task(id: store.revision) { cardCounts = await store.courseCardCounts() }
+        .sheet(isPresented: $choosingCourses) {
+            OffTopicCoursesSheet(unchecked: cardCounts.unchecked) { ids in sweepCardsForContext(inCourses: ids) }
+        }
         .sheet(isPresented: $showingArchivedCourses) { ArchivedCoursesSheet() }
         .sheet(isPresented: $showingExcludedFolders) { ExcludedFoldersSheet() }
         .sheet(isPresented: $showingDuplicateReview) {
@@ -162,6 +170,37 @@ struct LibraryView: View {
         .graspCard(padding: 24)
     }
 
+    // MARK: - Courses
+
+    /// Every course as a card, under the vault: where it sits, how many cards it has.
+    private var coursesCard: some View {
+        let semesterName = Dictionary(uniqueKeysWithValues: store.semesters.map { ($0.id, $0.name) })
+        let courses = store.coursesBySemester.values.joined().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: GRASPSpace.l) {
+            HStack {
+                SectionLabel("Courses")
+                Spacer()
+                Text("\(courses.count)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+            }
+            if courses.isEmpty {
+                Text("No courses yet. Import the vault to bring them in.")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: GRASPSpace.m, alignment: .top)], spacing: GRASPSpace.m) {
+                    ForEach(courses) { course in
+                        LibraryCourseCard(
+                            course: course, color: store.courseColor(course),
+                            subtitle: [course.code, course.semesterId.flatMap { semesterName[$0] }].compactMap { $0 }.joined(separator: " · "),
+                            cards: cardCounts.all[course.id] ?? 0
+                        )
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .graspCard(padding: 24)
+    }
+
     // MARK: - Checks
 
     private var checksCard: some View {
@@ -195,6 +234,9 @@ struct LibraryView: View {
                 detail: "Checks each card against its own note. A definition that reads like assignment instructions, or a vague fragment, is rewritten from the note or removed. Every change is listed afterwards and can be undone from the card's \u{201C}AI Refined\u{201D} badge."
             ) {
                 if sweepActivity == nil {
+                    Button("Choose courses…") { choosingCourses = true }
+                        .buttonStyle(GRASPQuietButton())
+                        .help("Check only the courses you pick. Much faster than the whole library")
                     Button {
                         sweepAllCardsForContext()
                     } label: {
@@ -279,6 +321,16 @@ struct LibraryView: View {
             ))
         }
         return sections
+    }
+
+    private func sweepCardsForContext(inCourses ids: Set<String>) {
+        let run = AIActivity(headline: ids.count == 1 ? "Checking one course against its notes" : "Checking \(ids.count) courses against their notes")
+        store.runAIJob(AppStore.sweepJobKey, activity: run) { [store] run in
+            let result = await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
+                await store.sweepCardsForContext(inCourses: ids)
+            }
+            if !(run.stopRequested && result.isEmpty) { contextSweepResult = result }
+        }
     }
 
     private func sweepAllCardsForContext() {
@@ -520,5 +572,119 @@ struct ExcludedFoldersSheet: View {
                 try? store.includeFolder(path)
             }
         }
+    }
+}
+
+/// One course in the Library's list: its colour, name, where it sits and how many cards it has.
+private struct LibraryCourseCard: View {
+    let course: Course
+    let color: Color
+    let subtitle: String
+    let cards: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle().fill(color).frame(width: 10, height: 10).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(course.name)
+                    .font(.graspUI(size: 14, weight: .semibold))
+                    .foregroundStyle(GRASPColor.textPrimary)
+                    .lineLimit(2)
+                if !subtitle.isEmpty {
+                    Text(subtitle).graspType(.meta).foregroundStyle(GRASPColor.textTertiary).lineLimit(1)
+                }
+                Text("\(cards) \(cards == 1 ? "card" : "cards")")
+                    .graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+        .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Pick the courses the off-topic check should look at. Checking everything is slow and uses a
+/// lot of the AI quota, so this starts with nothing ticked.
+struct OffTopicCoursesSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    /// Cards each course still has to be checked (ones already rewritten are not looked at again).
+    let unchecked: [String: Int]
+    let onStart: (Set<String>) -> Void
+    @State private var chosen: Set<String> = []
+
+    private var courses: [Course] {
+        store.coursesBySemester.values.joined().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    private var cardTotal: Int { chosen.reduce(0) { $0 + (unchecked[$1] ?? 0) } }
+
+    var body: some View {
+        GRASPSheet(
+            eyebrow: "Library", title: "Check Courses",
+            message: "Each card in the courses you tick is checked against its own note. One that reads like assignment text is rewritten from the note or removed, and every change is listed afterwards.",
+            icon: AIGlyph.symbol, width: 520
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Button("All") { chosen = Set(courses.filter { (unchecked[$0.id] ?? 0) > 0 }.map(\.id)) }
+                    Button("None") { chosen = [] }
+                    Spacer()
+                    Text("\(cardTotal) \(cardTotal == 1 ? "card" : "cards")").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                }
+                .buttonStyle(GRASPQuietButton())
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(courses.enumerated()), id: \.element.id) { index, course in
+                            if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                            let count = unchecked[course.id] ?? 0
+                            Button { toggle(course.id) } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: chosen.contains(course.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(chosen.contains(course.id) ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                                    CourseDot(color: store.courseColor(course), size: 8)
+                                    Text(course.name).font(.graspUI(size: 14, weight: .medium)).foregroundStyle(GRASPColor.textPrimary).lineLimit(1)
+                                    Spacer()
+                                    Text(count == 0 ? "nothing to check" : "\(count)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                                }
+                                .padding(.vertical, 10)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(count == 0)
+                        }
+                    }
+                    .padding(.horizontal, GRASPSpace.l)
+                }
+                .frame(maxHeight: 320)
+                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous).strokeBorder(GRASPColor.hairline))
+                if let warning = AIQuotaEstimate.warning(needed: AIQuotaEstimate.contextCheckRequests(cards: cardTotal), mode: store.aiMode),
+                   store.hasCloudKey {
+                    Label(warning, systemImage: "gauge.with.dots.needle.67percent")
+                        .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                }
+            }
+        } footer: {
+            Button("Cancel") { dismiss() }
+            Button {
+                onStart(chosen)
+                dismiss()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol).font(.graspUI(size: 11, weight: .semibold))
+                    Text(chosen.isEmpty ? "Check" : "Check \(chosen.count) \(chosen.count == 1 ? "course" : "courses")")
+                }
+            }
+            .buttonStyle(GRASPProminentButton())
+            .keyboardShortcut(.defaultAction)
+            .disabled(chosen.isEmpty)
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
     }
 }
