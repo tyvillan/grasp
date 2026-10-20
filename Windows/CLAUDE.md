@@ -374,3 +374,12 @@ Core: `QuestionBank.move(_:toDeck:db:)` and `copy(_:toDeck:now:db:)` return a `M
 
 ### Photo import, core part (Mac session note, 2026-10-20, branch `photo-import`, unfinished)
 Migration `v20_question_images` adds synced table `questionImage` (id, courseId, jpegBase64, width, height, status draft|ready, createdAt, deletedAt), local while `status` is draft, registered after `testQuestion`. Core: `QuestionSplitter`, `PhotoQuestionImporter`, `QuestionImages`, `QuestionBank.needsAnswerCheck` and `checkLabel`, and `CardGenerator.structurePhotoQuestion` (requirement with a nil default). v20 also adds `testQuestion.imageCrop` (a nullable "x,y,width,height" of page fractions). Sync sends pictures in requests of about 1.5 MB at most (`SyncEngine.pushBatchBytes`). `SyncTransport.pull` now takes a `scope`: `.rows` (everything but `questionImage`) and `.pictures`, pulled two per page with their own `syncState.pictureCursor` (v20); a picture failure is reported in `Report.pictureProblem` and retried, never blocking other rows. Any new transport must implement the scoped pull. Windows needs the migration and table entry to sync; reading photos (Vision) is Mac and iPhone only.
+
+## Parity item: first-run tutorial (UI only, Mac session, 2026)
+
+The Mac and iPhone apps now have an interactive first-run tutorial (`Sources/GRASP/Shared/Tutorial/`, pattern in `DESIGN.md`). The Windows app should get the same thing, as UI only: no core or schema change is needed.
+- Eight steps, in this order: welcome, courses, adding notes, deck tabs (waits for a tap on Cards, then Questions), Study / Learn / Test, the Add menus, "AI is optional", done. The wording is data in `TutorialSteps`; reuse it.
+- Dim the window, light up the real control, show a small coach card. Skip is always available. It only navigates and highlights: it must never import, generate or write anything but its own flag.
+- Runs on its own once, for a profile with no courses and no cards, and not for a profile signed in to an account. Replay from Settings and from the Help menu. The "seen" flag is per device and per profile and is not synced.
+- If a control is not on screen, show a plain card instead of faking it.
+
