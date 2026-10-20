@@ -93,6 +93,8 @@ public enum QuestionSplitter {
             }
         }
 
+        // A page title or instructions above the first numbered question are not a question.
+        if blocks.contains(where: { $0.number != nil }), blocks.first?.number == nil { blocks.removeFirst() }
         var questions = blocks.compactMap { parse($0.number, $0.lines) }
         for index in questions.indices where questions[index].answerLetter == nil {
             if let number = questions[index].number, let letter = key[number] { questions[index].answerLetter = letter }

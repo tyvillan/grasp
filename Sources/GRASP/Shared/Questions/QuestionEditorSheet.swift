@@ -20,6 +20,8 @@ struct QuestionEditorSheet: View {
     @FocusState private var promptFocused: Bool
 
     private var isEditing: Bool { editing != nil }
+    /// The picture a photo question was read from, if this device has it.
+    private var photoData: Data? { editing?.imageId.flatMap { store.questionImage($0)?.jpegData } }
 
     var body: some View {
         GRASPSheet(eyebrow: "Question", title: isEditing ? "Edit question" : "Write a question",
@@ -34,6 +36,21 @@ struct QuestionEditorSheet: View {
                 } else {
                     Text(input.kind.label)
                         .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                }
+
+                if let photo = photoData {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("Photo")
+                        DataImage(data: photo)
+                            .frame(maxWidth: .infinity, maxHeight: 220)
+                            .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                        if let editing, QuestionBank.needsAnswerCheck(editing) {
+                            Text("The photo did not print this answer. The AI wrote it, so check it against the photo before you save.")
+                                .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
 
                 if !isEditing, decks.count > 1 {

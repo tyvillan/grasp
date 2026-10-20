@@ -40,6 +40,9 @@ struct QuestionsTab: View {
     @State private var pick: DeckPick?
     /// Every deck of this course, for moving and copying.
     @State private var courseDecks: [Deck] = []
+    /// The pictures of photo questions, by image id, and the one being looked at.
+    @State private var photos: [String: Data] = [:]
+    @State private var viewingPhoto: Data?
     @State private var pendingBulkDelete = false
 
     #if DEBUG
@@ -101,6 +104,8 @@ struct QuestionsTab: View {
                                 question: question, history: history[question.id],
                                 noteTitle: question.materialId.flatMap { noteTitles[$0] },
                                 notApprovedReason: notApproved[question.id],
+                                photo: question.imageId.flatMap { photos[$0] },
+                                onOpenPhoto: { viewingPhoto = question.imageId.flatMap { photos[$0] } },
                                 selecting: selecting, isSelected: selectedIds.contains(question.id),
                                 onToggle: { toggle(question.id) },
                                 onEdit: { editing = question },
@@ -161,6 +166,9 @@ struct QuestionsTab: View {
         }
         .sheet(item: $editing, onDismiss: { notApproved = [:] }) { question in
             QuestionEditorSheet(decks: decks, editing: question)
+        }
+        .sheet(isPresented: Binding(get: { viewingPhoto != nil }, set: { if !$0 { viewingPhoto = nil } })) {
+            if let viewingPhoto { QuestionPhotoSheet(data: viewingPhoto) }
         }
         .sheet(item: $pick) { pick in
             QuestionDeckPickerSheet(mode: pick.mode, count: pick.ids.count, decks: courseDecks,
@@ -277,6 +285,10 @@ struct QuestionsTab: View {
         var reasons: [String: String] = [:]
         var approved = 0
         for question in chosen where question.statusKind == .draft {
+            if QuestionBank.needsAnswerCheck(question) {
+                reasons[question.id] = "Its answer was written by AI. Check it, then approve it yourself."
+                continue
+            }
             if let why = store.approveQuestion(question.id) { reasons[question.id] = why } else { approved += 1 }
         }
         notApproved = reasons
@@ -390,6 +402,11 @@ struct QuestionsTab: View {
         history = store.questionHistory(of: questions.map(\.id))
         noteTitles = store.noteTitles(forMaterials: Array(Set(questions.compactMap(\.materialId))))
         if let courseId { courseDecks = (try? store.decks(inCourse: courseId)) ?? [] }
+        var loaded: [String: Data] = [:]
+        for id in Set(questions.compactMap(\.imageId)) {
+            if let data = photos[id] ?? store.questionImage(id)?.jpegData { loaded[id] = data }
+        }
+        photos = loaded
         if drafts.isEmpty, filter == .review { filter = .all }
         hasLoaded = true
     }
@@ -486,6 +503,9 @@ private struct QuestionRow: View {
     let history: QuestionHistory?
     let noteTitle: String?
     var notApprovedReason: String? = nil
+    /// The photo this question was read from, when this device has it.
+    var photo: Data? = nil
+    var onOpenPhoto: () -> Void = {}
     var selecting = false
     var isSelected = false
     var onToggle: () -> Void = {}
@@ -509,6 +529,17 @@ private struct QuestionRow: View {
                     .padding(.top, 1)
                     .accessibilityHidden(true)
             }
+            if let photo {
+                Button(action: onOpenPhoto) {
+                    DataImage(data: photo, contentMode: .fill)
+                        .frame(width: 46, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(GRASPColor.hairlineStrong))
+                }
+                .buttonStyle(.plain)
+                .help("See the photo this was read from")
+                .accessibilityLabel("Photo this question was read from")
+            }
             VStack(alignment: .leading, spacing: 7) {
                 Text(question.promptText.isEmpty ? "(No text)" : question.promptText)
                     .font(.graspUI(size: 14, weight: .medium))
@@ -527,6 +558,12 @@ private struct QuestionRow: View {
                             .font(.graspUI(size: 12))
                             .foregroundStyle(GRASPColor.textTertiary)
                             .lineLimit(1)
+                    }
+                    if isDraft, QuestionBank.needsAnswerCheck(question) {
+                        Label("Check the answer", systemImage: "exclamationmark.circle")
+                            .font(.graspUI(size: 12, weight: .medium))
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .help("The photo did not print this answer. The AI wrote it, so check it before you approve")
                     }
                     if isDraft, let notApprovedReason {
                         Label("Not approved. " + notApprovedReason, systemImage: "exclamationmark.circle")
@@ -732,6 +769,24 @@ struct QuestionDeckPickerSheet: View {
         } footer: {
             Spacer()
             Button("Cancel") { dismiss() }
+        }
+    }
+}
+
+
+/// The photo a question was read from, full size.
+struct QuestionPhotoSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let data: Data
+
+    var body: some View {
+        GRASPSheet(eyebrow: "Question", title: "Photo", icon: "camera", width: 520) {
+            DataImage(data: data)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+        } footer: {
+            Spacer()
+            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
         }
     }
 }

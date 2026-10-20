@@ -110,6 +110,12 @@ struct QuestionSplitterTests {
         #expect(q.count == 1 && q[0].options.isEmpty)
     }
 
+    @Test("a title above the first numbered question is not a question")
+    func titleIsDropped() {
+        let q = QuestionSplitter.split("BIO 1010 Practice Quiz 2\n1. Name the powerhouse of the cell.\nAnswer: mitochondria")
+        #expect(q.count == 1 && q[0].number == 1)
+    }
+
     @Test("empty text gives no questions")
     func empty() {
         #expect(QuestionSplitter.split("  \n \n").isEmpty)
