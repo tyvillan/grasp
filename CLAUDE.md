@@ -9,10 +9,11 @@ Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
 - Build Mac (`./build.sh`) and iPhone (`GRASPiOS`) before reporting.
 - `main` is the main line. `study-guides` is kept at the same commit. `windows-app` only fast-forwards to it.
 
-## Branches (as of 2026-10-16)
+## Branches (as of 2026-10-20)
 - `main` = `study-guides` = `questions-tab`, all at the same commit (fast-forwarded, no merge commits). It contains the study guides, understanding meter, Test feeds the meter, Learn streak (synced), comebacks, two-miss drop, test defaults, suspend deck, stage colours, generation quality and the Questions tab (migration v19). Tag `main-before-questions-tab` marks the old `main`.
+- 2026-10-20: `main` also contains move/copy questions, photo import (migration v20: `questionImage`, `testQuestion.imageCrop`, `syncState.pictureCursor`; pictures sync apart from other rows in small pages) and `polish-1`. Tag `main-before-photo-import` marks the previous `main` (2f4b395). Branches `question-move-copy`, `photo-import` and `polish-1` are merged.
 - Not in `main`, each its own branch: `cloud-speed` (call timing, pacing, batched checks; conflicts with `AIKeyStore.swift` and `AnswerJudge.swift`, and adds required `CardGenerator` methods), `cpp-question-rules` (merges clean), `windows-app` (Windows session; `Windows/CLAUDE.md` will conflict, keep both sections). `cloud-speed-baseline` is a measurement copy, never merged.
-- The real library is at schema v19 only after the merged app is installed; before that it is v18.
+- The real library is at schema v20 once the Mac app built from this `main` has been opened on it; the phone needs a reinstall to match.
 
 ## Real data is off limits
 - Screenshots and UI tests must NEVER create real data. Use a copy of the
