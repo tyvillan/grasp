@@ -22,12 +22,22 @@ struct SyncEngineTests {
             }
         }
 
-        func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] {
+        var pullRequests: [(scope: SyncPullScope, count: Int, bytes: Int)] = []
+        /// When set, a pull of pictures throws, as if the server refused them.
+        var failPictures = false
+
+        func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope) async throws -> [SyncRecord] {
+            if scope == .pictures, failPictures { throw URLError(.timedOut) }
             let matching = rows.values
+                .filter { scope.includes(table: $0.table) }
                 .filter { since == nil || ($0.updatedAt ?? "") > since! }
                 .sorted { ($0.updatedAt ?? "") < ($1.updatedAt ?? "") }
-            return Array(matching.dropFirst(offset).prefix(limit))
+            let page = Array(matching.dropFirst(offset).prefix(limit))
+            pullRequests.append((scope, page.count, page.reduce(0) { $0 + SyncEngine.approximateSize($1) }))
+            return page
         }
+
+        func setFailPictures(_ fail: Bool) { failPictures = fail }
 
         var count: Int { rows.count }
     }
@@ -83,7 +93,7 @@ struct SyncEngineTests {
         actor Counting: SyncTransport {
             var batches: [Int] = []
             func push(_ records: [SyncRecord]) async throws { batches.append(records.count) }
-            func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] { [] }
+            func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope) async throws -> [SyncRecord] { [] }
         }
         let server = Counting()
         let mac = try Device()
@@ -265,5 +275,91 @@ struct SyncEngineTests {
         ]
         let decoded = try JSONDecoder().decode([String: SyncValue].self, from: JSONEncoder().encode(data))
         #expect(decoded == data)
+    }
+
+    private func seedPictures(_ device: Device, count: Int) throws {
+        try device.db.queue.write { db in
+            let course = Course(semesterId: nil, name: "Biology"); try course.insert(db)
+            let deck = Deck(courseId: course.id, name: "Cells"); try deck.insert(db)
+            let card = Card(materialId: nil, front: "Mitosis", back: "Cell division", origin: .manual, status: .active)
+            try card.insert(db)
+            try DeckCard(deckId: deck.id, cardId: card.id).insert(db)
+            for _ in 0..<count {
+                let image = try QuestionImages.save(jpeg: Data(repeating: 9, count: 550_000), width: 10, height: 10, courseId: course.id, db: db)
+                try QuestionImages.markReady(image.id, db: db)
+            }
+        }
+    }
+
+    @Test("many large photos arrive over several small pages, and nothing is lost")
+    func picturesPullInSmallPages() async throws {
+        let server = MemoryServer()
+        let mac = try Device()
+        try seedPictures(mac, count: 9)
+        try mac.engine.enable(accountUserId: "user-1", uploadExisting: true)
+        try await mac.engine.sync(using: server)
+
+        let phone = try Device()
+        try phone.engine.enable(accountUserId: "user-1", uploadExisting: false)
+        let report = try await phone.engine.sync(using: server)
+        #expect(report.pictureProblem == nil)
+        let have = try await phone.db.queue.read { try QuestionImage.fetchCount($0) }
+        #expect(have == 9)
+        let cards = try await phone.db.queue.read { try Card.fetchCount($0) }
+        #expect(cards == 1)
+        let pages = await server.pullRequests.filter { $0.scope == .pictures && $0.count > 0 }
+        #expect(pages.count >= 5)
+        #expect(pages.allSatisfy { $0.bytes <= 1_600_000 })
+        // A second sync finds nothing new and nothing is duplicated.
+        _ = try await phone.engine.sync(using: server)
+        #expect(try await phone.db.queue.read { try QuestionImage.fetchCount($0) } == 9)
+    }
+
+    @Test("a failure pulling photos leaves cards and questions arriving, and photos arrive on the next sync")
+    func pictureFailureDoesNotBlockTheRest() async throws {
+        let server = MemoryServer()
+        let mac = try Device()
+        try seedPictures(mac, count: 3)
+        try mac.engine.enable(accountUserId: "user-1", uploadExisting: true)
+        try await mac.engine.sync(using: server)
+
+        let phone = try Device()
+        try phone.engine.enable(accountUserId: "user-1", uploadExisting: false)
+        await server.setFailPictures(true)
+        let first = try await phone.engine.sync(using: server)
+        #expect(first.pictureProblem != nil)
+        #expect(try await phone.db.queue.read { try Card.fetchCount($0) } == 1)
+        #expect(try await phone.db.queue.read { try QuestionImage.fetchCount($0) } == 0)
+        await server.setFailPictures(false)
+        let second = try await phone.engine.sync(using: server)
+        #expect(second.pictureProblem == nil)
+        #expect(try await phone.db.queue.read { try QuestionImage.fetchCount($0) } == 3)
+    }
+
+    @Test("a picture that will not upload stays queued while everything else is sent")
+    func pictureFailureOnPush() async throws {
+        actor Picky: SyncTransport {
+            var pushed: [String] = []
+            var refusePictures = true
+            func setRefuse(_ v: Bool) { refusePictures = v }
+            func push(_ records: [SyncRecord]) async throws {
+                if refusePictures, records.contains(where: { $0.table == "questionImage" }) { throw URLError(.networkConnectionLost) }
+                pushed += records.map(\.table)
+            }
+            func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope) async throws -> [SyncRecord] { [] }
+        }
+        let server = Picky()
+        let mac = try Device()
+        try mac.engine.enable(accountUserId: "user-1", uploadExisting: false)
+        try seedPictures(mac, count: 2)
+        let first = try await mac.engine.sync(using: server)
+        #expect(first.pictureProblem != nil)
+        let sent = await server.pushed
+        #expect(sent.contains("card") && !sent.contains("questionImage"))
+        #expect(try mac.engine.status().pendingChanges == 2)
+        await server.setRefuse(false)
+        let second = try await mac.engine.sync(using: server)
+        #expect(second.pictureProblem == nil && second.pushed == 2)
+        #expect(try mac.engine.status().pendingChanges == 0)
     }
 }

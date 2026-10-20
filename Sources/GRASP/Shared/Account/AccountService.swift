@@ -248,9 +248,11 @@ struct SupabaseSyncTransport: SyncTransport {
         try await send()
     }
 
-    func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] {
+    func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope) async throws -> [SyncRecord] {
         var query = client.from("sync_rows")
             .select("user_id,table_name,row_key,data,deleted,device_id,updated_at")
+        query = scope == .rows ? query.neq("table_name", value: SyncPullScope.pictureTable)
+                               : query.eq("table_name", value: SyncPullScope.pictureTable)
         if let since { query = query.gt("updated_at", value: since) }
         let rows: [Row] = try await query
             .order("updated_at")

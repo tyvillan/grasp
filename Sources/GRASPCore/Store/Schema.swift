@@ -542,6 +542,11 @@ enum Schema {
             try db.alter(table: "testQuestion") { t in
                 t.add(column: "imageCrop", .text)
             }
+            // Pictures are pulled apart from the other rows, in small pages, with their own
+            // cursor, so a picture that fails to arrive never holds back cards or reviews.
+            try db.alter(table: "syncState") { t in
+                t.add(column: "pictureCursor", .text)
+            }
             try SyncSchema.installTriggers(db)
         }
 
