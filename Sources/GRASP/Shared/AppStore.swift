@@ -60,13 +60,14 @@ final class AppStore {
     /// How the notes folder is read: a vault laid out under `College`, any ordinary folder
     /// (each folder inside is a course), or whichever of the two the folder looks like.
     enum NotesLayout: String, CaseIterable, Identifiable {
-        case automatic, vault, folders
+        case automatic, vault, folders, none
         var id: String { rawValue }
         var title: String {
             switch self {
             case .automatic: return "Automatic"
             case .vault: return "Obsidian vault"
             case .folders: return "Any folder"
+            case .none: return "None"
             }
         }
     }
@@ -1826,6 +1827,10 @@ final class AppStore {
         isImporting = true
         importError = nil
         defer { isImporting = false }
+        guard notesLayout != .none else {
+            importError = "Folder reading is off. Add files to a course by hand instead."
+            return
+        }
         guard !vaultPath.isEmpty else {
             importError = "Choose your notes folder in Settings first."
             return

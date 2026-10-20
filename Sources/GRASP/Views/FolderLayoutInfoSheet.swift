@@ -8,7 +8,7 @@ struct FolderLayoutInfoSheet: View {
     @State private var layout: Layout
 
     enum Layout: String, CaseIterable, Identifiable {
-        case automatic = "Automatic", folders = "Any folder", vault = "Obsidian vault"
+        case automatic = "Automatic", vault = "Obsidian vault", folders = "Any folder", none = "None"
         var id: String { rawValue }
     }
 
@@ -17,6 +17,7 @@ struct FolderLayoutInfoSheet: View {
         case .automatic: _layout = State(initialValue: .automatic)
         case .vault: _layout = State(initialValue: .vault)
         case .folders: _layout = State(initialValue: .folders)
+        case .none: _layout = State(initialValue: .none)
         }
     }
 
@@ -60,6 +61,18 @@ struct FolderLayoutInfoSheet: View {
 
     private var rows: [Row] {
         switch layout {
+        case .none:
+            return [
+                Row(depth: 0, name: "On your Mac", isFolder: false, role: .chosen, isCaption: true),
+                Row(depth: 0, name: "My Notes", isFolder: true, role: .unread, detail: "GRASP does not look here"),
+                Row(depth: 1, name: "Biology", isFolder: true, role: .unread),
+                Row(depth: 2, name: "Week 1.md", isFolder: false, role: .unread),
+                Row(depth: 2, name: "Week 2.pdf", isFolder: false, role: .unread),
+                Row(depth: 0, name: "In GRASP, one course at a time", isFolder: false, role: .chosen, isCaption: true),
+                Row(depth: 0, name: "Biology", isFolder: true, role: .course, detail: "a course you make yourself"),
+                Row(depth: 1, name: "Week 1.md", isFolder: false, role: .note, detail: "you add it"),
+                Row(depth: 1, name: "Week 2.pdf", isFolder: false, role: .note, detail: "you add it"),
+            ]
         case .automatic:
             return [
                 Row(depth: 0, name: "If the folder has a College folder inside", isFolder: false, role: .chosen, isCaption: true),
@@ -105,6 +118,13 @@ struct FolderLayoutInfoSheet: View {
 
     private var points: [String] {
         switch layout {
+        case .none:
+            return [
+                "GRASP reads nothing from your disk on its own, and Import folder is turned off.",
+                "You bring each document in yourself: make a course, then use Add Files or Folder… on it and pick the files.",
+                "A file is only read when you choose it. If it changes later, add it again to bring the change in.",
+                "Choose this if you would rather keep GRASP away from your folders completely.",
+            ]
         case .automatic:
             return [
                 "GRASP looks for a College folder inside the folder you choose, every time you import.",
@@ -135,11 +155,7 @@ struct FolderLayoutInfoSheet: View {
             icon: "info.circle", width: 600
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                Picker("", selection: $layout) {
-                    ForEach(Layout.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                GRASPSegmented(selection: $layout, options: Layout.allCases.map { ($0, $0.rawValue) }, fillsWidth: true)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
@@ -148,7 +164,7 @@ struct FolderLayoutInfoSheet: View {
                                 .font(.graspUI(size: 10.5, weight: .semibold))
                                 .tracking(0.8)
                                 .foregroundStyle(GRASPColor.textTertiary)
-                                .padding(.top, row.name == "Otherwise" ? 14 : 0).padding(.bottom, 4)
+                                .padding(.top, row.name == rows.first?.name ? 0 : 14).padding(.bottom, 4)
                         } else {
                         HStack(spacing: 8) {
                             Image(systemName: row.isFolder ? "folder" : iconName(for: row.name))

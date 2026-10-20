@@ -138,9 +138,11 @@ struct LibraryView: View {
                     .padding(.vertical, 3)
                 }
                 .buttonStyle(GRASPProminentButton())
-                .disabled(store.isImporting)
+                .disabled(store.isImporting || store.notesLayout == .none)
+                .help(store.notesLayout == .none ? "Folder reading is off. Add files to a course by hand" : "")
             }
 
+            if store.notesLayout != .none {
             VStack(alignment: .leading, spacing: 6) {
                 FieldLabel("Folder")
                 HStack(spacing: GRASPSpace.s) {
@@ -159,6 +161,7 @@ struct LibraryView: View {
                         .buttonStyle(GRASPQuietButton())
                 }
             }
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -172,17 +175,13 @@ struct LibraryView: View {
                     .help("How GRASP reads your folder")
                     .accessibilityLabel("How GRASP reads your folder")
                 }
-                Picker("", selection: $store.notesLayout) {
-                    ForEach(AppStore.NotesLayout.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 420)
+                GRASPSegmented(selection: $store.notesLayout,
+                               options: AppStore.NotesLayout.allCases.map { ($0, $0.title) })
                 Text(layoutHelp)
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
-                if store.notesLayout != .vault {
+                if store.notesLayout == .automatic || store.notesLayout == .folders {
                     FieldLabel("Time frame for new courses (optional)").padding(.top, 6)
                     FieldChrome {
                         TextField("Fall 2026", text: $store.notesTimeframe)
@@ -192,6 +191,7 @@ struct LibraryView: View {
                 }
             }
 
+            if store.notesLayout != .none {
             HStack(spacing: 6) {
                 Image(systemName: "lock")
                     .font(.graspUI(size: 10, weight: .semibold))
@@ -199,6 +199,7 @@ struct LibraryView: View {
             }
             .graspType(.meta)
             .foregroundStyle(GRASPColor.textTertiary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .graspCard(padding: 24)
@@ -326,6 +327,7 @@ struct LibraryView: View {
         switch store.notesLayout {
         case .automatic: return "A folder with a College folder inside is read as a vault. Any other folder is read as courses."
         case .vault: return "Reads College/<Semester>/<Course>/ the way the Obsidian vault is laid out."
+        case .none: return "GRASP does not read any folder. You add each document yourself: make a course, then use Add Files or Folder… on it. Nothing is picked up from your disk unless you choose it."
         case .folders: return "Each folder inside this one becomes a course, named after the folder, with every note, PDF, Word, slide, notebook and picture below it. A time frame, if you type one, files them under that term."
         }
     }
