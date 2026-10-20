@@ -418,6 +418,18 @@ final class AppStore {
         return summary
     }
 
+    /// The same check on the chosen courses only.
+    func sweepCardsForContext(inCourses courseIds: Set<String>) async -> ContextCheckSummary {
+        let summary = await CardAI.sweepCards(inCourses: courseIds, using: await CardGenerators.select(), database: database)
+        reload()
+        return summary
+    }
+
+    /// How many cards each course has, and how many the off-topic check would look at.
+    func courseCardCounts() async -> (all: [String: Int], unchecked: [String: Int]) {
+        (await CardAI.cardCountsByCourse(database: database), await CardAI.cardCountsByCourse(unchecked: true, database: database))
+    }
+
     /// "Refine Deck with AI": the context check on every draft first (which
     /// removes or rewrites what isn't a real definition), then wording
     /// cleanup on what survives -- in that order, so an off-topic card isn't
