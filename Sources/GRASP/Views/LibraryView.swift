@@ -17,6 +17,7 @@ struct LibraryView: View {
     @State private var duplicateScanFoundNone = false
     @State private var contextSweepResult: AppStore.ContextCheckSummary?
     @State private var choosingCourses = false
+    @State private var showingLayoutInfo = false
     @State private var cardCounts: (all: [String: Int], unchecked: [String: Int]) = ([:], [:])
     private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
 
@@ -56,6 +57,7 @@ struct LibraryView: View {
         .background(GRASPColor.canvas)
         .navigationTitle("Library")
         .task(id: store.revision) { cardCounts = await store.courseCardCounts() }
+        .sheet(isPresented: $showingLayoutInfo) { FolderLayoutInfoSheet(starting: store.notesLayout) }
         .sheet(isPresented: $choosingCourses) {
             OffTopicCoursesSheet(unchecked: cardCounts.unchecked) { ids in sweepCardsForContext(inCourses: ids) }
         }
@@ -159,7 +161,17 @@ struct LibraryView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                FieldLabel("Layout")
+                HStack(spacing: 6) {
+                    FieldLabel("Layout")
+                    Button { showingLayoutInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(.graspUI(size: 13))
+                            .foregroundStyle(GRASPColor.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("How GRASP reads your folder")
+                    .accessibilityLabel("How GRASP reads your folder")
+                }
                 Picker("", selection: $store.notesLayout) {
                     ForEach(AppStore.NotesLayout.allCases) { Text($0.title).tag($0) }
                 }
