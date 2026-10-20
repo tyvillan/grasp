@@ -238,6 +238,75 @@ public enum QuestionBank {
         try record.save(db)
     }
 
+    // MARK: Moving and copying
+
+    public struct MoveResult: Sendable, Equatable {
+        /// Questions moved or copied.
+        public var changed = 0
+        /// Copies not made because the deck already has that question.
+        public var skippedRepeats = 0
+        public init(changed: Int = 0, skippedRepeats: Int = 0) { self.changed = changed; self.skippedRepeats = skippedRepeats }
+    }
+
+    /// Moves questions to another deck. A question keeps its history, source
+    /// and status. Its note link stays only when the note is in the new
+    /// deck's course, and its card link only when that card is in the new deck.
+    @discardableResult
+    public static func move(_ ids: [String], toDeck deckId: String, db: Database) throws -> MoveResult {
+        guard let deck = try Deck.fetchOne(db, key: deckId), deck.deletedAt == nil else {
+            throw QuestionBankError.invalid("That deck is gone.")
+        }
+        var result = MoveResult()
+        for id in ids {
+            guard var record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil,
+                  record.deckId != deckId else { continue }
+            relink(&record, toDeck: deck, db: db)
+            record.deckId = deckId
+            record.courseId = deck.courseId
+            try record.save(db)
+            result.changed += 1
+        }
+        return result
+    }
+
+    /// Copies questions into another deck as new questions (no history). A
+    /// question the deck already has, word for word, is not copied again.
+    @discardableResult
+    public static func copy(_ ids: [String], toDeck deckId: String, now: Date = Date(), db: Database) throws -> MoveResult {
+        guard let deck = try Deck.fetchOne(db, key: deckId), deck.deletedAt == nil else {
+            throw QuestionBankError.invalid("That deck is gone.")
+        }
+        var have = Set(try listing(inDecks: [deckId], db: db).map { $0.promptText.lowercased() })
+        var result = MoveResult()
+        for id in ids {
+            guard var record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil else { continue }
+            if !record.promptText.isEmpty, have.contains(record.promptText.lowercased()) { result.skippedRepeats += 1; continue }
+            relink(&record, toDeck: deck, db: db)
+            record.id = UUID().uuidString
+            record.deckId = deckId
+            record.courseId = deck.courseId
+            record.createdAt = now
+            try record.insert(db)
+            have.insert(record.promptText.lowercased())
+            result.changed += 1
+        }
+        return result
+    }
+
+    private static func relink(_ record: inout TestQuestion, toDeck deck: Deck, db: Database) {
+        if let materialId = record.materialId,
+           (try? Material.fetchOne(db, key: materialId))?.courseId != deck.courseId { record.materialId = nil }
+        if let cardId = record.cardId,
+           (try? DeckCard.filter(Column("deckId") == deck.id && Column("cardId") == cardId).fetchCount(db)) ?? 0 == 0 {
+            record.cardId = nil
+        }
+    }
+
+    /// Sets the status of several questions at once.
+    public static func setStatus(_ ids: [String], to status: QuestionStatus, db: Database) throws {
+        for id in ids { try setStatus(id, to: status, db: db) }
+    }
+
     /// The card a saved question helps, if that card still exists.
     public static func linkedCardId(ofQuestion id: String, db: Database) throws -> String? {
         guard let cardId = try TestQuestion.fetchOne(db, key: id)?.cardId,

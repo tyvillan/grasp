@@ -229,6 +229,78 @@ struct QuestionsTabTests {
         } == 16)
     }
 
+    // MARK: Moving and copying
+
+    private func twoDecks() throws -> (Library, String) {
+        let lib = try makeLibrary(cards: 2)
+        let other = try lib.db.queue.write { db -> String in
+            let deck = Deck(courseId: lib.courseId, name: "Module 2"); try deck.insert(db)
+            return deck.id
+        }
+        return (lib, other)
+    }
+
+    @Test("moving keeps a question's history, source and status and changes only its deck")
+    func moveKeepsEverything() throws {
+        let (lib, other) = try twoDecks()
+        let q1 = try lib.db.queue.write { try QuestionBank.create(mc("one?"), deckId: lib.deckId, db: $0) }
+        try lib.db.queue.write { try QuestionBank.setStatus(q1.id, to: .suspended, db: $0) }
+        let result = try lib.db.queue.write { try QuestionBank.move([q1.id], toDeck: other, db: $0) }
+        #expect(result == QuestionBank.MoveResult(changed: 1, skippedRepeats: 0))
+        let moved = try #require(try lib.db.queue.read { try TestQuestion.fetchOne($0, key: q1.id) })
+        #expect(moved.deckId == other && moved.courseId == lib.courseId)
+        #expect(moved.status == "suspended" && moved.source == "yours")
+        #expect(try lib.db.queue.read { try QuestionBank.listing(inDecks: [lib.deckId], db: $0) }.isEmpty)
+        // Moving to the deck it is already in changes nothing.
+        #expect(try lib.db.queue.write { try QuestionBank.move([q1.id], toDeck: other, db: $0) }.changed == 0)
+    }
+
+    @Test("moving drops a card link when the card is not in the new deck, and keeps it when it is")
+    func moveRelinksCard() throws {
+        let (lib, other) = try twoDecks()
+        let linked = try lib.db.queue.write { try QuestionBank.create(mc("linked?", card: lib.cardId), deckId: lib.deckId, db: $0) }
+        try lib.db.queue.write { _ = try QuestionBank.move([linked.id], toDeck: other, db: $0) }
+        #expect(try lib.db.queue.read { try TestQuestion.fetchOne($0, key: linked.id) }?.cardId == nil)
+        try lib.db.queue.write { try DeckCard(deckId: other, cardId: lib.cardId).insert($0) }
+        let again = try lib.db.queue.write { try QuestionBank.create(mc("again?", card: lib.cardId), deckId: lib.deckId, db: $0) }
+        try lib.db.queue.write { _ = try QuestionBank.move([again.id], toDeck: other, db: $0) }
+        #expect(try lib.db.queue.read { try TestQuestion.fetchOne($0, key: again.id) }?.cardId == lib.cardId)
+    }
+
+    @Test("copying makes new questions without history, and skips ones the deck already has")
+    func copyMakesNewQuestions() throws {
+        let (lib, other) = try twoDecks()
+        let q1 = try lib.db.queue.write { try QuestionBank.create(mc("alpha question text?"), deckId: lib.deckId, db: $0) }
+        let q2 = try lib.db.queue.write { try QuestionBank.create(mc("beta question text?"), deckId: lib.deckId, db: $0) }
+        let first = try lib.db.queue.write { try QuestionBank.copy([q1.id, q2.id], toDeck: other, db: $0) }
+        #expect(first.changed == 2 && first.skippedRepeats == 0)
+        let copies = try lib.db.queue.read { try QuestionBank.listing(inDecks: [other], db: $0) }
+        #expect(copies.count == 2 && Set(copies.map(\.id)).isDisjoint(with: [q1.id, q2.id]))
+        // The originals stay where they were.
+        #expect(try lib.db.queue.read { try QuestionBank.listing(inDecks: [lib.deckId], db: $0) }.count == 2)
+        let second = try lib.db.queue.write { try QuestionBank.copy([q1.id], toDeck: other, db: $0) }
+        #expect(second.changed == 0 && second.skippedRepeats == 1)
+    }
+
+    @Test("a deleted deck is refused with a plain sentence")
+    func moveToMissingDeck() throws {
+        let (lib, _) = try twoDecks()
+        let q1 = try lib.db.queue.write { try QuestionBank.create(mc("one?"), deckId: lib.deckId, db: $0) }
+        #expect(throws: QuestionBankError.self) { try lib.db.queue.write { _ = try QuestionBank.move([q1.id], toDeck: "nope", db: $0) } }
+    }
+
+    @Test("a draft that is moved stays a draft and stays local")
+    func moveDraftStaysLocal() throws {
+        let (lib, other) = try twoDecks()
+        let problem = ProblemQuestion(kind: .written, subject: .concepts, prompt: "What does a draft look like here?", answer: "Local only.")
+        let draft = TestQuestion(courseId: lib.courseId, deckId: lib.deckId, problem: problem, bodyJSON: problem.encoded() ?? "{}",
+                                 verifiedBy: "test", source: .ai, status: .draft)
+        try lib.db.queue.write { try draft.insert($0) }
+        try lib.db.queue.write { _ = try QuestionBank.move([draft.id], toDeck: other, db: $0) }
+        #expect(try lib.db.queue.read { try TestQuestion.fetchOne($0, key: draft.id) }?.status == "draft")
+        #expect(try lib.db.queue.read { try QuestionBank.draftCount(inDecks: [other], db: $0) } == 1)
+    }
+
     // MARK: Test switches
 
     @Test("neither switch on is refused in plain words")

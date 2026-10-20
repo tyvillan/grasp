@@ -129,6 +129,14 @@ A view that uses the tokens needs no check of its own.
   Debug builds with `-GRASPAllowStubs 1` and `GRASP_STUB_QUESTIONS=1` never read the
   Keychain (`AIKeyStore.skipsKeychain`), so demo and screenshot runs cannot raise a
   password prompt.
+- **Select, move and copy.** A "Select" button above the list turns on select mode: a
+  tick circle in front of each row, a bar with Done, the count, All and an Actions menu
+  (Approve for drafts, Move to deck, Copy to deck, Suspend, Reactivate, Delete). On the
+  Mac the bar stays at the top while the list scrolls; on the iPhone it scrolls with the
+  list (the tab sits in a List row, where a pinned header does not work). Each row's menu
+  also has Move to deck and Copy to deck. The picker lists the other decks of the same
+  course. A moved question keeps its history, source and status; a copy is new, with no
+  history, and is skipped if the deck already has that question word for word.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.

@@ -366,3 +366,7 @@ UI parity item for the Windows session, plus the data it needs. **Do not edit un
 
 ### Stage 2 follow-up: Keychain skip for demo runs (Mac session note, 2026-10-16, branch `questions-tab`)
 `AIKeyStore` (core) gained a DEBUG-only `skipsKeychain` flag, on only when the app is launched with `-GRASPAllowStubs 1` and `GRASP_STUB_QUESTIONS=1`. It makes `read`, `state`, `save` and `delete` return without touching the Keychain, so screenshot runs cannot raise a password prompt. It uses only Foundation, so it builds on Windows unchanged and does nothing in a release build. A `keychainCalls` counter exists for the test that proves no call is made.
+
+
+### Move and copy questions (Mac session note, 2026-10-20, branch `question-move-copy`)
+Core: `QuestionBank.move(_:toDeck:db:)` and `copy(_:toDeck:now:db:)` return a `MoveResult` (changed, skippedRepeats), and `setStatus(_ ids:...)` sets several at once. Move changes `deckId` and `courseId` only (history is by `questionId`, so it follows); the note link is cleared when the note is in another course and the card link when the card is not in the new deck. No schema change; the updates sync as ordinary `testQuestion` edits. UI is shared (`QuestionsTab`: Select mode, Actions menu, `QuestionDeckPickerSheet`); Windows needs its own screen for it.

@@ -32,10 +32,27 @@ struct QuestionsTab: View {
     /// Why a draft stayed under To review after Approve all or Approve.
     @State private var notApproved: [String: String] = [:]
     @State private var showingDrops = false
+    /// Select mode: tick several questions, then move, copy, suspend or delete them together.
+    @State private var selecting = false
+    @State private var selectedIds: Set<String> = []
+    @State private var pick: DeckPick?
+    /// Every deck of this course, for moving and copying.
+    @State private var courseDecks: [Deck] = []
+    @State private var pendingBulkDelete = false
 
     #if DEBUG
     private var debugShow: String? { ProcessInfo.processInfo.environment["GRASP_QUESTIONS_SHOW"] }
     #endif
+
+    /// On the Mac the bar stays put while the list scrolls under it. On the iPhone
+    /// the tab sits inside a List row, where a pinned header has nothing to pin to.
+    private static var pinnedBar: PinnedScrollableViews {
+        #if os(macOS)
+        [.sectionHeaders]
+        #else
+        []
+        #endif
+    }
 
     private var drafts: [TestQuestion] { questions.filter { $0.statusKind == .draft } }
     private var jobKey: String { store.questionDraftJobKey(courseId: courseId) }
@@ -64,26 +81,33 @@ struct QuestionsTab: View {
                 notice(approveMessage, icon: "checkmark.circle", tint: GRASPColor.success) { self.approveMessage = nil }
                     .padding(.horizontal, 18).padding(.top, 12)
             }
-            if !drafts.isEmpty { filterBar.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 4) }
-
             if hasLoaded && questions.isEmpty {
                 QuestionsEmptyState { isWriting = true }
             } else if hasLoaded {
-                LazyVStack(spacing: 0) {
-                    ForEach(shown) { question in
-                        QuestionRow(
-                            question: question, history: history[question.id],
-                            noteTitle: question.materialId.flatMap { noteTitles[$0] },
-                            notApprovedReason: notApproved[question.id],
-                            onEdit: { editing = question },
-                            onApprove: { approve(question) },
-                            onSetStatus: { store.setQuestionStatus(question.id, to: $0) },
-                            onDelete: {
-                                // A draft was never approved: deleting it needs no second question.
-                                if question.statusKind == .draft { store.deleteCodeQuestion(question.id) } else { pendingDelete = question }
-                            }
-                        )
-                        Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                // The bar stays at the top while a long list scrolls under it.
+                LazyVStack(spacing: 0, pinnedViews: Self.pinnedBar) {
+                    Section {
+                        ForEach(shown) { question in
+                            QuestionRow(
+                                question: question, history: history[question.id],
+                                noteTitle: question.materialId.flatMap { noteTitles[$0] },
+                                notApprovedReason: notApproved[question.id],
+                                selecting: selecting, isSelected: selectedIds.contains(question.id),
+                                onToggle: { toggle(question.id) },
+                                onEdit: { editing = question },
+                                onApprove: { approve(question) },
+                                onSetStatus: { store.setQuestionStatus(question.id, to: $0) },
+                                onMove: { pick = DeckPick(mode: .move, ids: [question.id]) },
+                                onCopy: { pick = DeckPick(mode: .copy, ids: [question.id]) },
+                                onDelete: {
+                                    // A draft was never approved: deleting it needs no second question.
+                                    if question.statusKind == .draft { store.deleteCodeQuestion(question.id) } else { pendingDelete = question }
+                                }
+                            )
+                            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                        }
+                    } header: {
+                        listBar
                     }
                 }
             }
@@ -99,8 +123,14 @@ struct QuestionsTab: View {
         #if DEBUG
         .task {
             // Screenshots only, with the canned writer on.
-            guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), debugShow == "approveall" || debugShow == "editdraft" else { return }
+            guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), ["approveall", "editdraft", "select", "pick"].contains(debugShow ?? "") else { return }
             try? await Task.sleep(for: .milliseconds(900))
+            if debugShow == "select" || debugShow == "pick" {
+                selecting = true
+                selectedIds = Set(shown.prefix(2).map(\.id))
+                if debugShow == "pick" { pick = DeckPick(mode: .move, ids: Array(selectedIds)) }
+                return
+            }
             if debugShow == "editdraft" {
                 filter = .review
                 editing = questions.first { $0.statusKind == .draft }
@@ -120,6 +150,22 @@ struct QuestionsTab: View {
         .sheet(item: $editing, onDismiss: { notApproved = [:] }) { question in
             QuestionEditorSheet(decks: decks, editing: question)
         }
+        .sheet(item: $pick) { pick in
+            QuestionDeckPickerSheet(mode: pick.mode, count: pick.ids.count, decks: courseDecks,
+                                    excluding: pick.mode == .move ? currentDeckIds(of: pick.ids) : []) { deck in
+                finishPick(pick, deck: deck)
+            }
+        }
+        .sheet(isPresented: $pendingBulkDelete) {
+            ConfirmationSheet(
+                icon: "trash", title: "Delete \(selectedIds.count) Questions?",
+                message: "They will no longer appear in tests. Past test results are kept.",
+                confirmTitle: "Delete"
+            ) {
+                store.deleteCodeQuestions(Array(selectedIds))
+                endSelecting()
+            }
+        }
         .sheet(item: $pendingDelete) { question in
             ConfirmationSheet(
                 icon: "trash", title: "Delete This Question?",
@@ -133,17 +179,114 @@ struct QuestionsTab: View {
 
     // MARK: Filter and approving
 
-    private var filterBar: some View {
+    /// The bar above the list: the filter pills and Select, or, while selecting, the count and Actions.
+    private var listBar: some View {
         HStack(spacing: 8) {
-            pill("All \(questions.count)", selected: filter == .all) { filter = .all }
-            pill("To review \(drafts.count)", selected: filter == .review) { filter = .review }
-            Spacer(minLength: 8)
-            if filter == .review {
-                Button("Approve all") { approveAll() }
+            if selecting {
+                Button("Done") { endSelecting() }.buttonStyle(GRASPQuietButton())
+                Text(selectedIds.isEmpty ? "Tick questions" : "\(selectedIds.count) selected")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textSecondary).monospacedDigit()
+                Spacer(minLength: 8)
+                Button(selectedIds.count == shown.count ? "None" : "All") {
+                    selectedIds = selectedIds.count == shown.count ? [] : Set(shown.map(\.id))
+                }
+                .buttonStyle(.plain).font(.graspUI(size: 12, weight: .semibold)).foregroundStyle(GRASPColor.textSecondary)
+                actionsMenu
+            } else {
+                if !drafts.isEmpty {
+                    pill("All \(questions.count)", selected: filter == .all) { filter = .all }
+                    pill("To review \(drafts.count)", selected: filter == .review) { filter = .review }
+                }
+                Spacer(minLength: 8)
+                if filter == .review, !drafts.isEmpty {
+                    Button("Approve all") { approveAll() }
+                        .buttonStyle(GRASPQuietButton())
+                        .help("Approves every draft that passes its checks. A draft that fails one stays here.")
+                }
+                Button("Select") { selecting = true }
                     .buttonStyle(GRASPQuietButton())
-                    .help("Approves every draft that passes its checks. A draft that fails one stays here.")
+                    .help("Pick several questions to move, copy, suspend or delete")
             }
         }
+        .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(GRASPColor.canvas)
+    }
+
+    private var actionsMenu: some View {
+        let chosen = questions.filter { selectedIds.contains($0.id) }
+        return Menu {
+            if chosen.contains(where: { $0.statusKind == .draft }) {
+                Button { approveSelected(chosen) } label: { Label("Approve", systemImage: "checkmark.circle") }
+            }
+            if courseDecks.count > 1 {
+                Button { pick = DeckPick(mode: .move, ids: Array(selectedIds)) } label: { Label("Move to deck…", systemImage: "arrow.right.circle") }
+                Button { pick = DeckPick(mode: .copy, ids: Array(selectedIds)) } label: { Label("Copy to deck…", systemImage: "doc.on.doc") }
+            }
+            if chosen.contains(where: { $0.statusKind == .active }) {
+                Button { store.setQuestionStatus(chosen.filter { $0.statusKind == .active }.map(\.id), to: .suspended) } label: {
+                    Label("Suspend", systemImage: "pause.circle")
+                }
+            }
+            if chosen.contains(where: { $0.statusKind == .suspended }) {
+                Button { store.setQuestionStatus(chosen.filter { $0.statusKind == .suspended }.map(\.id), to: .active) } label: {
+                    Label("Reactivate", systemImage: "play.circle")
+                }
+            }
+            Button(role: .destructive) { pendingBulkDelete = true } label: { Label("Delete…", systemImage: "trash") }
+        } label: {
+            Text("Actions")
+                .font(.graspUI(size: 13, weight: .semibold))
+                .foregroundStyle(GRASPColor.textPrimary)
+                .padding(.horizontal, 14).frame(height: 30)
+                .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(selectedIds.isEmpty)
+    }
+
+    // MARK: Selecting, moving and copying
+
+    private func toggle(_ id: String) {
+        if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) }
+    }
+
+    private func endSelecting() {
+        selecting = false
+        selectedIds = []
+    }
+
+    private func currentDeckIds(of ids: [String]) -> Set<String> {
+        Set(questions.filter { ids.contains($0.id) }.map(\.deckId))
+    }
+
+    private func approveSelected(_ chosen: [TestQuestion]) {
+        var reasons: [String: String] = [:]
+        var approved = 0
+        for question in chosen where question.statusKind == .draft {
+            if let why = store.approveQuestion(question.id) { reasons[question.id] = why } else { approved += 1 }
+        }
+        notApproved = reasons
+        approveMessage = "Approved \(approved) question\(approved == 1 ? "" : "s")."
+            + (reasons.isEmpty ? "" : " \(reasons.count) stayed under To review because \(reasons.count == 1 ? "it" : "they") failed a check.")
+        selectedIds = Set(reasons.keys)
+    }
+
+    private func finishPick(_ pick: DeckPick, deck: Deck) {
+        let noun = pick.ids.count == 1 ? "question" : "questions"
+        switch pick.mode {
+        case .move:
+            let result = store.moveQuestions(pick.ids, toDeck: deck.id)
+            approveMessage = result.map { "Moved \($0.changed) \(noun) to \(deck.name)." } ?? "That deck is gone."
+        case .copy:
+            let result = store.copyQuestions(pick.ids, toDeck: deck.id)
+            approveMessage = result.map {
+                "Copied \($0.changed) \(noun) to \(deck.name)."
+                    + ($0.skippedRepeats > 0 ? " \($0.skippedRepeats) already there." : "")
+            } ?? "That deck is gone."
+        }
+        endSelecting()
     }
 
     private func pill(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -234,6 +377,7 @@ struct QuestionsTab: View {
         questions = store.savedQuestions(inDecks: deckIds)
         history = store.questionHistory(of: questions.map(\.id))
         noteTitles = store.noteTitles(forMaterials: Array(Set(questions.compactMap(\.materialId))))
+        if let courseId { courseDecks = (try? store.decks(inCourse: courseId)) ?? [] }
         if drafts.isEmpty, filter == .review { filter = .all }
         hasLoaded = true
     }
@@ -330,9 +474,14 @@ private struct QuestionRow: View {
     let history: QuestionHistory?
     let noteTitle: String?
     var notApprovedReason: String? = nil
+    var selecting = false
+    var isSelected = false
+    var onToggle: () -> Void = {}
     let onEdit: () -> Void
     let onApprove: () -> Void
     let onSetStatus: (QuestionStatus) -> Void
+    var onMove: () -> Void = {}
+    var onCopy: () -> Void = {}
     let onDelete: () -> Void
 
     private var canEdit: Bool { UserQuestionInput(question) != nil }
@@ -341,6 +490,13 @@ private struct QuestionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            if selecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.graspUI(size: 18))
+                    .foregroundStyle(isSelected ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 7) {
                 Text(question.promptText.isEmpty ? "(No text)" : question.promptText)
                     .font(.graspUI(size: 14, weight: .medium))
@@ -387,20 +543,25 @@ private struct QuestionRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if isDraft {
-                Button("Approve", action: onApprove)
-                    .buttonStyle(GRASPQuietButton())
-                    .help("Approve this question so tests can ask it")
+            if !selecting {
+                if isDraft {
+                    Button("Approve", action: onApprove)
+                        .buttonStyle(GRASPQuietButton())
+                        .help("Approve this question so tests can ask it")
+                }
+                QuestionRowMenu(
+                    canEdit: canEdit, isSuspended: isSuspended, isDraft: isDraft, onEdit: onEdit, onApprove: onApprove,
+                    onSuspend: { onSetStatus(.suspended) }, onReactivate: { onSetStatus(.active) },
+                    onMove: onMove, onCopy: onCopy, onDelete: onDelete
+                )
             }
-            QuestionRowMenu(
-                canEdit: canEdit, isSuspended: isSuspended, isDraft: isDraft, onEdit: onEdit, onApprove: onApprove,
-                onSuspend: { onSetStatus(.suspended) }, onReactivate: { onSetStatus(.active) }, onDelete: onDelete
-            )
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+        .onTapGesture { if selecting { onToggle() } }
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
     }
 }
 
@@ -448,6 +609,8 @@ private struct QuestionRowMenu: View {
     let onApprove: () -> Void
     let onSuspend: () -> Void
     let onReactivate: () -> Void
+    var onMove: () -> Void = {}
+    var onCopy: () -> Void = {}
     let onDelete: () -> Void
 
     var body: some View {
@@ -462,6 +625,8 @@ private struct QuestionRowMenu: View {
                     : .action("Suspend", systemImage: "pause.circle",
                               help: "Keeps it, but it won't come up in tests") { onSuspend() })
             }
+            items.append(.action("Move to deck…", systemImage: "arrow.right.circle") { onMove() })
+            items.append(.action("Copy to deck…", systemImage: "doc.on.doc") { onCopy() })
             items.append(.divider)
             items.append(.action(isDraft ? "Delete" : "Delete…", systemImage: "trash", destructive: true) { onDelete() })
             return items
@@ -477,6 +642,8 @@ private struct QuestionRowMenu: View {
                     Button { onSuspend() } label: { Label("Suspend", systemImage: "pause.circle") }
                 }
             }
+            Button { onMove() } label: { Label("Move to deck", systemImage: "arrow.right.circle") }
+            Button { onCopy() } label: { Label("Copy to deck", systemImage: "doc.on.doc") }
             Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis")
@@ -487,5 +654,72 @@ private struct QuestionRowMenu: View {
         }
         .accessibilityLabel("Question actions")
         #endif
+    }
+}
+
+
+// MARK: - Moving and copying
+
+enum DeckPickMode { case move, copy }
+
+struct DeckPick: Identifiable {
+    let id = UUID()
+    let mode: DeckPickMode
+    let ids: [String]
+}
+
+/// Which deck to move or copy questions to, within the same course.
+struct QuestionDeckPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let mode: DeckPickMode
+    let count: Int
+    let decks: [Deck]
+    /// Decks that make no sense to pick (the one a moved question is already in).
+    let excluding: Set<String>
+    let onPick: (Deck) -> Void
+
+    private var choices: [Deck] { decks.filter { !excluding.contains($0.id) } }
+
+    var body: some View {
+        GRASPSheet(
+            eyebrow: "Questions",
+            title: mode == .move ? "Move to Deck" : "Copy to Deck",
+            message: mode == .move
+                ? "\(count) question\(count == 1 ? "" : "s") will move, keeping their history."
+                : "\(count) question\(count == 1 ? "" : "s") will be copied. The copies start with no history.",
+            icon: mode == .move ? "arrow.right.circle" : "doc.on.doc", width: 420
+        ) {
+            if choices.isEmpty {
+                Text("There is no other deck in this course.")
+                    .graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                    ForEach(choices) { deck in
+                        Button {
+                            onPick(deck)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(deck.name).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.right").font(.graspUI(size: 11, weight: .semibold))
+                                    .foregroundStyle(GRASPColor.textTertiary)
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 11)
+                            .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    }
+                }
+                .frame(maxHeight: 360)
+            }
+        } footer: {
+            Spacer()
+            Button("Cancel") { dismiss() }
+        }
     }
 }
