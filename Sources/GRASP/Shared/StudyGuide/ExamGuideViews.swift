@@ -387,7 +387,7 @@ private struct PartSection: View {
                 .font(.graspUI(size: 11))
                 .foregroundStyle(GRASPColor.textTertiary)
             if covered.isEmpty {
-                Text("No lecture deck yet — this guide is the only source for this part.")
+                Text("No lecture deck yet. This guide is the only source for this part.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             } else {
