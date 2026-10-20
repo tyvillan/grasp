@@ -254,6 +254,7 @@ public enum CodeQuestionBank {
         guard var question = try TestQuestion.fetchOne(db, key: id) else { return }
         question.deletedAt = now
         try question.save(db)
+        if let imageId = question.imageId { try QuestionImages.releaseIfUnused(imageId, now: now, db: db) }
     }
 
     /// Whether the note this was written from has changed since.

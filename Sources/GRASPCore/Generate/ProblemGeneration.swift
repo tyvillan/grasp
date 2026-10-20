@@ -13,11 +13,16 @@ public struct GeneratedProblem: Sendable, Equatable {
     /// A short Python program that prints the answer, for the checker to run.
     public var script: String?
     public var explanation: String?
+    /// Photo import: whether the page itself printed the answer (true), or the
+    /// model worked it out (false). Nil for problems written from notes.
+    public var answerGiven: Bool?
 
     public init(kind: ProblemKind, prompt: String, choices: [String] = [], correct: Int? = nil,
-                claimedAnswer: String = "", unit: String? = nil, script: String? = nil, explanation: String? = nil) {
+                claimedAnswer: String = "", unit: String? = nil, script: String? = nil, explanation: String? = nil,
+                answerGiven: Bool? = nil) {
         self.kind = kind; self.prompt = prompt; self.choices = choices; self.correct = correct
         self.claimedAnswer = claimedAnswer; self.unit = unit; self.script = script; self.explanation = explanation
+        self.answerGiven = answerGiven
     }
 }
 
@@ -89,9 +94,9 @@ extension OllamaGenerator {
         """
     }
 
-    private static let problemSections = ["KIND", "PROMPT", "CHOICES", "ANSWER", "UNIT", "SCRIPT", "EXPLANATION"]
+    private static let problemSections = ["KIND", "PROMPT", "CHOICES", "ANSWER", "UNIT", "SCRIPT", "EXPLANATION", "GIVEN"]
 
-    static func parseProblems(_ raw: String) -> [GeneratedProblem] {
+    static func parseProblems(_ raw: String, choiceCounts: ClosedRange<Int> = 4...4) -> [GeneratedProblem] {
         var blocks: [[String]] = []
         for line in raw.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -103,10 +108,10 @@ extension OllamaGenerator {
                 blocks[blocks.count - 1].append(line)
             }
         }
-        return blocks.compactMap(parseProblemBlock)
+        return blocks.compactMap { parseProblemBlock($0, choiceCounts: choiceCounts) }
     }
 
-    private static func parseProblemBlock(_ lines: [String]) -> GeneratedProblem? {
+    private static func parseProblemBlock(_ lines: [String], choiceCounts: ClosedRange<Int> = 4...4) -> GeneratedProblem? {
         var sections: [String: [String]] = [:]
         var current: String?
         for line in lines {
@@ -141,13 +146,14 @@ extension OllamaGenerator {
         if kind == .multipleChoice {
             for line in sections["CHOICES"] ?? [] {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if let match = trimmed.range(of: #"^\(?([A-Da-d])[\)\.:]\s*"#, options: .regularExpression) {
+                if let match = trimmed.range(of: #"^\(?([A-Fa-f])[\)\.:]\s*"#, options: .regularExpression) {
                     choices.append(String(trimmed[match.upperBound...]).trimmingCharacters(in: .whitespaces))
                 }
             }
-            guard choices.count == 4, Set(choices).count == 4 else { return nil }
-            if let letter = text("ANSWER").uppercased().first(where: { "ABCD".contains($0) }) {
-                correct = "ABCD".distance(from: "ABCD".startIndex, to: "ABCD".firstIndex(of: letter)!)
+            guard choiceCounts.contains(choices.count), Set(choices).count == choices.count else { return nil }
+            let letters = String("ABCDEF".prefix(choices.count))
+            if let letter = text("ANSWER").uppercased().first(where: { letters.contains($0) }) {
+                correct = letters.distance(from: letters.startIndex, to: letters.firstIndex(of: letter)!)
             }
             guard correct != nil else { return nil }
         }
@@ -165,7 +171,8 @@ extension OllamaGenerator {
             kind: kind, prompt: prompt, choices: choices, correct: correct, claimedAnswer: answer,
             unit: unit.isEmpty || unit.lowercased() == "none" ? nil : unit,
             script: script.isEmpty ? nil : script,
-            explanation: QuestionExplanation.clean(text("EXPLANATION").replacingOccurrences(of: "\n", with: " "))
+            explanation: QuestionExplanation.clean(text("EXPLANATION").replacingOccurrences(of: "\n", with: " ")),
+            answerGiven: sections["GIVEN"].map { $0.joined(separator: " ").lowercased().contains("yes") }
         )
     }
 
@@ -186,6 +193,50 @@ extension OllamaGenerator {
         }
         AIProgress.current?.setNote(nil)
         return []
+    }
+
+    /// Photo import: one question as the page printed it (text read by the
+    /// device, so it may carry odd spacing or a misread character), written out
+    /// clean. Nil when the text is not a question or no usable question came back.
+    public func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let prompt = Self.photoQuestionPrompt(text: String(trimmed.prefix(2500)), courseName: courseName)
+        for _ in 0..<2 {
+            if Task.isCancelled { return nil }
+            if let content = try? await chatText(prompt: prompt, maxTokens: 900),
+               let problem = Self.parseProblems(content, choiceCounts: 2...6).first { return problem }
+        }
+        return nil
+    }
+
+    static func photoQuestionPrompt(text: String, courseName: String) -> String {
+        """
+        Below is the text read by a scanner from a photo of one question on a \(courseName) exam or worksheet. It may \
+        have odd spacing or a misread character. Write it out as one clean question. Keep the original wording and \
+        every number; fix only obvious scanning mistakes. Do not invent a different question.
+
+        Kinds: multipleChoice (the options as printed, 2 to 6, A) to F)), written (the answer is a word, a number or a \
+        short phrase), trueFalse (a statement; ANSWER is True or False).
+        If the question has no printed options, write it as written or trueFalse. If the page prints the answer, copy it \
+        and set GIVEN: yes. If it does not, work out the answer yourself and set GIVEN: no.
+
+        Reply in exactly this layout, with no other text:
+        ### PROBLEM
+        KIND: one of the kinds above
+        PROMPT: the full question
+        CHOICES:
+        A) first option
+        B) second option
+        (CHOICES only for multipleChoice)
+        ANSWER: the letter for multipleChoice, otherwise the answer
+        GIVEN: yes or no
+        EXPLANATION: \(QuestionExplanation.styleRules)
+        ### END
+
+        Text from the photo:
+        \(text)
+        """
     }
 
     /// What a study-guide skill means, in two or three plain sentences.

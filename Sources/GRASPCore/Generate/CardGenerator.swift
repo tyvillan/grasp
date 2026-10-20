@@ -234,6 +234,11 @@ public protocol CardGenerator: Sendable {
     /// opinion on its answer key; nil when this generator can't say.
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int?
 
+    /// Photo import: one question as the page printed it, written out clean
+    /// (a requirement, with a default that answers nil, so each generator's
+    /// own is called). Nil when this generator can't say.
+    func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem?
+
     /// A plain explanation of one study-guide skill ("loops (for, while)"):
     /// what it is and what the student would be asked to do. nil when this
     /// generator can't say.
@@ -286,6 +291,8 @@ public extension CardGenerator {
     ) async -> [GeneratedProblem] { [] }
 
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? { nil }
+
+    func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? { nil }
 
     func explainSkill(_ skill: String, subject: String, context: String) async -> String? { nil }
 

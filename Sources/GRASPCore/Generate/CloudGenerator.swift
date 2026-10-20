@@ -126,6 +126,10 @@ public struct CloudGenerator: CardGenerator {
         await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
     }
 
+    public func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        await pipeline.structurePhotoQuestion(text: text, courseName: courseName)
+    }
+
     public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
         await pipeline.explainSkill(skill, subject: subject, context: context)
     }
@@ -445,6 +449,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { $0 != nil },
                   cloud: { await cloud.solveMultipleChoice(prompt: prompt, choices: choices) },
                   local: { await local.solveMultipleChoice(prompt: prompt, choices: choices) })
+    }
+
+    public func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        await run(keep: { $0 != nil },
+                  cloud: { await cloud.structurePhotoQuestion(text: text, courseName: courseName) },
+                  local: { await local.structurePhotoQuestion(text: text, courseName: courseName) })
     }
 
     public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {

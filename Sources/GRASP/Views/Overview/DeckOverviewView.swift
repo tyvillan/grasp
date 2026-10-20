@@ -251,7 +251,6 @@ struct DeckOverviewView: View {
             : parts.joined(separator: ", and ") + "."
     }
 
-    @ViewBuilder
     /// What a downloaded overview is called: the deck, the course, or the
     /// exam it was opened from.
     private var scopeTitle: String {

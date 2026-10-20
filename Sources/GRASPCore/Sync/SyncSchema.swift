@@ -52,6 +52,7 @@ public enum SyncSchema {
         Table(name: "card", primaryKey: ["id"]),
         Table(name: "deckCard", primaryKey: ["deckId", "cardId"]),
         Table(name: "testQuestion", primaryKey: ["id"], localOnly: (column: "status", value: "draft")),
+        Table(name: "questionImage", primaryKey: ["id"], localOnly: (column: "status", value: "draft")),
         Table(name: "review", primaryKey: ["id"]),
         Table(name: "learnState", primaryKey: ["cardId"]),
         Table(name: "testAttempt", primaryKey: ["id"]),

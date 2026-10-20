@@ -201,6 +201,15 @@ public enum QuestionBank {
         return "It can't be read."
     }
 
+    /// The marker a photo question carries while its answer is one the AI
+    /// worked out rather than one the page printed.
+    public static let answerCheckMarker = "answer written by AI: check it"
+
+    /// Whether a draft's answer was written by AI and has not been checked by you yet.
+    public static func needsAnswerCheck(_ record: TestQuestion) -> Bool {
+        record.verifiedBy.contains(answerCheckMarker)
+    }
+
     /// Approves one draft: it becomes active, and from then on it syncs.
     /// Returns why it was not approved, or nil on success. Nothing that fails
     /// a check is approved.
@@ -209,6 +218,12 @@ public enum QuestionBank {
         guard let record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil,
               record.statusKind == .draft else { return nil }
         if let why = approvalProblem(record) { return why }
+        // Approving it yourself is the check.
+        if needsAnswerCheck(record) {
+            var checked = record
+            checked.verifiedBy = record.verifiedBy.replacingOccurrences(of: answerCheckMarker, with: "answer written by AI, checked by you")
+            try checked.save(db)
+        }
         try setStatus(id, to: .active, db: db)
         return nil
     }
@@ -227,6 +242,11 @@ public enum QuestionBank {
     public static func approveAll(inDecks deckIds: [String], db: Database) throws -> ApproveAllResult {
         var result = ApproveAllResult()
         for draft in try drafts(inDecks: deckIds, db: db) {
+            // An answer the AI wrote is approved one question at a time, after you have looked at it.
+            if needsAnswerCheck(draft) {
+                result.skipped.append((draft.id, "Its answer was written by AI. Check it, then approve it yourself."))
+                continue
+            }
             if let why = try approve(draft.id, db: db) { result.skipped.append((draft.id, why)) } else { result.approved += 1 }
         }
         return result
@@ -236,6 +256,7 @@ public enum QuestionBank {
         guard var record = try TestQuestion.fetchOne(db, key: id), record.status != status.rawValue else { return }
         record.status = status.rawValue
         try record.save(db)
+        if status == .active, let imageId = record.imageId { try QuestionImages.markReady(imageId, db: db) }
     }
 
     /// The card a saved question helps, if that card still exists.
