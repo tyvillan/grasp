@@ -57,6 +57,29 @@ final class AppStore {
         didSet { UserDefaults.standard.set(vaultPath, forKey: Self.vaultPathKey(for: profile)) }
     }
 
+    /// How the notes folder is read: a vault laid out under `College`, any ordinary folder
+    /// (each folder inside is a course), or whichever of the two the folder looks like.
+    enum NotesLayout: String, CaseIterable, Identifiable {
+        case automatic, vault, folders
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .automatic: return "Automatic"
+            case .vault: return "Obsidian vault"
+            case .folders: return "Any folder"
+            }
+        }
+    }
+
+    var notesLayout: NotesLayout {
+        didSet { UserDefaults.standard.set(notesLayout.rawValue, forKey: "notesLayout.\(profile.id)") }
+    }
+
+    /// The term a plain folder's new courses are filed under ("Fall 2026"); empty for none.
+    var notesTimeframe: String {
+        didSet { UserDefaults.standard.set(notesTimeframe, forKey: "notesTimeframe.\(profile.id)") }
+    }
+
     /// Global, per-profile: when on, `startTest` mixes a few ephemeral,
     /// AI-generated written questions in alongside a test's real cards.
     /// Defaults off -- a new AI-mixing behavior shouldn't silently turn on
@@ -234,6 +257,8 @@ final class AppStore {
         // vault meant a second person's first Import pulled the owner's
         // notes into their profile -- the mixing profiles exist to prevent.
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? ""
+        self.notesLayout = NotesLayout(rawValue: UserDefaults.standard.string(forKey: "notesLayout.\(profile.id)") ?? "") ?? .automatic
+        self.notesTimeframe = UserDefaults.standard.string(forKey: "notesTimeframe.\(profile.id)") ?? ""
         let oldAIToggle = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
         self.isAITestQuestionsEnabled = oldAIToggle
         // The two switches are new. Until one has been set, it reads from
@@ -1807,7 +1832,9 @@ final class AppStore {
         }
         let root = URL(fileURLWithPath: vaultPath)
         do {
-            let summary = try await scanner.scan(vaultRoot: root)
+            let asVault = notesLayout == .vault || (notesLayout == .automatic && VaultScanner.hasVaultLayout(root))
+            let summary = asVault ? try await scanner.scan(vaultRoot: root)
+                                  : try await scanner.scanFolders(root: root, timeframe: notesTimeframe)
             lastImportSummary = summary
             if !summary.errors.isEmpty {
                 importError = summary.errors.first

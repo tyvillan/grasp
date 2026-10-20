@@ -110,7 +110,7 @@ struct LibraryView: View {
             HStack(alignment: .top, spacing: GRASPSpace.m) {
                 PopupIconTile(systemImage: "books.vertical")
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Obsidian vault")
+                    Text("Notes folder")
                         .font(.graspDisplay(22))
                         .tracking(-0.4)
                         .foregroundStyle(GRASPColor.textPrimary)
@@ -130,7 +130,7 @@ struct LibraryView: View {
                         } else {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.graspUI(size: 12, weight: .semibold))
-                            Text("Import vault")
+                            Text("Import folder")
                         }
                     }
                     .padding(.vertical, 3)
@@ -158,10 +158,32 @@ struct LibraryView: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                FieldLabel("Layout")
+                Picker("", selection: $store.notesLayout) {
+                    ForEach(AppStore.NotesLayout.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 420)
+                Text(layoutHelp)
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if store.notesLayout != .vault {
+                    FieldLabel("Time frame for new courses (optional)").padding(.top, 6)
+                    FieldChrome {
+                        TextField("Fall 2026", text: $store.notesTimeframe)
+                            .font(.graspUI(size: 13))
+                    }
+                    .frame(maxWidth: 260)
+                }
+            }
+
             HStack(spacing: 6) {
                 Image(systemName: "lock")
                     .font(.graspUI(size: 10, weight: .semibold))
-                Text("GRASP only reads from this folder. It never writes to your vault.")
+                Text("GRASP only reads from this folder. It never writes to it.")
             }
             .graspType(.meta)
             .foregroundStyle(GRASPColor.textTertiary)
@@ -288,8 +310,16 @@ struct LibraryView: View {
         .animation(Motion.fade, value: duplicateScanFoundNone)
     }
 
+    private var layoutHelp: String {
+        switch store.notesLayout {
+        case .automatic: return "A folder with a College folder inside is read as a vault. Any other folder is read as courses."
+        case .vault: return "Reads College/<Semester>/<Course>/ the way the Obsidian vault is laid out."
+        case .folders: return "Each folder inside this one becomes a course, named after the folder, with every note, PDF, Word, slide, notebook and picture below it. A time frame, if you type one, files them under that term."
+        }
+    }
+
     private var importSummaryText: String {
-        guard let summary = store.lastImportSummary else { return "Scan the vault for new or changed notes." }
+        guard let summary = store.lastImportSummary else { return "Scan the folder for new or changed notes." }
         var text = "Last import: \(summary.filesImportedOrUpdated) updated, \(summary.cardsCreated) cards created"
         if summary.duplicatesSkipped > 0 { text += ", \(summary.duplicatesSkipped) duplicates skipped" }
         return text
