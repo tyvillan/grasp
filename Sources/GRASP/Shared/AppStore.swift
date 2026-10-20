@@ -511,6 +511,8 @@ final class AppStore {
         case .noSourceNotes:
             return "None of these cards came from a note, so there is nothing to write new cards from."
         case .modelGaveNoAnswer(let reason):
+            // A cloud failure already says what happened and what to do.
+            if CloudFailureText.isOwn(reason) { return reason }
             return "The AI model didn't give a usable answer. \(reason) Try again, or check Settings → AI."
         case .writeFailed(let created, _):
             return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")

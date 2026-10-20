@@ -33,8 +33,16 @@ public enum CloudProvider {
     public static let usagePageURL = URL(string: "https://aistudio.google.com/rate-limit")!
     /// Used until the live model list has been read once.
     public static let fallbackModel = "gemini-2.5-flash"
-    /// Requests per minute the pacer keeps under.
-    public static let requestsPerMinute = 10
+    /// Requests per minute the pacer keeps under, for the chosen plan.
+    public static var requestsPerMinute: Int { AIPreferences.geminiPlan.requestsPerMinute }
+    /// Said while a request waits a long time for its turn.
+    public static var pacingNote: String {
+        AIPreferences.geminiPlan == .free
+            ? "GRASP sends one request every \(Int((60.0 / Double(requestsPerMinute)).rounded())) seconds to stay inside Google's free limit. Choose Paid in Settings if billing is on."
+            : "Waiting for a free slot in Google's request limit."
+    }
+    /// Said while one request has taken unusually long.
+    public static let slowNote = "Google is taking longer than usual to answer. GRASP is still waiting. You can stop at any time."
     /// The daily request allowance quota warnings plan against.
     public static let estimatedRequestsPerDay = 250
     /// The free tier resets at midnight Pacific.
@@ -57,6 +65,38 @@ public enum CloudProvider {
     }
 }
 
+/// Which Gemini plan the student's key is on. The pace of requests follows it.
+///
+/// Google no longer publishes fixed per-minute numbers (its rate-limit page
+/// says limits "depend on a variety of factors" and are shown per project
+/// in AI Studio), so these are conservative choices, not quotes: free is
+/// the long-standing 10 a minute for Flash models, paid is a rate far
+/// under what a billed project is normally given. A rate-limit reply is
+/// retried with a wait either way.
+public enum GeminiPlan: String, CaseIterable, Sendable {
+    case free, paid
+
+    public var requestsPerMinute: Int { self == .paid ? Self.paidRequestsPerMinute : Self.freeRequestsPerMinute }
+
+    /// The free pace: the long-standing limit for Flash models.
+    public static let freeRequestsPerMinute = 10
+    /// The paid pace. A conservative choice, not a quote from Google:
+    /// Google no longer publishes fixed numbers, and a billed project's
+    /// real limit is higher and shown per project in AI Studio. If a paid
+    /// key still gets a 429, the pacer halves this for the rest of the
+    /// session (`RequestPacer.halveRate`).
+    public static let paidRequestsPerMinute = 120
+    /// How many independent calls may be in flight at once.
+    public var concurrency: Int { self == .paid ? 4 : 1 }
+
+    /// The setting's explanation, in plain words.
+    public static func explanation(for raw: String) -> String {
+        raw == GeminiPlan.paid.rawValue
+            ? "Choose Paid if billing is turned on for your Google project. GRASP then sends requests faster and works on several things at once, so generating cards, overviews and study guides finishes sooner. If Google says it is going too fast, GRASP slows down and tries again."
+            : "Free is where every new Google AI Studio key starts. GRASP sends at most 10 requests a minute so Google does not turn requests away. Switch to Paid if billing is on for your project."
+    }
+}
+
 /// The student's AI choices. Machine-wide (`UserDefaults.standard`), like
 /// the Ollama model: they describe this device, not one person's library.
 public enum AIPreferences {
@@ -64,6 +104,13 @@ public enum AIPreferences {
     public static let cloudModelKey = "GRASP.cloudModel"
     /// Set once the student has accepted the free-tier data notice.
     public static let acceptedCloudNoticeKey = "GRASP.acceptedCloudNotice"
+
+    public static let geminiPlanKey = "GRASP.geminiPlan"
+
+    public static var geminiPlan: GeminiPlan {
+        get { UserDefaults.standard.string(forKey: geminiPlanKey).flatMap(GeminiPlan.init(rawValue:)) ?? .free }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: geminiPlanKey) }
+    }
 
     public static var mode: AIMode {
         get { UserDefaults.standard.string(forKey: modeKey).flatMap(AIMode.init(rawValue:)) ?? .local }
@@ -95,7 +142,7 @@ public enum AIPreferences {
 
     /// The rest of the list, in the order the picker shows it.
     static func alternates(from known: [String], besides primary: String) -> [String] {
-        (known.isEmpty ? [CloudProvider.fallbackModel] : known).filter { $0 != primary }
+        CloudModelSelection.rest(of: known, besides: primary)
     }
 
     /// The best model the key's live list offered, remembered so a request
@@ -107,9 +154,7 @@ public enum AIPreferences {
 
     /// The model requests actually use.
     public static var resolvedCloudModel: String {
-        let chosen = cloudModel
-        if !chosen.isEmpty { return chosen }
-        return bestKnownCloudModel ?? CloudProvider.fallbackModel
+        CloudModelSelection.read(from: .standard).primary
     }
 
     public static var hasAcceptedCloudNotice: Bool {
@@ -122,7 +167,17 @@ public enum AIPreferences {
 /// paused, and the last time a job fell back to the local model. Shown in
 /// the AI settings and used to warn before a job that won't fit.
 public final class CloudUsage: @unchecked Sendable {
-    public static let shared = CloudUsage()
+    /// A stand-in run (debug only) counts into a throwaway defaults suite,
+    /// so it never changes the real request count or settings.
+    public static let shared: CloudUsage = {
+        #if DEBUG
+        if CloudStub.isActive, let suite = UserDefaults(suiteName: "GRASP.stub.cloudusage") {
+            suite.removePersistentDomain(forName: "GRASP.stub.cloudusage")
+            return CloudUsage(defaults: suite)
+        }
+        #endif
+        return CloudUsage()
+    }()
     /// Posted (on whatever thread) after any change, for UI to re-read.
     public static let didChange = Notification.Name("GRASP.CloudUsage.didChange")
 

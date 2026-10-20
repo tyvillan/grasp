@@ -95,6 +95,7 @@ public enum AIKeyStore {
             return ProcessInfo.processInfo.environment["GRASP_STUB_KEY"] == "1"
                 ? ("stub-key-for-screenshots-only", 0, true) : (nil, -1, false)
         }
+        if CloudStub.isActive { return ("stub", errSecSuccess, true) }
         keychainCalls += 1
         #endif
         #if canImport(Security)
@@ -130,6 +131,7 @@ public enum AIKeyStore {
     public static func save(_ key: String) -> Bool {
         #if DEBUG
         if skipsKeychain { return true }
+        if CloudStub.isActive { return true }
         #endif
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         delete()
@@ -165,6 +167,7 @@ public enum AIKeyStore {
     public static func delete() {
         #if DEBUG
         if skipsKeychain { return }
+        if CloudStub.isActive { return }
         keychainCalls += 1
         #endif
         #if canImport(Security)

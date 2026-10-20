@@ -3,24 +3,114 @@ import Foundation
 import FoundationNetworking
 #endif
 
+/// How urgent a request is. A student waiting on one answer (the AI judge,
+/// "Explain this") must not sit behind a queue of background generation.
+enum RequestPriority: Sendable { case background, interactive }
+
+/// Per-request context carried by the task, so the transport needs no
+/// extra parameters: the priority lane, and a gate the caller can watch to
+/// start its own clock when the request is really sent.
+enum AIRequestContext {
+    @TaskLocal static var priority: RequestPriority = .background
+    @TaskLocal static var gate: SendGate?
+}
+
+/// Whether a request is still waiting for the pacer's turn. A timeout that
+/// is about the answer's speed holds its clock while this is true.
+final class SendGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var queued = false
+    var isQueued: Bool { lock.lock(); defer { lock.unlock() }; return queued }
+    func setQueued(_ value: Bool) { lock.lock(); queued = value; lock.unlock() }
+}
+
 /// Spaces cloud requests out to stay under the per-minute limit. Shared by
 /// every transport, since the limit is per key, not per generator.
+///
+/// Background requests go one at a time in arrival order, spaced
+/// `minimumInterval` apart. An interactive request does not wait behind
+/// them: it goes at once. It still counts: it is recorded in the same
+/// one-minute window, so the background requests after it wait for room.
+/// The window may be exceeded by one request in ten (at least one) for an
+/// interactive call, because a student waiting is worth that and a
+/// rate-limit reply is retried anyway.
 actor RequestPacer {
     static let shared = RequestPacer(minimumInterval: 60.0 / Double(CloudProvider.requestsPerMinute))
 
-    private let minimumInterval: TimeInterval
-    private var nextSlot = Date.distantPast
+    private var minimumInterval: TimeInterval
+    private let now: @Sendable () -> Date
+    private let sleep: @Sendable (TimeInterval) async throws -> Void
+    private var sends: [Date] = []
+    private var lastSend = Date.distantPast
+    private var queue: [UInt64] = []
+    private var nextTicket: UInt64 = 0
 
-    init(minimumInterval: TimeInterval) {
+    /// `now` and `sleep` are the clock, replaceable so a test can run the
+    /// pacer on a clock it moves by hand instead of waiting in real time.
+    init(minimumInterval: TimeInterval,
+         now: @escaping @Sendable () -> Date = { Date() },
+         sleep: @escaping @Sendable (TimeInterval) async throws -> Void = {
+             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
+         }) {
         self.minimumInterval = minimumInterval
+        self.now = now
+        self.sleep = sleep
     }
 
-    func waitTurn() async throws {
-        let now = Date()
-        let start = max(now, nextSlot)
-        nextSlot = start.addingTimeInterval(minimumInterval)
-        let wait = start.timeIntervalSince(now)
-        if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+    /// Requests waiting for a turn (background ones), for tests.
+    var waitingCount: Int { queue.count }
+
+    private var planRate = GeminiPlan.freeRequestsPerMinute
+    private var halvings = 0
+
+    /// The rate in force: the plan's, halved once for each time a paid
+    /// key was told to slow down this session, never below the free pace.
+    var effectiveRequestsPerMinute: Int {
+        halvings == 0 ? planRate : max(GeminiPlan.freeRequestsPerMinute, planRate >> halvings)
+    }
+
+    /// Follows the plan setting; takes effect for the next request.
+    func setRequestsPerMinute(_ rate: Int) {
+        planRate = max(1, rate)
+        minimumInterval = 60.0 / Double(effectiveRequestsPerMinute)
+    }
+
+    /// A 429 on a paid key: halve the rate for the rest of the session.
+    /// Returns the new rate, or nil when already at the free pace.
+    @discardableResult
+    func halveRate() -> Int? {
+        guard planRate > GeminiPlan.freeRequestsPerMinute,
+              effectiveRequestsPerMinute > GeminiPlan.freeRequestsPerMinute else { return nil }
+        halvings += 1
+        minimumInterval = 60.0 / Double(effectiveRequestsPerMinute)
+        return effectiveRequestsPerMinute
+    }
+
+    func waitTurn(priority: RequestPriority = AIRequestContext.priority) async throws {
+        guard minimumInterval > 0 else { return }
+        let ticket = nextTicket
+        nextTicket += 1
+        if priority == .background { queue.append(ticket) }
+        defer { queue.removeAll { $0 == ticket } }
+        while true {
+            try Task.checkCancellation()
+            let now = self.now()
+            sends.removeAll { now.timeIntervalSince($0) >= 60 }
+            let limit = max(1, Int((60 / minimumInterval).rounded()))
+            let allowed = priority == .interactive ? limit + max(1, limit / 10) : limit
+            var wait: TimeInterval = 0
+            if sends.count >= allowed { wait = max(wait, 60 - now.timeIntervalSince(sends[0])) }
+            if priority == .background {
+                wait = max(wait, minimumInterval - now.timeIntervalSince(lastSend))
+            }
+            let isNext = priority == .interactive || queue.first == ticket
+            if wait <= 0 && isNext {
+                sends.append(now)
+                lastSend = now
+                return
+            }
+            try await sleep(max(wait, 0.025))
+        }
     }
 }
 
@@ -74,7 +164,15 @@ public struct GeminiTransport: ChatTransport {
         apiKey: String, model: String, baseURL: URL = CloudProvider.baseURL,
         usage: CloudUsage = .shared, pacer: RequestPacer = .shared, failures: FailureLog? = nil,
         maxRetries: Int = 2, alternates: [String] = [], overloadPauses: [TimeInterval] = [3, 8],
-        send: @escaping Send = { try await GeminiTransport.session.data(for: $0) },
+        send: @escaping Send = { request in
+            #if DEBUG
+            if CloudStub.isActive { return try await CloudStub.respond(request) }
+            if AITiming.isEnabled, let metrics = AITiming.metrics {
+                return try await GeminiTransport.session.data(for: request, delegate: metrics)
+            }
+            #endif
+            return try await GeminiTransport.session.data(for: request)
+        },
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = {
             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
         }
@@ -107,14 +205,38 @@ public struct GeminiTransport: ChatTransport {
         var boost = 1
         // The chosen model first, then the rest in list order -- skipping
         // any that just failed, so the next call doesn't wait them out again.
+        // Only the shared pacer follows the plan setting; a pacer made for a test keeps its own pace.
+        if pacer === RequestPacer.shared {
+            var rate = CloudProvider.requestsPerMinute
+            #if DEBUG
+            if CloudStub.isActive, let slowed = CloudStub.requestsPerMinute { rate = slowed }
+            #endif
+            await pacer.setRequestsPerMinute(rate)
+        }
         let usable = ([model] + alternates).filter { !usage.isAvoided($0) }
         let order = usable.isEmpty ? [model] : usable
         var index = 0
         var retries = 0
         var overloadedModels = 0
+        #if DEBUG
+        var pacerWaited = 0.0
+        #endif
         while true {
             try Task.checkCancellation()
-            try await pacer.waitTurn()
+            #if DEBUG
+            let pacerStart = Date()
+            #endif
+            let gate = AIRequestContext.gate
+            gate?.setQueued(true)
+            // A long wait for a turn is the free plan's pace, not a fault;
+            // say so, and say how to change it.
+            let pacingNote = Self.notify(after: 8, CloudProvider.pacingNote)
+            do { try await pacer.waitTurn() } catch { pacingNote.cancel(); gate?.setQueued(false); throw error }
+            pacingNote.cancel()
+            gate?.setQueued(false)
+            #if DEBUG
+            pacerWaited = Date().timeIntervalSince(pacerStart)
+            #endif
             let current = order[index]
             let isLast = index + 1 >= order.count
             func moveToNext(_ reason: String) {
@@ -122,11 +244,47 @@ public struct GeminiTransport: ChatTransport {
                 retries = 0
                 AIProgress.current?.setNote("\(reason), so GRASP is using \(order[index])")
             }
+            let slowNote = Self.notify(after: 25, CloudProvider.slowNote)
+            defer { slowNote.cancel() }
             do {
+                #if DEBUG
+                let started = Date()
+                let metrics = AITiming.Metrics()
+                let answer: String
+                do {
+                    answer = try await AITiming.$metrics.withValue(metrics) {
+                        try await request(
+                            prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
+                            boost: boost, reasoning: useReasoning
+                        )
+                    }
+                } catch {
+                    // A failed call is a row too: its time is real, and the
+                    // kind of failure (never the body) says why.
+                    let answered = metrics.answer
+                    var kind = AITiming.describeFailure(error)
+                    if let code = answered.status {
+                        kind += " (HTTP \(code)" + (answered.errorStatus.map { " \($0)" } ?? "") + ")"
+                    }
+                    AITiming.record(.init(
+                        feature: AITiming.feature, model: current, promptChars: prompt.count, outputChars: 0,
+                        pacerWait: pacerWaited, request: Date().timeIntervalSince(started),
+                        firstByte: nil, connect: nil, reusedConnection: nil, status: answered.status ?? 0,
+                        failure: kind))
+                    throw error
+                }
+                let seen = metrics.snapshot
+                AITiming.record(.init(
+                    feature: AITiming.feature, model: current, promptChars: prompt.count, outputChars: answer.count,
+                    pacerWait: pacerWaited, request: Date().timeIntervalSince(started),
+                    firstByte: seen.firstByte, connect: seen.connect, reusedConnection: seen.reused, status: 200))
+                return answer
+                #else
                 return try await request(
                     prompt: prompt, model: current, jsonMode: useJSONMode, maxTokens: useCap ? maxTokens : nil,
                     boost: boost, reasoning: useReasoning
                 )
+                #endif
             } catch AIBackendError.overloaded(let status) {
                 // The first model gets the full wait; the others one short one.
                 let pauses = index == 0 ? overloadPauses : Array(overloadPauses.prefix(1))
@@ -159,6 +317,10 @@ public struct GeminiTransport: ChatTransport {
                 }
                 moveToNext("today's free limit for \(current) is used up")
             } catch AIBackendError.rateLimited(let retryAfter) {
+                if pacer === RequestPacer.shared, AIPreferences.geminiPlan == .paid,
+                   let slower = await pacer.halveRate() {
+                    AITiming.event("Paid key got a 429: pace halved to \(slower) requests per minute for the rest of the session")
+                }
                 if retries < maxRetries {
                     retries += 1
                     AIProgress.current?.setNote("\(CloudProvider.name) asked GRASP to slow down; waiting a moment")
@@ -189,6 +351,21 @@ public struct GeminiTransport: ChatTransport {
                 failures?.record(error)
                 throw error
             }
+        }
+    }
+
+    /// Shows `text` as the job's note if the call is still going after
+    /// `seconds`, and takes it down again when cancelled. The caller cancels
+    /// the returned task as soon as the call is over.
+    static func notify(after seconds: Double, _ text: String) -> Task<Void, Never> {
+        let progress = AIProgress.current
+        return Task {
+            guard let progress else { return }
+            do { try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) } catch { return }
+            progress.setNote(text)
+            // Held until cancelled, then cleared if nothing replaced it.
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 200_000_000) }
+            if progress.snapshot.note == text { progress.setNote(nil) }
         }
     }
 
@@ -230,6 +407,18 @@ public struct GeminiTransport: ChatTransport {
         }
         if let message = errorMessage(in: body) { return "Google said: \(message)" }
         return "Google answered with something GRASP couldn't read: \(body.prefix(300))"
+    }
+
+    /// Google's own status word for an error (`NOT_FOUND`), for the debug
+    /// timing output. Letters and underscores only, so nothing else can
+    /// ride along.
+    static func errorStatusWord(in body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let object = (json as? [[String: Any]])?.first ?? (json as? [String: Any])
+        guard let word = (object?["error"] as? [String: Any])?["status"] as? String,
+              word.count <= 40, word.allSatisfy({ $0.isUppercase || $0 == "_" }) else { return nil }
+        return word
     }
 
     static func errorMessage(in body: String) -> String? {
@@ -296,6 +485,9 @@ public struct GeminiTransport: ChatTransport {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         let body = String(data: data, encoding: .utf8) ?? ""
+        #if DEBUG
+        AITiming.metrics?.setAnswer(status: status, errorStatus: status == 200 ? nil : Self.errorStatusWord(in: body))
+        #endif
         switch status {
         case 200:
             guard let reply = try? JSONDecoder().decode(Reply.self, from: data), let choice = reply.choices.first
@@ -367,6 +559,9 @@ public struct GeminiTransport: ChatTransport {
 
     /// The model ids this key can use.
     public static func listModels(apiKey: String, baseURL: URL = CloudProvider.baseURL) async throws -> [String] {
+        #if DEBUG
+        if CloudStub.isActive { return [CloudProvider.fallbackModel] }
+        #endif
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15

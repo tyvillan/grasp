@@ -268,6 +268,57 @@ public protocol CardGenerator: Sendable {
     /// chunks against. Words rather than tokens because nothing in this
     /// codebase has a tokenizer, and `NoteText.wordCount` is already stored.
     var overviewContextWordBudget: Int { get }
+
+    /// How many cards one context-check call may carry. 1 asks about one
+    /// card per call, which is what a small local model is trusted with;
+    /// the cloud model takes several at once, so the note is sent once
+    /// per call instead of once per card.
+    var contextCheckBatchSize: Int { get }
+
+    /// How many independent calls the caller may have in flight at once.
+    /// 1 on a local model and on a free cloud plan, where requests are
+    /// paced one at a time anyway.
+    var maxConcurrentCalls: Int { get }
+
+    /// The context check for several cards of one note in one call.
+    /// Returns a verdict only for the cards the reply answered validly;
+    /// a card missing from the result was not judged, and the caller asks
+    /// about it on its own. Empty when the reply was unusable.
+    func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation]
+
+    /// Whether the second pass over an overview can be one call over the
+    /// whole lesson. A cloud model reads all sections and the note at once;
+    /// a small local model needs one section at a time to catch errors.
+    var reviewsWholeOverview: Bool { get }
+
+    /// Corrections for every section of one lesson, in one call: element
+    /// `i` belongs to `sections[i]`. Nil when the reply was unusable, so
+    /// the caller reviews section by section instead.
+    func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]?
+
+    /// The second pass over one written section: corrections for
+    /// statements the note contradicts or that are simply wrong. A
+    /// requirement, not only an extension default: declared in an
+    /// extension alone, a call through `any CardGenerator` ran the empty
+    /// default and never reached a generator's own version.
+    func reviewSection(noteContext: String, section: OverviewSection) async -> [OverviewFix]
+
+    /// The second pass over a whole lesson: sections that repeat an
+    /// earlier one. Also a requirement, for the same reason.
+    func findRepetition(in document: OverviewDocument) async -> OverviewRepetition
+}
+
+/// One card in a batched context check.
+public struct ContextCheckItem: Sendable, Equatable {
+    public var id: String
+    public var front: String
+    public var back: String
+
+    public init(id: String, front: String, back: String) {
+        self.id = id; self.front = front; self.back = back
+    }
 }
 
 /// How one note's "additional cards" request ended.
@@ -326,6 +377,18 @@ public extension CardGenerator {
     /// 7-8B model's 8k window comfortable room for the prompt and a full
     /// answer. `FoundationModelsGenerator` overrides this downward.
     var overviewContextWordBudget: Int { 1_200 }
+
+    var contextCheckBatchSize: Int { 1 }
+
+    var maxConcurrentCalls: Int { 1 }
+
+    var reviewsWholeOverview: Bool { false }
+
+    func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? { nil }
+
+    func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] { [:] }
 
     /// The second pass over a written section: corrections for statements
     /// the note contradicts or that are simply wrong. Empty by default --
@@ -434,10 +497,14 @@ public struct NoGenerator: CardGenerator {
 public enum CardGenerators {
     /// The generator for the student's AI mode (see `AIPreferences`).
     public static func select() async -> any CardGenerator {
-        let mode = AIPreferences.mode
+        var mode = AIPreferences.mode
+        var stubKey: String?
+        #if DEBUG
+        if CloudStub.isActive { mode = .cloud; stubKey = "stub" }
+        #endif
         let local: any CardGenerator = mode == .cloud ? NoGenerator() : await localGenerator()
         let model = AIPreferences.resolvedCloudModel
-        return select(mode: mode, cloudKey: mode.usesCloud ? AIKeyStore.read() : nil, cloudModel: model,
+        return select(mode: mode, cloudKey: mode.usesCloud ? (stubKey ?? AIKeyStore.read()) : nil, cloudModel: model,
                       alternates: AIPreferences.alternateCloudModels(besides: model), local: local)
     }
 

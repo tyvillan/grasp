@@ -247,6 +247,7 @@ private struct AISettingsTab: View {
     @State private var keyDraft = ""
     @State private var pendingMode: AIMode?
     @AppStorage(AIPreferences.cloudModelKey, store: .standard) private var cloudModel = ""
+    @AppStorage(AIPreferences.geminiPlanKey, store: .standard) private var geminiPlan = GeminiPlan.free.rawValue
 
     var body: some View {
         @Bindable var store = store
@@ -331,6 +332,7 @@ private struct AISettingsTab: View {
 
     // MARK: Cloud
 
+
     private var cloudSection: some View {
         SettingsGroup(title: "Cloud: \(CloudProvider.name)") {
             if store.hasCloudKey {
@@ -364,6 +366,15 @@ private struct AISettingsTab: View {
                             Footnote(note)
                         }
                     }
+                }
+                SettingsRow {
+                    HStack {
+                        Text("Gemini plan")
+                        Spacer()
+                        GRASPPicker(selection: $geminiPlan, options: [("free", "Free"), ("paid", "Paid")])
+                            .frame(maxWidth: 260, alignment: .trailing)
+                    }
+                    Footnote(GeminiPlan.explanation(for: geminiPlan))
                 }
                 if let detail = cloudErrorDetail {
                     SettingsRow {

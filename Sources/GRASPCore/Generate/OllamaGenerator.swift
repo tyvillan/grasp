@@ -18,6 +18,11 @@ public struct OllamaGenerator: CardGenerator {
     private let model: String
     private let transport: any ChatTransport
     private let wordBudget: Int
+    private let callConcurrency: @Sendable () -> Int
+
+    /// How many independent calls this pipeline may run at once. 1 for a
+    /// local model; a cloud pipeline follows the plan setting.
+    public var maxConcurrentCalls: Int { max(1, callConcurrency()) }
 
     /// Exposed so a stored overview can record which model wrote it.
     public var modelName: String { model }
@@ -40,10 +45,13 @@ public struct OllamaGenerator: CardGenerator {
         self.model = model
         self.transport = OllamaTransport(baseURL: baseURL, model: model)
         self.wordBudget = 1_800
+        self.callConcurrency = { 1 }
     }
 
     /// The prompt pipeline on another backend (see `CloudGenerator`).
-    init(transport: any ChatTransport, model: String, wordBudget: Int) {
+    init(transport: any ChatTransport, model: String, wordBudget: Int,
+         concurrency: @escaping @Sendable () -> Int = { 1 }) {
+        self.callConcurrency = concurrency
         self.baseURL = URL(string: "http://127.0.0.1:11434")!
         self.model = model
         self.transport = transport
@@ -229,28 +237,35 @@ public struct OllamaGenerator: CardGenerator {
         }
         if let plan {
             progress?.expect(plan.sections.count - assumed)
-            var sections: [OverviewSection] = []
-            for (index, planned) in plan.sections.enumerated() {
-                // Cancellation throws out of the request in flight, but
-                // `try?` below would then just move on to the next
-                // section -- so the loop checks for itself.
-                if Task.isCancelled { return .empty }
+            // Sections are independent once the plan exists, so a cloud
+            // plan that allows it writes several at once. Results are kept
+            // in the plan's order, whichever finishes first.
+            let headings = plan.sections.map(\.heading)
+            let total = plan.sections.count
+            let width = maxConcurrentCalls
+            if Task.isCancelled { return .empty }
+            progress?.begin(width > 1 ? "Writing \(total) sections" : "Writing section 1 of \(total)")
+            let written = await AIConcurrency.map(Array(plan.sections.enumerated()), limit: width) { item -> OverviewSection? in
+                let (index, planned) = item
+                if Task.isCancelled { return nil }
                 let prompt = Self.sectionPrompt(
                     courseName: courseName, noteContext: noteContext,
                     heading: planned.heading, covers: planned.covers,
-                    lessonHeadings: plan.sections.map(\.heading)
+                    lessonHeadings: headings
                 )
-                progress?.begin("Writing section \(index + 1) of \(plan.sections.count)")
+                if width == 1 { progress?.begin("Writing section \(index + 1) of \(total)") }
                 // Room for a worked example, its pictures and is/isn't pairs
                 // on top of the paragraphs -- 1,000 cut the example off
                 // mid-JSON.
-                let response = try? await chat(prompt: prompt, maxTokens: 1_800)
+                let response = try? await self.chat(prompt: prompt, maxTokens: 1_800)
                 progress?.advance()
                 guard let response,
-                      let section = Self.parseSectionResponse(response, heading: planned.heading)
-                else { continue }
-                sections.append(section)
+                      let section = Self.parseSectionResponse(response, heading: planned.heading) else { return nil }
+                progress?.addFinished(section.heading)
+                return section
             }
+            if Task.isCancelled { return .empty }
+            let sections = written.compactMap { $0 ?? nil }
             if !sections.isEmpty {
                 var document = plan.document
                 document.sections = sections
@@ -617,7 +632,7 @@ public struct OllamaGenerator: CardGenerator {
         let check: OverviewDTO.CheckDTO?
     }
 
-    private static func clean(_ text: String?) -> String? {
+    static func clean(_ text: String?) -> String? {
         guard let text else { return nil }
         let collapsed = text
             .replacingOccurrences(of: "\n", with: " ")

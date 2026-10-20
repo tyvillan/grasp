@@ -1376,7 +1376,8 @@ struct DeckDetailView: View {
     /// when the drafts strip returns with the final count.
     private var generatingStrip: some View {
         let written = DeckCardCounts.newCount(recent: recentAIIds, held: countHeldIds)
-        return HStack(spacing: 10) {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
@@ -1398,6 +1399,15 @@ struct DeckDetailView: View {
             .buttonStyle(GRASPQuietButton())
             .disabled(aiActivity?.stopRequested == true)
             .help("Stops now. Cards already written are kept.")
+            }
+            // Why it is slow, in plain words: set by the transport after a
+            // long wait for a turn or for Google's answer.
+            if let note = aiActivity?.snapshot.note {
+                Label(note, systemImage: "hourglass")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

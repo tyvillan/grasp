@@ -401,7 +401,7 @@ struct DeckOverviewView: View {
         guard !materialIds.isEmpty else { return }
         failure = nil
         let generation = scopeGeneration
-        let run = AIActivity(headline: "Writing overviews", units: materialIds.count)
+        let run = AIActivity(headline: "Writing overviews", units: materialIds.count, unitName: "Note")
         let titles = Dictionary(uniqueKeysWithValues: materialIds.map { ($0, title(of: $0)) })
 
         store.runAIJob(jobKey, activity: run) { [store] run in
