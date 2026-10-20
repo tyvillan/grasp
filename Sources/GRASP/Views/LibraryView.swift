@@ -172,27 +172,38 @@ struct LibraryView: View {
 
     // MARK: - Courses
 
-    /// Every course as a card, under the vault: where it sits, how many cards it has.
+    /// Every course as a card, under the vault, grouped by time frame in the sidebar's order
+    /// (newest term first, then No Timeline).
     private var coursesCard: some View {
-        let semesterName = Dictionary(uniqueKeysWithValues: store.semesters.map { ($0.id, $0.name) })
-        let courses = store.coursesBySemester.values.joined().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let groups = store.libraryCourseGroups()
+        let total = groups.reduce(0) { $0 + $1.courses.count }
         return VStack(alignment: .leading, spacing: GRASPSpace.l) {
             HStack {
                 SectionLabel("Courses")
                 Spacer()
-                Text("\(courses.count)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                Text("\(total)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
             }
-            if courses.isEmpty {
+            if groups.isEmpty {
                 Text("No courses yet. Import the vault to bring them in.")
                     .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: GRASPSpace.m, alignment: .top)], spacing: GRASPSpace.m) {
-                    ForEach(courses) { course in
-                        LibraryCourseCard(
-                            course: course, color: store.courseColor(course),
-                            subtitle: [course.code, course.semesterId.flatMap { semesterName[$0] }].compactMap { $0 }.joined(separator: " · "),
-                            cards: cardCounts.all[course.id] ?? 0
-                        )
+            }
+            ForEach(groups, id: \.title) { group in
+                VStack(alignment: .leading, spacing: GRASPSpace.m) {
+                    HStack(spacing: 8) {
+                        Text(group.title)
+                            .font(.graspUI(size: 15, weight: .semibold))
+                            .foregroundStyle(GRASPColor.textPrimary)
+                        Text("\(group.courses.count)")
+                            .graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                        Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: GRASPSpace.m, alignment: .top)], spacing: GRASPSpace.m) {
+                        ForEach(group.courses.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { course in
+                            LibraryCourseCard(
+                                course: course, color: store.courseColor(course),
+                                subtitle: course.code ?? "", cards: cardCounts.all[course.id] ?? 0
+                            )
+                        }
                     }
                 }
             }
@@ -616,9 +627,10 @@ struct OffTopicCoursesSheet: View {
     let onStart: (Set<String>) -> Void
     @State private var chosen: Set<String> = []
 
-    private var courses: [Course] {
-        store.coursesBySemester.values.joined().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    private var groups: [(title: String, courses: [Course])] {
+        store.libraryCourseGroups().map { ($0.title, $0.courses.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
     }
+    private var courses: [Course] { groups.flatMap(\.courses) }
     private var cardTotal: Int { chosen.reduce(0) { $0 + (unchecked[$1] ?? 0) } }
 
     var body: some View {
@@ -630,6 +642,7 @@ struct OffTopicCoursesSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Button("All") { chosen = Set(courses.filter { (unchecked[$0.id] ?? 0) > 0 }.map(\.id)) }
+                        .help("Every course that has cards to check")
                     Button("None") { chosen = [] }
                     Spacer()
                     Text("\(cardTotal) \(cardTotal == 1 ? "card" : "cards")").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
@@ -637,23 +650,40 @@ struct OffTopicCoursesSheet: View {
                 .buttonStyle(GRASPQuietButton())
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(Array(courses.enumerated()), id: \.element.id) { index, course in
-                            if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
-                            let count = unchecked[course.id] ?? 0
-                            Button { toggle(course.id) } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: chosen.contains(course.id) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(chosen.contains(course.id) ? GRASPColor.textPrimary : GRASPColor.textTertiary)
-                                    CourseDot(color: store.courseColor(course), size: 8)
-                                    Text(course.name).font(.graspUI(size: 14, weight: .medium)).foregroundStyle(GRASPColor.textPrimary).lineLimit(1)
-                                    Spacer()
-                                    Text(count == 0 ? "nothing to check" : "\(count)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                        ForEach(groups, id: \.title) { group in
+                            let ids = group.courses.filter { (unchecked[$0.id] ?? 0) > 0 }.map(\.id)
+                            let allChosen = !ids.isEmpty && ids.allSatisfy(chosen.contains)
+                            HStack {
+                                SectionLabel(group.title)
+                                Spacer()
+                                if !ids.isEmpty {
+                                    Button(allChosen ? "None" : "All") {
+                                        if allChosen { chosen.subtract(ids) } else { chosen.formUnion(ids) }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.graspUI(size: 12, weight: .semibold))
+                                    .foregroundStyle(GRASPColor.textSecondary)
                                 }
-                                .padding(.vertical, 10)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                            .disabled(count == 0)
+                            .padding(.top, 14).padding(.bottom, 4)
+                            ForEach(Array(group.courses.enumerated()), id: \.element.id) { index, course in
+                                if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                                let count = unchecked[course.id] ?? 0
+                                Button { toggle(course.id) } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: chosen.contains(course.id) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(chosen.contains(course.id) ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                                        CourseDot(color: store.courseColor(course), size: 8)
+                                        Text(course.name).font(.graspUI(size: 14, weight: .medium)).foregroundStyle(GRASPColor.textPrimary).lineLimit(1)
+                                        Spacer()
+                                        Text(count == 0 ? "nothing to check" : "\(count)").graspType(.meta).monospacedDigit().foregroundStyle(GRASPColor.textTertiary)
+                                    }
+                                    .padding(.vertical, 10)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(count == 0)
+                            }
                         }
                     }
                     .padding(.horizontal, GRASPSpace.l)
@@ -686,5 +716,18 @@ struct OffTopicCoursesSheet: View {
 
     private func toggle(_ id: String) {
         if chosen.contains(id) { chosen.remove(id) } else { chosen.insert(id) }
+    }
+}
+
+extension AppStore {
+    /// Courses by time frame in the sidebar's own order: this term, other named timelines,
+    /// courses with no timeline, then each past term.
+    func libraryCourseGroups() -> [(title: String, courses: [Course])] {
+        var groups: [(title: String, courses: [Course])] = []
+        if let term = currentTerm { groups.append((term.name, courses(inSemester: term.id))) }
+        for semester in nonTermSemesters { groups.append((semester.name, courses(inSemester: semester.id))) }
+        if !unfiledCourses.isEmpty { groups.append(("No timeline", unfiledCourses)) }
+        for term in pastTerms { groups.append((term.name, courses(inSemester: term.id))) }
+        return groups.filter { !$0.courses.isEmpty }
     }
 }
