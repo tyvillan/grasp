@@ -8,12 +8,16 @@ struct FolderLayoutInfoSheet: View {
     @State private var layout: Layout
 
     enum Layout: String, CaseIterable, Identifiable {
-        case folders = "Any folder", vault = "Obsidian vault"
+        case automatic = "Automatic", folders = "Any folder", vault = "Obsidian vault"
         var id: String { rawValue }
     }
 
     init(starting: AppStore.NotesLayout) {
-        _layout = State(initialValue: starting == .vault ? .vault : .folders)
+        switch starting {
+        case .automatic: _layout = State(initialValue: .automatic)
+        case .vault: _layout = State(initialValue: .vault)
+        case .folders: _layout = State(initialValue: .folders)
+        }
     }
 
     /// What GRASP makes of a row.
@@ -50,10 +54,24 @@ struct FolderLayoutInfoSheet: View {
         let isFolder: Bool
         let role: Role
         var detail: String? = nil
+        /// A line of explanation between two drawings, not a file or folder.
+        var isCaption = false
     }
 
     private var rows: [Row] {
         switch layout {
+        case .automatic:
+            return [
+                Row(depth: 0, name: "If the folder has a College folder inside", isFolder: false, role: .chosen, isCaption: true),
+                Row(depth: 0, name: "My Vault", isFolder: true, role: .chosen),
+                Row(depth: 1, name: "College", isFolder: true, role: .passthrough),
+                Row(depth: 2, name: "Fall Semester 2026", isFolder: true, role: .term),
+                Row(depth: 3, name: "Biology", isFolder: true, role: .course, detail: "read as an Obsidian vault"),
+                Row(depth: 0, name: "Otherwise", isFolder: false, role: .chosen, isCaption: true),
+                Row(depth: 0, name: "Spring Classes", isFolder: true, role: .chosen),
+                Row(depth: 1, name: "Biology", isFolder: true, role: .course, detail: "each folder inside is a course"),
+                Row(depth: 2, name: "Week 1.md", isFolder: false, role: .note),
+            ]
         case .folders:
             return [
                 Row(depth: 0, name: "Spring Classes", isFolder: true, role: .chosen),
@@ -87,6 +105,12 @@ struct FolderLayoutInfoSheet: View {
 
     private var points: [String] {
         switch layout {
+        case .automatic:
+            return [
+                "GRASP looks for a College folder inside the folder you choose, every time you import.",
+                "Found: it is read as an Obsidian vault. Not found: each folder inside is a course.",
+                "Pick Obsidian vault or Any folder instead if you want one reading every time.",
+            ]
         case .folders:
             return [
                 "Each folder directly inside the one you choose becomes a course.",
@@ -119,6 +143,13 @@ struct FolderLayoutInfoSheet: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
+                        if row.isCaption {
+                            Text(row.name.uppercased())
+                                .font(.graspUI(size: 10.5, weight: .semibold))
+                                .tracking(0.8)
+                                .foregroundStyle(GRASPColor.textTertiary)
+                                .padding(.top, row.name == "Otherwise" ? 14 : 0).padding(.bottom, 4)
+                        } else {
                         HStack(spacing: 8) {
                             Image(systemName: row.isFolder ? "folder" : iconName(for: row.name))
                                 .font(.graspUI(size: 13))
@@ -144,6 +175,7 @@ struct FolderLayoutInfoSheet: View {
                         }
                         .padding(.leading, CGFloat(row.depth) * 18)
                         .padding(.vertical, 5)
+                        }
                     }
                 }
                 .padding(14)
