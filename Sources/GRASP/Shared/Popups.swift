@@ -341,6 +341,8 @@ struct GRASPSegmented<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
     var fillsWidth = false
+    /// Called on every tap, even on the option that is already chosen.
+    var onTap: ((Value) -> Void)?
     @Namespace private var namespace
     private var reduceMotion: Bool { Motion.isReduced }
 
@@ -349,6 +351,7 @@ struct GRASPSegmented<Value: Hashable>: View {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 let isOn = option.value == selection
                 Button {
+                    onTap?(option.value)
                     withAnimation(Motion.thumb) { selection = option.value }
                 } label: {
                     Text(option.label)

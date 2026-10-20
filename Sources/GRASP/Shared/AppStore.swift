@@ -190,6 +190,10 @@ final class AppStore {
     /// order were everyone's.
     let preferences: UserDefaults
 
+    /// The first-run tutorial. It only navigates and highlights; the one thing
+    /// it saves is its own "seen" flag, in `preferences`.
+    let tutorial: TutorialFlow
+
     private static let perProfilePreferenceKeys = [
         "dailyCardGoal", "focusWorkMinutes", "focusBreakMinutes", "focusCardTarget",
         "deckSortOption", "cardSortOption", "deckListCollapsed",
@@ -253,6 +257,11 @@ final class AppStore {
         self.database = db
         self.databaseOpenError = openError
         self.preferences = Self.preferences(for: profile)
+        #if os(macOS)
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .mac)
+        #else
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .phone)
+        #endif
         self.scanner = VaultScanner(database: db)
         // A new profile starts with no vault. Defaulting to this Mac owner's
         // vault meant a second person's first Import pulled the owner's

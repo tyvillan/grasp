@@ -48,6 +48,7 @@ struct CoursesView: View {
             }
         }
         .graspList()
+        .tutorialTrailingBarTarget(.importNotes, width: 44)
         .navigationTitle("Courses")
         .navigationDestination(item: $openedCourse) { CourseView(course: $0) }
         .onAppear {

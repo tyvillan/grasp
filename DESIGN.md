@@ -247,6 +247,33 @@ A view that uses the tokens needs no check of its own.
   Reduce Motion the flame only fades in. Flame and embers use `accent` and
   `brand`, no new colour. Rule lives in `LearnStreak` (core).
 
+- **First-run tutorial** (`Sources/GRASP/Shared/Tutorial/`, shared by the Mac and iPhone).
+  It points at the real controls and never draws a copy. Three parts:
+  - **Dim.** The window goes to black at 62% with a rounded hole over the control
+    (`SpotlightShape`, even-odd fill) and a 2 pt cream ring (`textPrimary`) 6 pt
+    outside it. The dim swallows every tap, so nothing behind it can change. Only
+    on a step that waits for a real tap (the deck tabs) is the lit area left open,
+    and only for navigation. The hole moves at `Motion.thumb` and the dim fades at
+    `Motion.base`, so under Reduce Motion both are instant.
+  - **Coach card.** A `surface` card, 14 pt radius, hairline border, no shadow, at most
+    360 pt wide. Top to bottom: "Step 3 of 8" (meta), title (title), one or two lines
+    (body), the AI line with the sparkle only on the AI step, "Tap Cards." while a step
+    waits, then buttons. Skip and Back are outlined (`GRASPQuietButton`); Next, Start
+    and Done are the one filled yellow primary (`GRASPProminentButton`). Next is hidden
+    while a step waits for a tap. The card goes in the largest open space beside the lit
+    control, so it never covers it, and scrolls inside that space if the text is long.
+  - **Fallback.** When the control is not on screen (a first-time user has no course, so
+    no deck page, or it has scrolled off), the step is a plain card with the real icon
+    in a small `inset` tile and "Once you add a course you'll see this." It never waits.
+  A control opts in with `.tutorialTarget(_)`. On the iPhone the Import Notes and Add
+  buttons live in the navigation bar, which reports no position, so
+  `.tutorialTrailingBarTarget(_, width:)` points at the bar's right edge instead.
+  The steps are data (`TutorialSteps`), with the wording in one place. The tour only
+  navigates and highlights: it never imports, generates or writes, and the one thing it
+  saves is its own "seen" flag in the profile's preferences. Mac keys: Return or Right
+  arrow is Next, Left arrow is Back, Escape is Skip. VoiceOver focuses the card and reads
+  the step; the lit control keeps its own label.
+
 **Naming AI actions.** Name an AI action by what it produces: cards, overview,
 study guide, test questions. Never "questions" for card generation. The deck
 toolbar button is "Generate cards", the empty deck's is "Generate cards from your

@@ -59,6 +59,16 @@ struct GRASPApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)
 
+        .commands {
+            // Help > GRASP tutorial replaces the empty system Help item.
+            CommandGroup(replacing: .help) {
+                Button("GRASP tutorial") {
+                    if let store { TutorialLauncher.replay(store.tutorial) }
+                }
+                .disabled(store == nil)
+            }
+        }
+
         Settings {
             if let store {
                 SettingsView()

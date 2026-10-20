@@ -29,6 +29,15 @@ struct SettingsScreen: View {
             .graspSection()
 
             Section {
+                Button("Replay tutorial") { store.tutorial.start() }
+            } header: {
+                Text("Tutorial")
+            } footer: {
+                Text("A two minute tour of the main screens. It only points at things and never changes your library.")
+            }
+            .graspSection()
+
+            Section {
                 if let account = sync.account {
                     LabeledContent("Signed in as", value: account.email ?? "Your account")
                     LabeledContent("Status") { statusText(sync) }

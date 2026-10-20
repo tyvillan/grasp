@@ -160,8 +160,10 @@ struct DeckScreen: View {
                     selection: $tab,
                     options: Tab.allCases.map { ($0, $0 == .questions && draftQuestionCount > 0
                                                     ? "\($0.rawValue) \(draftQuestionCount)" : $0.rawValue) },
-                    fillsWidth: true
+                    fillsWidth: true,
+                    onTap: { store.tutorial.didTap(.deckTab($0.rawValue)) }
                 )
+                .tutorialTarget(.deckTabs)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
             .listRowBackground(Color.clear)
@@ -188,6 +190,9 @@ struct DeckScreen: View {
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
+        // The Add and ⋯ buttons sit in the navigation bar, which gives no
+        // frame; the tutorial points at that corner instead.
+        .tutorialTrailingBarTarget(.addMenu, width: 150)
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: tab == .questions ? "Search questions" : "Search cards")
@@ -444,8 +449,10 @@ struct DeckScreen: View {
         HStack(spacing: 8) {
             StudyPill(title: "Study", icon: "rectangle.stack.fill", style: .primary,
                       detail: dueCount > 0 ? "\(dueCount)" : nil) { studying = true }
+                .tutorialTarget(.studyButton)
                 .disabled(dueCount == 0)
             StudyPill(title: "Learn", icon: "graduationcap.fill", style: .quiet, detail: nil) { learning = true }
+                .tutorialTarget(.learnButton)
                 .disabled(activeCount == 0)
             StudyPill(title: unfinishedTest == nil ? "Test" : "Continue test", icon: "checklist", style: .quiet,
                       detail: unfinishedTest.map { "\($0.answered)/\($0.total)" }) {
@@ -455,6 +462,7 @@ struct DeckScreen: View {
                     testPhase = .setup
                 }
             }
+            .tutorialTarget(.testButton)
             .disabled(!testAvailability.isAvailable && unfinishedTest == nil)
         }
     }

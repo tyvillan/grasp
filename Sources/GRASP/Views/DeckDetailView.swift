@@ -716,10 +716,12 @@ struct DeckDetailView: View {
     @ViewBuilder
     private var studyModeButtons: some View {
         modeButton("Study", "rectangle.stack.fill", prominent: true, help: "Study the cards that are due, one at a time") { isStudying = true }
+            .tutorialTarget(.studyButton)
             .disabled(dueCount == 0)
         modeButton("Learn", "graduationcap.fill", prominent: false, help: "Learn this deck in short rounds") {
             isLearning = true
         }
+        .tutorialTarget(.learnButton)
         .disabled(activeCount == 0)
         if let unfinishedTest {
             modeButton("Continue Test (\(unfinishedTest.answered)/\(unfinishedTest.total))", "play.fill", prominent: false,
@@ -730,6 +732,7 @@ struct DeckDetailView: View {
         // Test is available whenever the deck has approved cards or active
         // saved questions; with neither it says what to add.
         modeButton("Test", "checklist", prominent: false, help: testHelp) { testPhase = .setup }
+            .tutorialTarget(.testButton)
             .disabled(!testAvailability.isAvailable)
     }
 
@@ -902,6 +905,7 @@ struct DeckDetailView: View {
             items += addSourceItems
             return items
         }
+        .tutorialTarget(.addMenu)
         .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
@@ -925,6 +929,7 @@ struct DeckDetailView: View {
                 },
             ]
         }
+        .tutorialTarget(.addMenu)
         .help("Write a question")
     }
 
@@ -979,6 +984,7 @@ struct DeckDetailView: View {
             ForEach(availableTabs) { tab in
                 let selected = contentTab == tab
                 Button {
+                    store.tutorial.didTap(.deckTab(tab.rawValue))
                     withAnimation(Motion.thumb) { contentTab = tab }
                 } label: {
                     HStack(spacing: 7) {
@@ -1023,6 +1029,7 @@ struct DeckDetailView: View {
         .padding(3)
         .background(GRASPColor.surface, in: Capsule())
         .overlay(Capsule().strokeBorder(GRASPColor.hairline))
+        .tutorialTarget(.deckTabs)
     }
 
     @ViewBuilder
