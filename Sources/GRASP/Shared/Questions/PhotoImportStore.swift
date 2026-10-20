@@ -22,21 +22,23 @@ extension AppStore {
             var pages: [PhotoPage] = []
             var unreadable = 0
             run.reporter(forUnit: 0).setNote("Reading the photo on this device")
-            for data in files {
+            var hard: [Int] = []
+            for (number, data) in files.enumerated() {
                 if Task.isCancelled { break }
-                guard let prepared = PhotoSupport.prepare(data) else { unreadable += 1; continue }
-                let text = await PhotoSupport.recognizeText(in: prepared.readable)
+                // Nothing is kept of a photo that holds no readable text.
+                guard let reading = await PhotoSupport.read(data), !reading.lines.isEmpty else { unreadable += 1; continue }
                 let imageId = try? await self.database.queue.write {
-                    try QuestionImages.save(jpeg: prepared.jpeg, width: prepared.width, height: prepared.height,
+                    try QuestionImages.save(jpeg: reading.jpeg, width: reading.width, height: reading.height,
                                             courseId: courseId, db: $0).id
                 }
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { unreadable += 1 }
-                pages.append(PhotoPage(imageId: imageId, text: text))
+                if reading.hardToRead { hard.append(number + 1) }
+                pages.append(PhotoPage(imageId: imageId, text: reading.text, boxes: reading.lines.map { Optional($0.box) },
+                                       hardToRead: reading.hardToRead))
             }
 
             var outcome = DraftOutcome()
             var failure: String?
-            if pages.allSatisfy({ $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            if pages.isEmpty {
                 failure = files.count == 1
                     ? "No text could be read from that photo. Try a sharper one with the page filling the frame."
                     : "No text could be read from those photos. Try sharper ones with the page filling the frame."
@@ -48,13 +50,21 @@ extension AppStore {
                 }
                 if outcome.saved == 0, !run.stopRequested {
                     if outcome.drops.isEmpty {
-                        failure = "No questions were found on the photo. Numbered questions (1., 2., 3.) read best."
+                        failure = files.count == 1
+                            ? "No questions were found on that photo. It has text but nothing numbered like a question, so it looks like notes. Numbered questions (1., 2., 3.) read best."
+                            : "No questions were found on those photos. They have text but nothing numbered like a question. Numbered questions (1., 2., 3.) read best."
                     } else if outcome.modelUnreachable {
                         failure = "No AI model is reachable right now, and these questions need one to write their answers. Settings has the setup."
                     } else {
                         failure = "None of the questions on the photo could be kept."
                     }
-                } else if unreadable > 0, files.count > 1 {
+                }
+                if !hard.isEmpty, !run.stopRequested {
+                    outcome.drops.append(DraftDrop(
+                        text: "Photo \(hard.map(String.init).joined(separator: ", "))", reason: .unclear,
+                        detail: "Hard to read (blur, poor light or handwriting). Words may be wrong and questions may be missing, so check each draft against its photo."))
+                }
+                if outcome.saved > 0 || !outcome.drops.isEmpty, unreadable > 0, files.count > 1 {
                     // Some pictures worked: say so rather than hide the ones that did not.
                     outcome.drops.append(DraftDrop(text: "\(unreadable) photo\(unreadable == 1 ? "" : "s")", reason: .unclear,
                                                    detail: "No text could be read."))

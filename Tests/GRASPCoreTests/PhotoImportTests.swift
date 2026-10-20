@@ -232,4 +232,84 @@ struct PhotoImportTests {
         // The notes-writing path still insists on four.
         #expect(OllamaGenerator.parseProblems(reply).isEmpty)
     }
+
+    // MARK: Pages that are not a tidy quiz
+
+    @Test("a page of notes with no questions in it makes no question")
+    func proseIsNotAQuestion() {
+        let notes = "The mitochondrion is an organelle found in most cells.\nIt makes most of the cell's energy.\nMitochondria have their own genome.\nChloroplasts perform photosynthesis."
+        #expect(QuestionSplitter.split(notes).isEmpty)
+        #expect(QuestionSplitter.split("Explain why cells divide.").count == 1)
+        #expect(QuestionSplitter.split("Why do cells divide? Give two reasons.").count == 1)
+    }
+
+    @Test("a page that starts with options or an answer starts partway through a question")
+    func continuation() {
+        #expect(QuestionSplitter.startsMidQuestion("A) DNA\nB) ATP"))
+        #expect(QuestionSplitter.startsMidQuestion("Answer: B\n5. Next question here?"))
+        #expect(!QuestionSplitter.startsMidQuestion("BIO 1010 Quiz\n1. First question?"))
+        #expect(!QuestionSplitter.startsMidQuestion("1. First question?\nA) one"))
+    }
+
+    @Test("a question that runs onto the next photo is joined, with its answer")
+    func questionSpansTwoPhotos() async throws {
+        let lib = try makeLibrary()
+        let first = PhotoPage(imageId: try saveImage(lib), text: "1. Name an organelle with its own DNA.\nAnswer: mitochondrion\n2. Which molecule carries the genetic code?")
+        let second = PhotoPage(imageId: try saveImage(lib), text: "A) DNA\nB) ATP\nC) Glucose\nAnswer: A\n3. Which sugar do cells burn?\nAnswer: glucose")
+        let outcome = await PhotoQuestionImporter.importPages([first, second], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        #expect(outcome.saved == 3 && outcome.drops.isEmpty)
+        let two = try #require(try drafts(lib).first { $0.promptText.contains("genetic code") })
+        let problem = try #require(two.problem)
+        #expect(problem.choices == ["DNA", "ATP", "Glucose"] && problem.correct == 0)
+    }
+
+    @Test("a photo that starts partway through a question with nothing before it says so")
+    func orphanStart() async throws {
+        let lib = try makeLibrary()
+        let page = PhotoPage(text: "A) DNA\nB) ATP\nAnswer: A\n2. Which sugar do cells burn?\nAnswer: glucose")
+        let outcome = await PhotoQuestionImporter.importPages([page], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        #expect(outcome.saved == 1)
+        #expect(outcome.drops.contains { $0.detail.contains("starts partway through") })
+    }
+
+    @Test("a question is cropped to its own lines of the page, and a page-sized one is not")
+    func cropsToTheQuestion() async throws {
+        let lib = try makeLibrary()
+        let lines = ["1. First question here today?", "A) one", "B) two", "Answer: A", "2. Second question here today?", "A) one", "B) two", "Answer: B"]
+        let boxes: [PhotoBox?] = lines.indices.map { PhotoBox(x: 0.1, y: 0.05 + Double($0) * 0.1, width: 0.6, height: 0.05) }
+        let page = PhotoPage(imageId: try saveImage(lib), text: lines.joined(separator: "\n"), boxes: boxes)
+        _ = await PhotoQuestionImporter.importPages([page], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        let second = try #require(try drafts(lib).first { $0.promptText.hasPrefix("Second") })
+        let box = try #require(PhotoBox(encoded: second.imageCrop))
+        #expect(box.y > 0.4 && box.y < 0.5 && box.height < 0.5 && box.width > 0.6)
+        // No boxes known: the whole picture is shown.
+        let whole = PhotoPage(imageId: try saveImage(lib), text: "1. A third question here today?\nA) one\nB) two\nAnswer: A")
+        _ = await PhotoQuestionImporter.importPages([whole], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        #expect(try drafts(lib).first { $0.promptText.hasPrefix("A third") }?.imageCrop == nil)
+    }
+
+    @Test("a photo that was hard to read marks every question, even with printed answers, and Approve all leaves them")
+    func hardToReadIsFlagged() async throws {
+        let lib = try makeLibrary()
+        let page = PhotoPage(imageId: try saveImage(lib), text: "1. Which organelle makes energy?\nA) Nucleus\nB) Mitochondrion\nAnswer: B", hardToRead: true)
+        let outcome = await PhotoQuestionImporter.importPages([page], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        #expect(outcome.saved == 1)
+        let saved = try #require(try drafts(lib).first)
+        #expect(QuestionBank.needsAnswerCheck(saved) && QuestionBank.checkLabel(saved) == "Check the wording")
+        let all = try await lib.db.queue.write { try QuestionBank.approveAll(inDecks: [lib.deckId], db: $0) }
+        #expect(all.approved == 0 && all.skipped.first?.reason.contains("hard to read") == true)
+        #expect(try await lib.db.queue.write { try QuestionBank.approve(saved.id, db: $0) } == nil)
+        let approved = try #require(try await lib.db.queue.read { try TestQuestion.fetchOne($0, key: saved.id) })
+        #expect(approved.verifiedBy.contains("checked by you") && QuestionBank.checkLabel(approved) == nil)
+    }
+
+    @Test("a picture whose page gave no question is not kept")
+    func unusedPictureReleased() async throws {
+        let lib = try makeLibrary()
+        let image = try saveImage(lib)
+        let page = PhotoPage(imageId: image, text: "The mitochondrion is an organelle found in most cells.\nIt makes most of the cell's energy.\nMitochondria have their own genome.\nChloroplasts perform photosynthesis.")
+        let outcome = await PhotoQuestionImporter.importPages([page], deckId: lib.deckId, using: PhotoGenerator(), database: lib.db)
+        #expect(outcome.saved == 0 && outcome.drops.isEmpty)
+        #expect(try await lib.db.queue.read { try QuestionImages.image(image, db: $0) } == nil)
+    }
 }

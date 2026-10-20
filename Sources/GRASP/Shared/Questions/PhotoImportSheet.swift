@@ -23,6 +23,26 @@ struct DataImage: View {
     }
 }
 
+/// A page with a frame drawn round the part a question was read from.
+struct MarkedPhoto: View {
+    let data: Data
+    var box: PhotoBox?
+
+    var body: some View {
+        DataImage(data: data)
+            .overlay {
+                if let box {
+                    GeometryReader { proxy in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .strokeBorder(GRASPColor.accent, lineWidth: 2.5)
+                            .frame(width: proxy.size.width * box.width, height: proxy.size.height * box.height)
+                            .offset(x: proxy.size.width * box.x, y: proxy.size.height * box.y)
+                    }
+                }
+            }
+    }
+}
+
 private struct SourceLabel: View {
     let title: String
     let symbol: String
@@ -31,7 +51,7 @@ private struct SourceLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.graspUI(size: 12))
-            Text(title).font(.graspUI(size: 13, weight: .semibold))
+            Text(title).font(.graspUI(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
         }
         .foregroundStyle(GRASPColor.textPrimary)
         .padding(.horizontal, 12).frame(height: 32)
@@ -192,8 +212,9 @@ struct PhotoImportSheet: View {
             HStack(spacing: 8) {
                 #if os(iOS)
                 PhotosPicker(selection: $libraryItems, maxSelectionCount: Self.maxPhotos, matching: .images) {
-                    SourceLabel("Choose from Library", "photo.on.rectangle")
+                    SourceLabel("Photo Library", "photo.on.rectangle")
                 }
+                .buttonStyle(.plain)
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button { showingCamera = true } label: { SourceLabel("Take Photo", "camera") }.buttonStyle(.plain)
                 }
@@ -242,9 +263,11 @@ struct PhotoImportSheet: View {
     /// import, and `GRASP_AUTO_IMPORT=1` starts the import without a click.
     private func debugAutoImport() async {
         let environment = ProcessInfo.processInfo.environment
-        guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), let path = environment["GRASP_PHOTO_FILE"],
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return }
-        add(data)
+        guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), let paths = environment["GRASP_PHOTO_FILE"] else { return }
+        // Several pictures are separated by a colon, in the order they are "chosen".
+        for path in paths.split(separator: ":") {
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: String(path))) { add(data) }
+        }
         if environment["GRASP_AUTO_IMPORT"] == "1" {
             try? await Task.sleep(for: .milliseconds(900))
             start()

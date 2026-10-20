@@ -78,6 +78,31 @@ struct SyncEngineTests {
         #expect(await server.count == 5)
     }
 
+    @Test("pictures go up in several small requests, not one huge one")
+    func picturesAreSentInSmallBatches() async throws {
+        actor Counting: SyncTransport {
+            var batches: [Int] = []
+            func push(_ records: [SyncRecord]) async throws { batches.append(records.count) }
+            func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] { [] }
+        }
+        let server = Counting()
+        let mac = try Device()
+        try mac.engine.enable(accountUserId: "user-1", uploadExisting: false)
+        try await mac.db.queue.write { db in
+            let course = Course(semesterId: nil, name: "Biology"); try course.insert(db)
+            let big = Data(repeating: 7, count: 500_000)
+            for _ in 0..<6 {
+                let image = try QuestionImages.save(jpeg: big, width: 10, height: 10, courseId: course.id, db: db)
+                try QuestionImages.markReady(image.id, db: db)
+            }
+        }
+        let report = try await mac.engine.sync(using: server)
+        let batches = await server.batches
+        #expect(report.pushed == 7)               // the course and six pictures
+        #expect(batches.count >= 2 && batches.allSatisfy { $0 <= 4 })
+        #expect(try mac.engine.status().pendingChanges == 0)
+    }
+
     @Test("a second device joining the account receives everything")
     func secondDeviceDownloads() async throws {
         let server = MemoryServer()

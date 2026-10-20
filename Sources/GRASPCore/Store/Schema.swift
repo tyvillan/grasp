@@ -537,6 +537,11 @@ enum Schema {
                 t.column("createdAt", .datetime).notNull()
                 t.column("deletedAt", .datetime)
             }
+            // Where on the picture the question is ("x,y,width,height", fractions of
+            // the page from its top left corner), so a thumbnail can show just that part.
+            try db.alter(table: "testQuestion") { t in
+                t.add(column: "imageCrop", .text)
+            }
             try SyncSchema.installTriggers(db)
         }
 

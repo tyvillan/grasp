@@ -118,6 +118,10 @@ public struct SyncEngine: Sendable {
 
     private let database: GRASPDatabase
     static let pushBatchSize = 500
+    /// A push stops adding rows once it holds about this much, so a handful of
+    /// pictures (a question's photo is a row of up to 800 KB) never make one huge
+    /// request. The rest goes in the next request of the same sync.
+    static let pushBatchBytes = 1_500_000
     static let pullPageSize = 1000
 
     public init(database: GRASPDatabase) {
@@ -186,6 +190,17 @@ public struct SyncEngine: Sendable {
 
     // MARK: - Push
 
+    /// About how many bytes a row takes in a request: its text, plus a little for the rest.
+    static func approximateSize(_ record: SyncRecord) -> Int {
+        (record.data ?? [:]).values.reduce(64) { total, value in
+            switch value {
+            case .text(let text): return total + text.utf8.count
+            case .blob(let data): return total + data.count * 4 / 3
+            default: return total + 16
+            }
+        }
+    }
+
     private func push(using transport: some SyncTransport) async throws -> Int {
         var pushed = 0
         // Bounded, so a row that fails to send can't spin forever; what's
@@ -199,7 +214,9 @@ public struct SyncEngine: Sendable {
                     """, arguments: [Self.pushBatchSize])
                 var records: [SyncRecord] = []
                 var sent: [(String, String, Int64)] = []
+                var bytes = 0
                 for entry in entries {
+                    if bytes > Self.pushBatchBytes, !records.isEmpty { break }
                     let tableName: String = entry["tableName"]
                     let rowKey: String = entry["rowKey"]
                     sent.append((tableName, rowKey, entry["seq"]))
@@ -213,6 +230,7 @@ public struct SyncEngine: Sendable {
                         deleted: false, deviceId: deviceId
                     ))
                     if records[records.count - 1].data == nil { records[records.count - 1].deleted = true }
+                    bytes += Self.approximateSize(records[records.count - 1])
                 }
                 return (records, sent)
             }

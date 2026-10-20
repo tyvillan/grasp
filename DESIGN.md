@@ -145,7 +145,18 @@ A view that uses the tokens needs no check of its own.
   by AI: check it", which Approve all skips. The picture is a small JPEG row that stays
   on the device until its question is approved. A draft row shows a small thumbnail of its photo (tap to enlarge)
   and "Check the answer" when the AI wrote the answer; the editor shows the photo above the fields.
-  A title above the first numbered question is ignored.
+  A title above the first numbered question is ignored (one line, two lines, or a course
+  code and date).
+  The reader turns a sideways or upside-down photo upright (it tries the four ways up and
+  keeps the one whose numbers count up), reads a tilted page line by line, and stores the
+  upright picture. A draft's thumbnail is cropped to its own question (Vision gives each
+  line's box; `testQuestion.imageCrop` holds "x,y,width,height" as page fractions) and
+  the viewer shows the whole page with that question framed. A photo that starts partway
+  through a question (options or an answer with no question above) is joined onto the
+  question at the end of the photo before it; alone, it is reported as starting partway.
+  Notes with no question in them make no question and say so. A photo the reader is unsure of
+  (low confidence, or many words the spell checker does not know, as with handwriting)
+  marks every draft from it "Check the wording", and Approve all skips them.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.

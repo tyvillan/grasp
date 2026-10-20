@@ -120,4 +120,12 @@ struct QuestionSplitterTests {
     func empty() {
         #expect(QuestionSplitter.split("  \n \n").isEmpty)
     }
+
+    @Test("a Cyrillic look-alike letter in an answer line is read as the Latin letter")
+    func lookalikeLetters() {
+        let found = QuestionSplitter.split("1. Which molecule carries the genetic code?\nA) DNA\nB) ATP\nAnswer: \u{0410}")
+        #expect(found.first?.answerLetter == "A" && found.first?.options.count == 2)
+        // A line that really is in another script is left alone.
+        #expect(QuestionSplitter.latinized("Привет") == "Привет")
+    }
 }

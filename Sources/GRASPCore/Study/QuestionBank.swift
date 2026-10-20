@@ -205,9 +205,32 @@ public enum QuestionBank {
     /// worked out rather than one the page printed.
     public static let answerCheckMarker = "answer written by AI: check it"
 
-    /// Whether a draft's answer was written by AI and has not been checked by you yet.
+    /// The marker a photo question carries when the reader was unsure of the page, so its
+    /// words may be misread.
+    public static let readCheckMarker = "photo hard to read: check the wording"
+
+    /// Whether a draft still needs you to check it against its photo: its answer was written
+    /// by AI, or the photo was hard to read.
     public static func needsAnswerCheck(_ record: TestQuestion) -> Bool {
-        record.verifiedBy.contains(answerCheckMarker)
+        record.verifiedBy.contains(answerCheckMarker) || record.verifiedBy.contains(readCheckMarker)
+    }
+
+    /// What to tell you to check: "Check the answer", "Check the wording" or both.
+    public static func checkLabel(_ record: TestQuestion) -> String? {
+        let answer = record.verifiedBy.contains(answerCheckMarker), words = record.verifiedBy.contains(readCheckMarker)
+        switch (answer, words) {
+        case (true, true): return "Check the wording and the answer"
+        case (true, false): return "Check the answer"
+        case (false, true): return "Check the wording"
+        default: return nil
+        }
+    }
+
+    /// Why a draft that needs checking is not approved in bulk.
+    public static func checkReason(_ record: TestQuestion) -> String {
+        record.verifiedBy.contains(readCheckMarker)
+            ? "The photo was hard to read. Check the wording against it, then approve it yourself."
+            : "Its answer was written by AI. Check it, then approve it yourself."
     }
 
     /// Approves one draft: it becomes active, and from then on it syncs.
@@ -221,7 +244,9 @@ public enum QuestionBank {
         // Approving it yourself is the check.
         if needsAnswerCheck(record) {
             var checked = record
-            checked.verifiedBy = record.verifiedBy.replacingOccurrences(of: answerCheckMarker, with: "answer written by AI, checked by you")
+            checked.verifiedBy = record.verifiedBy
+                .replacingOccurrences(of: answerCheckMarker, with: "answer written by AI, checked by you")
+                .replacingOccurrences(of: readCheckMarker, with: "photo hard to read, checked by you")
             try checked.save(db)
         }
         try setStatus(id, to: .active, db: db)
@@ -244,7 +269,7 @@ public enum QuestionBank {
         for draft in try drafts(inDecks: deckIds, db: db) {
             // An answer the AI wrote is approved one question at a time, after you have looked at it.
             if needsAnswerCheck(draft) {
-                result.skipped.append((draft.id, "Its answer was written by AI. Check it, then approve it yourself."))
+                result.skipped.append((draft.id, checkReason(draft)))
                 continue
             }
             if let why = try approve(draft.id, db: db) { result.skipped.append((draft.id, why)) } else { result.approved += 1 }

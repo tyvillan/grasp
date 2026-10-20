@@ -243,6 +243,9 @@ public struct TestQuestion: Codable, FetchableRecord, PersistableRecord, Identif
     public var cardId: String?
     /// A picture the question shows (photo import).
     public var imageId: String?
+    /// The part of that picture this question is on, as "x,y,width,height" in
+    /// fractions of the page from its top left corner; nil shows the whole picture.
+    public var imageCrop: String?
 
     public var sourceKind: QuestionSource { QuestionSource(rawValue: source) ?? .ai }
     public var statusKind: QuestionStatus { QuestionStatus(rawValue: status) ?? .active }
