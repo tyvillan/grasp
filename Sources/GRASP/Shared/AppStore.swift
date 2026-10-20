@@ -784,7 +784,7 @@ final class AppStore {
     /// re-read, so a review graded while the edit sheet was open survives
     /// (see `CardActions.updateText`).
     func updateCard(_ card: Card) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try CardActions.updateText(cardId: card.id, front: card.front, back: card.back, db: db)
         }
         reload()
@@ -1707,7 +1707,7 @@ final class AppStore {
     }
 
     func addManualCourse(name: String, code: String?, semesterId: String? = nil) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try LibraryActions.addManualCourse(name: name, code: code, semesterId: semesterId, db: db)
         }
         reload()
