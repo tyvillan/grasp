@@ -15,6 +15,7 @@ struct DeckScreen: View {
     @State private var writingQuestion = false
     /// Opens "Generate questions with AI" on the Questions tab.
     @State private var generatingQuestions = false
+    @State private var importingPhoto = false
     /// Saved questions a test could ask, and drafts waiting for review.
     @State private var activeQuestionCount = 0
     @State private var draftQuestionCount = 0
@@ -171,7 +172,8 @@ struct DeckScreen: View {
             case .questions:
                 Section {
                     QuestionsTab(deckIds: deckIds, courseId: courseId, query: query, isWriting: $writingQuestion,
-                                 isGenerating: $generatingQuestions, decks: deckChoices, scopeName: route.name)
+                                 isGenerating: $generatingQuestions, isImportingPhoto: $importingPhoto,
+                                 decks: deckChoices, scopeName: route.name)
                         .listRowInsets(EdgeInsets())
                 }
                 .listRowBackground(Color.clear)
@@ -211,6 +213,7 @@ struct DeckScreen: View {
             case "questions": tab = .questions
             case "writequestion": tab = .questions; writingQuestion = true
             case "generatequestions": tab = .questions; generatingQuestions = true
+            case "photoimport": tab = .questions; importingPhoto = true
             case "addmenu": tab = .questions; showingAddItemsPreview = DebugLaunch.showAddMenu
             default: break
             }
@@ -327,8 +330,8 @@ struct DeckScreen: View {
         Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
         Button { generatingQuestions = true } label: { Label("Generate questions with AI", systemImage: AIGlyph.symbol) }
             .disabled(!store.isGeneratorAvailable || store.aiJob(store.questionDraftJobKey(courseId: courseId)) != nil)
-        Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
-            .disabled(true)
+        Button { importingPhoto = true } label: { Label("From a photo", systemImage: "camera") }
+            .disabled(store.aiJob(store.photoImportJobKey(courseId: courseId)) != nil)
     }
 
     private var actionsMenu: some View {

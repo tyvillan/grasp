@@ -137,6 +137,14 @@ A view that uses the tokens needs no check of its own.
   also has Move to deck and Copy to deck. The picker lists the other decks of the same
   course. A moved question keeps its history, source and status; a copy is new, with no
   history, and is skipped if the deck already has that question word for word.
+- **From a photo (in progress, branch `photo-import`).** The Add menu's "From a photo"
+  opens a sheet to choose pictures (Library and camera on the iPhone; Choose Images and
+  Paste on the Mac). Text is read on the device with Vision, split into questions, and
+  saved as drafts under To review with source "From a photo". An answer the page prints
+  is kept as printed; one it does not print is written by AI and marked "answer written
+  by AI: check it", which Approve all skips. The picture is a small JPEG row that stays
+  on the device until its question is approved. Still to build: the thumbnail on a draft
+  row, the picture in the editor, screenshots.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.

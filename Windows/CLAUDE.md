@@ -370,3 +370,7 @@ UI parity item for the Windows session, plus the data it needs. **Do not edit un
 
 ### Move and copy questions (Mac session note, 2026-10-20, branch `question-move-copy`)
 Core: `QuestionBank.move(_:toDeck:db:)` and `copy(_:toDeck:now:db:)` return a `MoveResult` (changed, skippedRepeats), and `setStatus(_ ids:...)` sets several at once. Move changes `deckId` and `courseId` only (history is by `questionId`, so it follows); the note link is cleared when the note is in another course and the card link when the card is not in the new deck. No schema change; the updates sync as ordinary `testQuestion` edits. UI is shared (`QuestionsTab`: Select mode, Actions menu, `QuestionDeckPickerSheet`); Windows needs its own screen for it.
+
+
+### Photo import, core part (Mac session note, 2026-10-20, branch `photo-import`, unfinished)
+Migration `v20_question_images` adds synced table `questionImage` (id, courseId, jpegBase64, width, height, status draft|ready, createdAt, deletedAt), local while `status` is draft, registered after `testQuestion`. Core: `QuestionSplitter`, `PhotoQuestionImporter`, `QuestionImages`, `QuestionBank.needsAnswerCheck`, and `CardGenerator.structurePhotoQuestion` (requirement with a nil default). Windows needs the migration and table entry to sync; reading photos (Vision) is Mac and iPhone only.

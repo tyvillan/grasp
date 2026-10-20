@@ -170,6 +170,7 @@ struct DeckDetailView: View {
     @State private var isWritingQuestion = false
     /// Opens "Generate questions with AI" on the Questions tab.
     @State private var isGeneratingQuestions = false
+    @State private var isImportingPhoto = false
 
     private enum ContentTab: String, CaseIterable, Identifiable {
         case overview = "Overview", cards = "Cards", questions = "Questions"
@@ -428,7 +429,8 @@ struct DeckDetailView: View {
             case .questions:
                 ScrollView {
                     QuestionsTab(deckIds: scopeDeckIds, courseId: courseId, isWriting: $isWritingQuestion,
-                                 isGenerating: $isGeneratingQuestions, decks: scopeDecksForQuestions, scopeName: deckName)
+                                 isGenerating: $isGeneratingQuestions, isImportingPhoto: $isImportingPhoto,
+                                 decks: scopeDecksForQuestions, scopeName: deckName)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -903,7 +905,7 @@ struct DeckDetailView: View {
         .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
-    /// Questions view: write a question now; the other two ways in are coming.
+    /// Questions view: write a question, generate them with AI, or read them from a photo.
     /// Outlined like the other Add menus (Study stays the one yellow button).
     private var questionsAddMenuButton: some View {
         PillMenu(title: "Add", systemImage: "plus", showsTitle: !isCompact) {
@@ -917,7 +919,10 @@ struct DeckDetailView: View {
                     isGeneratingQuestions = true
                 },
                 .divider,
-                .action("From a photo (coming soon)", systemImage: "camera", disabled: true, help: "Coming soon") {},
+                .action("From a photo…", systemImage: "camera", disabled: questionJobRunning,
+                        help: "Read questions from a picture of an exam or worksheet. They wait for your review") {
+                    isImportingPhoto = true
+                },
             ]
         }
         .help("Write a question")

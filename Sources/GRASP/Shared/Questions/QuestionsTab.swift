@@ -15,6 +15,8 @@ struct QuestionsTab: View {
     @Binding var isWriting: Bool
     /// Opens "Generate questions with AI" (the Add menu sets it).
     @Binding var isGenerating: Bool
+    /// Opens "From a photo" (the Add menu sets it).
+    @Binding var isImportingPhoto: Bool
     /// The decks a new question can go in.
     let decks: [Deck]
     var scopeName = ""
@@ -56,6 +58,13 @@ struct QuestionsTab: View {
 
     private var drafts: [TestQuestion] { questions.filter { $0.statusKind == .draft } }
     private var jobKey: String { store.questionDraftJobKey(courseId: courseId) }
+    /// The writing or photo-reading job running for this course, if any.
+    private var runningJob: (String, AppStore.AIJob)? {
+        for key in [jobKey, store.photoImportJobKey(courseId: courseId)] {
+            if let job = store.aiJob(key) { return (key, job) }
+        }
+        return nil
+    }
     private var run: AppStore.QuestionDraftRunResult? {
         store.lastQuestionDraftRun.flatMap { Set($0.deckIds) == Set(deckIds) ? $0 : nil }
     }
@@ -71,8 +80,8 @@ struct QuestionsTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let job = store.aiJob(jobKey) {
-                AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(jobKey) },
+            if let (key, job) = runningJob {
+                AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(key) },
                                 stopHelp: "Stops now. Questions already written are kept as drafts.")
                     .padding(.horizontal, 18).padding(.top, 12)
             }
@@ -141,6 +150,9 @@ struct QuestionsTab: View {
         }
         #endif
         .sheet(isPresented: $isWriting) { QuestionEditorSheet(decks: decks) }
+        .sheet(isPresented: $isImportingPhoto) {
+            PhotoImportSheet(decks: decks, defaultDeckId: deckIds.first, courseId: courseId)
+        }
         .sheet(isPresented: $isGenerating) {
             GenerateQuestionsSheet(deckIds: deckIds, courseId: courseId, scopeName: scopeName)
         }
