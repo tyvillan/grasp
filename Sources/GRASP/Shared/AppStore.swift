@@ -1489,6 +1489,7 @@ final class AppStore {
     /// punished, so it doesn't also tighten the flashcard schedule.
     func finishTest(attemptId: String) throws -> (correct: Int, total: Int) {
         let result = try database.queue.write { db in try Study.finishTest(attemptId: attemptId, db: db) }
+        FeedbackAsks.shared.noteTestFinished()
         reload()
         return result
     }
