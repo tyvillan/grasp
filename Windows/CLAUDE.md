@@ -375,6 +375,13 @@ Core: `QuestionBank.move(_:toDeck:db:)` and `copy(_:toDeck:now:db:)` return a `M
 ### Photo import, core part (Mac session note, 2026-10-20, branch `photo-import`, unfinished)
 Migration `v20_question_images` adds synced table `questionImage` (id, courseId, jpegBase64, width, height, status draft|ready, createdAt, deletedAt), local while `status` is draft, registered after `testQuestion`. Core: `QuestionSplitter`, `PhotoQuestionImporter`, `QuestionImages`, `QuestionBank.needsAnswerCheck` and `checkLabel`, and `CardGenerator.structurePhotoQuestion` (requirement with a nil default). v20 also adds `testQuestion.imageCrop` (a nullable "x,y,width,height" of page fractions). Sync sends pictures in requests of about 1.5 MB at most (`SyncEngine.pushBatchBytes`). `SyncTransport.pull` now takes a `scope`: `.rows` (everything but `questionImage`) and `.pictures`, pulled two per page with their own `syncState.pictureCursor` (v20); a picture failure is reported in `Report.pictureProblem` and retried, never blocking other rows. Any new transport must implement the scoped pull. Windows needs the migration and table entry to sync; reading photos (Vision) is Mac and iPhone only.
 
+## Parity item: Send feedback (UI only, Mac session, 2026)
+
+The Mac and iPhone apps can send feedback to the maintainer's own Supabase (`Sources/GRASP/Shared/Feedback/`, pattern in `DESIGN.md`, setup in `supabase/FEEDBACK_SETUP.md`). The Windows app should get the same sheet, as UI only. No core or schema change is needed: it is two plain HTTP calls with the public key, `POST /rest/v1/feedback` and `POST /storage/v1/object/feedback-screenshots/<id>.jpg`.
+- Fields: kind (bug, confusing, idea, love), optional rating 1 to 5, a message up to 4000 characters, anonymous on by default (off adds optional name and email), an optional screenshot (scaled to 1600 px, JPEG, under 500 KB, never attached on its own).
+- A "What gets sent" list shows exactly: app version and build, platform, OS version, device model, the screen in plain words, AI cloud / local / off, and a random install id. Never notes, cards, questions, answers, deck or course names, or keys.
+- Offline or failed sends are kept in a local file queue and retried; at most 5 sends a day per install. Two soft asks, each once ever: after the first finished Test, and 7 days after first launch; never during Study, Learn or a Test, never over a sheet, and never for a library that already had content.
+
 ## Parity item: first-run tutorial (UI only, Mac session, 2026)
 
 The Mac and iPhone apps now have an interactive first-run tutorial (`Sources/GRASP/Shared/Tutorial/`, pattern in `DESIGN.md`). The Windows app should get the same thing, as UI only: no core or schema change is needed.

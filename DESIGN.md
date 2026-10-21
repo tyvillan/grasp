@@ -274,6 +274,26 @@ A view that uses the tokens needs no check of its own.
   arrow is Next, Left arrow is Back, Escape is Skip. VoiceOver focuses the card and reads
   the step; the lit control keeps its own label.
 
+- **Send feedback** (`Sources/GRASP/Shared/Feedback/`, Mac and iPhone). A `GRASPSheet`
+  opened from Settings, Help > Send feedback (Mac) and the soft asks. Top to bottom: what
+  kind (Bug, Confusing, Idea, Love it, in a `GRASPSegmented`), an optional 1 to 5 rating
+  in round pills (tap again to clear), the message with a counter that appears at 3,600 of
+  4,000, "Send anonymously" (on by default; off adds an optional Name and Email with "So
+  Tyler can ask you a follow-up."), an optional screenshot (Choose image and Capture this
+  window on the Mac, Photos on the iPhone) with a preview, Remove, and one plain warning
+  that a screenshot can show notes and cards, and a collapsible "What gets sent" listing
+  exactly the seven facts attached. Cancel is outlined, Send is the one yellow button,
+  and there is no sparkle. A Mac sheet scrolls inside 350 pt so it fits a short window.
+  After sending the sheet says "Thanks. Your feedback was sent." or, when the network is
+  down, "Saved. It will send when you're online." with Done as the yellow button. At 5
+  sends a day Send is disabled and the footer says so.
+- **Soft asks.** A small `surface` card with one line and three outlined buttons (Send
+  feedback, Not now, Don't ask again). It floats at the bottom right on the Mac and sits
+  just above the tab bar on the iPhone. It is non-blocking, never uses yellow, never
+  appears during Study, Learn, a Test or the tutorial, and never over a sheet. Two asks
+  only, each shown once ever per device: after the first finished Test, and 7 days after
+  first launch. Any choice ends that ask for good; "Don't ask again" ends both.
+
 **Naming AI actions.** Name an AI action by what it produces: cards, overview,
 study guide, test questions. Never "questions" for card generation. The deck
 toolbar button is "Generate cards", the empty deck's is "Generate cards from your
