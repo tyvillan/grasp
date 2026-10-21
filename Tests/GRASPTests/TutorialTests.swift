@@ -277,6 +277,13 @@ struct TutorialTests {
 
     @Test("a full run, and a skip at every step, leave the database exactly as it was")
     func databaseUnchanged() throws {
+        // A real AppStore reads the AI key from the Keychain when it opens, and
+        // that can raise a system password prompt that hangs the run. This flag
+        // (debug only) makes it skip the Keychain entirely, and the count
+        // proves it did.
+        AIKeyStore.skipsKeychain = true
+        let callsBefore = AIKeyStore.keychainCalls
+        defer { #expect(AIKeyStore.keychainCalls == callsBefore) }
         let store = AppStore(profile: .preview)
         defer { store.preferences.removeObject(forKey: TutorialSeenStore.key) }
         let now = "2026-10-20 12:00:00.000"
