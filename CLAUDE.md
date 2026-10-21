@@ -28,6 +28,18 @@ Read `DESIGN.md` before any UI work. Windows notes are in `Windows/CLAUDE.md`.
 - Do not approve, suspend, delete or generate cards in the real library.
 - If a temporary deck is unavoidable, it goes in a throwaway profile.
 
+## Real vault tests
+- Off by default. Run them with `GRASP_REAL_VAULT=1 swift test` (about 40 s more).
+- They scan my real Obsidian vault (`Master Vault` in iCloud), read-only, into a
+  throwaway database. They never write to the vault, but reading can make iCloud
+  download notes. Do not run them without asking.
+- Run them after changes to: vault scanning or import (`Ingest`), the note
+  parser or card pairing, file extraction (PDF, docx, ipynb, images), course or
+  semester detection and folder layouts, course deletion and exclusion, the
+  database schema or migrations, search indexing, and study, mastery or Test
+  logic that is checked against imported notes.
+- A plain `swift test` skips them, so a green run does not cover those areas.
+
 ## Copy
 - No double hyphens or dashes in UI text. Use a period or a comma.
 - Name AI actions by what they produce: cards, overview, study guide, test questions.
