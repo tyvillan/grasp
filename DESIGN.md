@@ -275,7 +275,7 @@ A view that uses the tokens needs no check of its own.
   the step; the lit control keeps its own label.
 
 - **Send feedback** (`Sources/GRASP/Shared/Feedback/`, Mac and iPhone). A `GRASPSheet`
-  opened from Settings, Help > Send feedback (Mac) and the soft asks. Top to bottom: what
+  opened from the footer of the sidebar, just above the profile button (Mac), the top right of Settings (iPhone), Help > Send feedback (Mac) and the soft asks. Top to bottom: what
   kind (Bug, Confusing, Idea, Love it, in a `GRASPSegmented`), an optional 1 to 5 rating
   in round pills (tap again to clear), the message with a counter that appears at 3,600 of
   4,000, "Send anonymously" (on by default; off adds an optional Name and Email with "So

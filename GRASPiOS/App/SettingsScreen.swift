@@ -29,15 +29,6 @@ struct SettingsScreen: View {
             .graspSection()
 
             Section {
-                Button("Send feedback") { FeedbackService.shared.isPresenting = true }
-            } header: {
-                Text("Feedback")
-            } footer: {
-                Text("Tell us what's working, what's confusing, or what you wish it did. Nothing is sent from your library, and you can send it anonymously.")
-            }
-            .graspSection()
-
-            Section {
                 Button("Replay tutorial") { store.tutorial.start() }
             } header: {
                 Text("Tutorial")
@@ -106,6 +97,14 @@ struct SettingsScreen: View {
         }
         .graspList()
         .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { FeedbackService.shared.isPresenting = true } label: {
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                }
+                .accessibilityLabel("Send feedback")
+            }
+        }
         .sheet(isPresented: $confirmingSignOut) {
             ConfirmationSheet(
                 icon: "rectangle.portrait.and.arrow.right", title: "Sign out of sync?",
