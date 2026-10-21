@@ -66,6 +66,8 @@ struct GRASPApp: App {
                     if let store { TutorialLauncher.replay(store.tutorial) }
                 }
                 .disabled(store == nil)
+                Button("Send feedback") { FeedbackLauncher.open() }
+                    .disabled(store == nil)
             }
         }
 

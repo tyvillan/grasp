@@ -213,6 +213,13 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
+            SettingsGroup(title: "Feedback") {
+                SettingsRow(showsDivider: false) {
+                    Button("Send feedback") { FeedbackLauncher.open() }
+                    Footnote("Tell us what's working, what's confusing, or what you wish it did. Nothing is sent from your library, and you can send it anonymously.")
+                }
+            }
+
             SettingsGroup(title: "Tutorial") {
                 SettingsRow(showsDivider: false) {
                     Button("Replay tutorial") { TutorialLauncher.replay(store.tutorial) }
@@ -220,7 +227,7 @@ private struct GeneralSettingsTab: View {
                 }
             }
         }
-        .frame(width: 480, height: 560)
+        .frame(width: 480, height: 700)
     }
 }
 

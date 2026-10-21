@@ -53,6 +53,8 @@ struct MainTabView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        // Feedback: the soft asks sit just above the tab bar.
+        .feedbackAskHost()
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
         .tint(GRASPColor.accent)
         // The first-run tutorial: it lights up the real controls and only
@@ -61,6 +63,19 @@ struct MainTabView: View {
         .overlay { TutorialOverlay().environment(store.tutorial) }
         .onChange(of: store.tutorial.token) { _, _ in prepareTutorialScreen() }
         .task { store.startTutorialIfFirstTime() }
+        .feedbackSheet()
+        .task { store.startFeedback() }
+        .onChange(of: tab, initial: true) { _, new in
+            let screen: FeedbackScreen = switch new {
+            case "study": .courses
+            case "calendar": .calendar
+            case "settings": .settings
+            case "search": .search
+            default: .today
+            }
+            FeedbackScreen.base = screen
+            FeedbackScreen.current = screen
+        }
         .onAppear(perform: openWidgetLink)
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
     }

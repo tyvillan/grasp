@@ -121,6 +121,11 @@ struct ContentView: View {
         .overlay { TutorialOverlay().environment(store.tutorial) }
         .onChange(of: store.tutorial.token) { _, _ in prepareTutorialScreen() }
         .task { store.startTutorialIfFirstTime() }
+        // Feedback: the Send feedback sheet, and the two soft asks.
+        .feedbackSheet()
+        .feedbackAskHost()
+        .task { store.startFeedback() }
+        .onChange(of: selectedCourseId) { _, _ in noteFeedbackScreen() }
         .sheet(isPresented: $showingAddCourse) {
             AddCourseSheet()
         }
@@ -335,6 +340,21 @@ struct ContentView: View {
         .fixedSize()
         .tutorialTarget(.addCourseMenu)
         .help("Add a course or upload a document")
+    }
+
+    // MARK: - Feedback
+
+    /// Which screen the person is on, in plain words, for the feedback sheet.
+    /// A fixed list: it never carries a course or deck name.
+    private func noteFeedbackScreen() {
+        switch selectedCourseId {
+        case Self.homeRoute, nil: FeedbackScreen.current = .home
+        case Self.calendarRoute: FeedbackScreen.current = .calendar
+        case Self.studyGuideRoute: FeedbackScreen.current = .studyGuides
+        case Self.libraryRoute: FeedbackScreen.current = .library
+        // A course with a deck page reports its own tab, Study, Learn or Test.
+        default: if !(selectedCourseId.map { store.hasDecks(inCourse: $0) } ?? false) { FeedbackScreen.current = .course }
+        }
     }
 
     // MARK: - Tutorial

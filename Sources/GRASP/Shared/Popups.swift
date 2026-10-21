@@ -358,6 +358,9 @@ struct GRASPSegmented<Value: Hashable>: View {
                         .font(.graspUI(size: 12.5, weight: isOn ? .semibold : .medium))
                         .foregroundStyle(isOn ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                         .lineLimit(1)
+                        // Four or more labels on a narrow phone shrink a little
+                        // rather than cutting a word off.
+                        .minimumScaleFactor(0.8)
                         .padding(.horizontal, 12)
                         .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 26)
                         .background {

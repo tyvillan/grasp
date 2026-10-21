@@ -75,6 +75,11 @@ struct DeckScreen: View {
 
     private var courseId: String? { store.courseId(of: route.scope) }
 
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = studying ? .study : learning ? .learn : testPhase != nil ? .test
+            : tab == .questions ? .deckQuestions : tab == .overview ? .deckOverview : .deckCards
+    }
+
     /// The AI job running on this course, if any -- owned by the store, so
     /// it keeps going (with its Stop button) when this screen closes.
     private var runningJob: (key: String, activity: AIActivity)? {
@@ -197,6 +202,13 @@ struct DeckScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: tab == .questions ? "Search questions" : "Search cards")
         .onChange(of: tab) { _, new in UserDefaults.standard.set(new.rawValue, forKey: "deckContentTab") }
+        // Which screen this is, in plain words, for the feedback sheet.
+        .onAppear { noteFeedbackScreen() }
+        .onDisappear { FeedbackScreen.current = FeedbackScreen.base }
+        .onChange(of: tab) { _, _ in noteFeedbackScreen() }
+        .onChange(of: studying) { _, _ in noteFeedbackScreen() }
+        .onChange(of: learning) { _, _ in noteFeedbackScreen() }
+        .onChange(of: testPhase != nil) { _, _ in noteFeedbackScreen() }
         .task(id: store.revision) { load() }
         .onAppear {
             if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {

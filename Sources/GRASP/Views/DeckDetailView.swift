@@ -448,6 +448,12 @@ struct DeckDetailView: View {
             MenuAnchor.closeOpenMenu()
             UserDefaults.standard.set(tab.rawValue, forKey: "deckContentTab")
         }
+        // Which screen this is, in plain words, for the feedback sheet.
+        .onAppear { noteFeedbackScreen() }
+        .onChange(of: contentTab) { _, _ in noteFeedbackScreen() }
+        .onChange(of: isStudying) { _, _ in noteFeedbackScreen() }
+        .onChange(of: isLearning) { _, _ in noteFeedbackScreen() }
+        .onChange(of: testPhase != nil) { _, _ in noteFeedbackScreen() }
         .onChange(of: hasSourceNotes) { _, hasNotes in
             if !hasNotes, contentTab == .overview { contentTab = .cards }
         }
@@ -601,6 +607,11 @@ struct DeckDetailView: View {
             ))
         }
         return sections
+    }
+
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = isStudying ? .study : isLearning ? .learn : testPhase != nil ? .test
+            : contentTab == .questions ? .deckQuestions : contentTab == .overview ? .deckOverview : .deckCards
     }
 
     /// Deck name, its one-line composition, and the four actions. Study,
