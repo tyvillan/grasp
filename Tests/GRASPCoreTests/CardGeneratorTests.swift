@@ -214,6 +214,10 @@ struct CardGeneratorTests {
 
     @Test("selecting a generator on this machine falls back to NoGenerator or an honestly-available one")
     func selectReturnsAnAvailableOrNoGenerator() async {
+        // Selecting reads the AI key from the Keychain, which can raise a system prompt.
+        let before = AIKeyStore.skipsKeychain
+        AIKeyStore.skipsKeychain = true
+        defer { AIKeyStore.skipsKeychain = before }
         let generator = await CardGenerators.select()
         // Whatever was selected must itself report consistently: either
         // it's the explicit no-op, or it claims to actually be available.
