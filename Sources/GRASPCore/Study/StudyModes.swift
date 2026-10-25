@@ -309,10 +309,12 @@ extension Study {
                     statementIsTrue: statement == nil ? nil : item.correctAnswer == "True",
                     explanation: PlainQuestionPayload.decode(item.payloadJSON)?.explanation)
             }
+            // A typed question's other right wordings come back with it,
+            // saved question or not (a guide's lettered choice accepts "b").
+            question.acceptedAnswers = PlainQuestionPayload.decode(item.payloadJSON)?.accepted ?? []
             if let questionId = item.questionId {
                 question.bankQuestionId = questionId
                 question.bankSource = try TestQuestion.fetchOne(db, key: questionId)?.source
-                question.acceptedAnswers = PlainQuestionPayload.decode(item.payloadJSON)?.accepted ?? []
             }
             questions.append(question)
             // Answers are given in order, so the first unanswered one is

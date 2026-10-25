@@ -7,6 +7,8 @@ import Foundation
 ///   key's code with one important piece (a condition, a loop header, a
 ///   return) taken out;
 /// - "what is the output" examples become predict-the-output;
+/// - a question with exactly the five choices (a) to (e) and a lettered answer
+///   becomes multiple choice, in the note's own order;
 /// - the rest are asked as written, with the answer key as the answer.
 public enum GuideExamples {
     /// Curly quotes from a word processor, so typed answers can match.
@@ -76,8 +78,73 @@ public enum GuideExamples {
         return nil
     }
 
+    /// A worked example that is a five-option multiple-choice question.
+    public struct ChoiceItem: Sendable, Equatable {
+        /// The question and anything it shows (table rows), without the options.
+        public let stem: String
+        /// The option texts in the note's order, (a) to (e), letters removed.
+        public let options: [String]
+        /// Index into `options` of the answer key's option.
+        public let correct: Int
+
+        public var letter: String { String(UnicodeScalar(UInt8(ascii: "a") + UInt8(correct))) }
+        public var correctText: String { options[correct] }
+
+        /// The stem with the options under it, for asking the question typed.
+        public var typedPrompt: String {
+            stem + "\n" + options.enumerated().map { "(\(String(UnicodeScalar(UInt8(ascii: "a") + UInt8($0.offset))))) \($0.element)" }
+                .joined(separator: "\n")
+        }
+    }
+
+    private static let optionLine = try! NSRegularExpression(pattern: #"^\(([a-z])\)\s*(\S.*)$"#)
+    private static let answerMarker = try! NSRegularExpression(pattern: #"\(\s*[A-Za-z]\s*\)"#)
+    private static let leadingMarker = try! NSRegularExpression(pattern: #"^\(([a-e])\)\s*(\S.*)$"#, options: [.dotMatchesLineSeparators])
+
+    /// What compares two option texts: case, spacing and a closing full stop don't count.
+    private static func comparable(_ text: String) -> String {
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        while t.hasSuffix(".") { t.removeLast() }
+        return t.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// The multiple-choice reading of an example, or nil. All of these must
+    /// hold, so a multi-part question ("(a) ... (b) ... (c) ...") or a
+    /// classify list stays a typed question:
+    /// - the question has exactly five option lines, (a) to (e) in order,
+    ///   and nothing after them;
+    /// - the answer is one "(x) text" with x from a to e, no second "(y)"
+    ///   marker, and text equal to option x's text.
+    public static func choiceItem(question: String, answer: String) -> ChoiceItem? {
+        let lines = straightQuotes(question).components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        var options: [(letter: String, text: String)] = []
+        var firstOption: Int?
+        for (index, line) in lines.enumerated() {
+            if let parts = StudyGuideParser.match(optionLine, line), let letter = parts[0], let text = parts[1] {
+                firstOption = firstOption ?? index
+                options.append((letter, text.trimmingCharacters(in: .whitespaces)))
+            } else if firstOption != nil, !line.isEmpty {
+                return nil // words after the options
+            }
+        }
+        guard let firstOption, options.map(\.letter) == ["a", "b", "c", "d", "e"],
+              Set(options.map { comparable($0.text) }).count == 5 else { return nil }
+        let key = straightQuotes(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parts = StudyGuideParser.match(leadingMarker, key), let letter = parts[0], let text = parts[1],
+              answerMarker.numberOfMatches(in: key, range: NSRange(location: 0, length: (key as NSString).length)) == 1,
+              let index = options.firstIndex(where: { $0.letter == letter }),
+              comparable(options[index].text) == comparable(text)
+        else { return nil }
+        let stem = lines[..<firstOption].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stem.isEmpty else { return nil }
+        return ChoiceItem(stem: stem, options: options.map(\.text), correct: index)
+    }
+
     public enum Item: Sendable {
         case code(CodeQuestion)
+        /// A five-option multiple-choice question.
+        case choice(ChoiceItem)
         /// A question answered in words, graded against the answer key.
         case recall(prompt: String, answer: String)
     }
@@ -110,6 +177,8 @@ public enum GuideExamples {
                     question.choices = Array(wrong.prefix(3))
                 }
                 items.append(.code(question))
+            } else if let choice = choiceItem(question: example.question, answer: answer) {
+                items.append(.choice(choice))
             } else if !isCode(answer), answer.count <= 200 {
                 items.append(.recall(prompt: straightQuotes(example.question), answer: answer))
             }
@@ -130,6 +199,18 @@ public enum GuideExamples {
                 let typed = allowWritten ? question.roundQuestion() : nil
                 if let typed, let choice { result.append(Bool.random(using: &rng) ? typed : choice) }
                 else if let question = typed ?? choice { result.append(question) }
+            case .choice(let item):
+                if allowMultipleChoice {
+                    result.append(LearnEngine.RoundQuestion(cardId: nil, prompt: item.stem, correctAnswer: item.correctText,
+                                                            type: .multipleChoice, choices: item.options))
+                } else if allowWritten {
+                    // Typed: the stem and the choices, answered with the
+                    // letter or the option's words.
+                    var question = LearnEngine.RoundQuestion(cardId: nil, prompt: item.typedPrompt,
+                                                             correctAnswer: item.correctText, type: .written)
+                    question.acceptedAnswers = [item.letter, "(\(item.letter))", "(\(item.letter)) \(item.correctText)"]
+                    result.append(question)
+                }
             case .recall(let prompt, let answer):
                 guard allowWritten else { continue }
                 result.append(LearnEngine.RoundQuestion(cardId: nil, prompt: prompt, correctAnswer: answer, type: .written))
