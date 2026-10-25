@@ -185,13 +185,15 @@ struct TestSetupSheet: View {
     private var useFlashcards: Bool { guide != nil || (hasCards && store.isFlashcardQuizEnabled) }
     private var useQuestions: Bool { guide != nil || (hasCards ? store.isSavedQuestionsEnabled : questionsWithoutCards) }
 
+    /// What a guide's test is made of, in the words of the questions it asks.
+    static let guideSetupMessage = "Built from what the exam will ask: this guide's worked examples, asked in the "
+        + "form the exam uses, plus the checked practice problems saved for the lectures it covers."
+
     var body: some View {
         GRASPSheet(
             eyebrow: "Test", title: deckName,
             message: guide != nil
-                ? "Built from what the exam will ask: this guide's worked examples (code answers become "
-                  + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
-                  + "problems saved for the lectures it covers."
+                ? Self.guideSetupMessage
                 : "A graded quiz on this deck's flashcards, its saved questions, or both: multiple choice, "
                   + "written, and true / false.",
             icon: "checklist", width: 460
@@ -765,7 +767,8 @@ struct TestRunView: View {
                     .frame(maxWidth: 520, alignment: .leading)
             }
             if isAnswered, let judged, judged.outcome != .correct {
-                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer)
+                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer,
+                                    hasCard: question.cardId != nil)
                     .frame(maxWidth: 520, alignment: .leading)
             }
         }
@@ -950,6 +953,12 @@ struct TestRunView: View {
 }
 
 struct TestResultsView: View {
+    /// The line under the score. The flashcard sentence only when cards were asked.
+    static func footnote(hasCards: Bool) -> String {
+        (hasCards ? "Cards you got right just earned a longer flashcard interval. " : "")
+            + "A miss here doesn't change anything. It just tells you where to focus."
+    }
+
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let deckName: String
@@ -1008,8 +1017,7 @@ struct TestResultsView: View {
                 .padding(.top, 14)
                 .animation(Motion.base, value: correct)
 
-                Text("Cards you got right just earned a longer flashcard interval. A miss here doesn't "
-                     + "change anything. It just tells you where to focus.")
+                Text(Self.footnote(hasCards: graded.contains { $0.question.cardId != nil }))
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .multilineTextAlignment(.center)
@@ -1070,7 +1078,8 @@ struct TestResultsView: View {
                                 .textCase(.uppercase)
                                 .foregroundStyle(GRASPColor.textTertiary)
                             TypedAnswerFeedback(judged: item.judged!, given: item.givenAnswer,
-                                                expected: item.question.correctAnswer)
+                                                expected: item.question.correctAnswer,
+                                                hasCard: item.question.cardId != nil)
                         }
                         .padding(.top, 2)
                     } else if item.isCorrect {
