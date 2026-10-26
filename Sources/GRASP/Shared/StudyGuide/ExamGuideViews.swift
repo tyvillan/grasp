@@ -15,12 +15,16 @@ struct ExamGuideContent: View {
     /// Opens a guide's file at a page, for the tables and figures its text
     /// can't carry.
     let onOpenPage: (PDFPageTarget) -> Void
+    @State private var questionsNotice: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             ExamHeader(page: page, fileURL: { store.fileURL(ofGuide: $0) },
                        onOpen: { guide, url in onOpenPage(PDFPageTarget(url: url, page: 1, title: guide.title, wholeFile: true)) },
-                       onRemove: { store.deleteStudyGuide($0.id) })
+                       onRemove: { store.deleteStudyGuide($0.id) },
+                       onAddQuestions: { guide in
+                           questionsNotice = Self.questionsNotice(store.addGuideQuestions(guideId: guide.id))
+                       })
             if page.parts.isEmpty {
                 ContentUnavailableView(
                     "No parts found",
@@ -44,11 +48,30 @@ struct ExamGuideContent: View {
                 }
             }
         }
+        .alert("Guide questions", isPresented: Binding(get: { questionsNotice != nil }, set: { if !$0 { questionsNotice = nil } })) {
+            Button("OK") { questionsNotice = nil }
+        } message: { Text(questionsNotice ?? "") }
         // Write the skills' explanations in the background, so "What is this?" is instant.
         .task(id: page.exam.id) {
             store.prefetchSkillExplanations(skills: page.parts.flatMap(\.skills),
                                             terms: page.parts.flatMap(\.terms), subject: page.exam.title)
         }
+    }
+
+    /// What the "Save Questions" menu item reports.
+    static func questionsNotice(_ result: GuideQuestions.Result?) -> String {
+        guard let result else { return "Couldn't save the questions. Try again." }
+        if result.added == 0 {
+            return result.alreadyThere > 0
+                ? "Every question in this guide is already saved, so nothing was added."
+                : "This guide has no questions with answers to save."
+        }
+        var text = "Saved \(result.added) \(result.added == 1 ? "question" : "questions") in \"\(result.deckName)\". "
+            + "Find them under Questions in that deck and in All Cards. A test includes them when "
+            + "\"Include questions\" is on."
+        if result.alreadyThere > 0 { text += " \(result.alreadyThere) were already saved." }
+        if result.skipped > 0 { text += " \(result.skipped) were left out because they have no answer or need a table or figure." }
+        return text
     }
 
     private func partView(_ part: StudyGuideActions.PagePart, showsSkills: Bool) -> some View {
@@ -149,6 +172,7 @@ private struct ExamHeader: View {
     let fileURL: (StudyGuide) -> URL?
     let onOpen: (StudyGuide, URL) -> Void
     let onRemove: (StudyGuide) -> Void
+    let onAddQuestions: (StudyGuide) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -204,6 +228,9 @@ private struct ExamHeader: View {
                                 .graspType(.meta)
                         }
                         Menu {
+                            Button { onAddQuestions(guide) } label: {
+                                Label("Save Questions", systemImage: "list.bullet.rectangle")
+                            }
                             Button(page.isPracticeSet ? "Delete This Practice Set" : "Remove from This Exam",
                                    role: .destructive) { onRemove(guide) }
                         } label: {
