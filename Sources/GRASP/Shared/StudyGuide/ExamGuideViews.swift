@@ -15,16 +15,12 @@ struct ExamGuideContent: View {
     /// Opens a guide's file at a page, for the tables and figures its text
     /// can't carry.
     let onOpenPage: (PDFPageTarget) -> Void
-    @State private var cardsNotice: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             ExamHeader(page: page, fileURL: { store.fileURL(ofGuide: $0) },
                        onOpen: { guide, url in onOpenPage(PDFPageTarget(url: url, page: 1, title: guide.title, wholeFile: true)) },
-                       onRemove: { store.deleteStudyGuide($0.id) },
-                       onAddCards: { guide in
-                           cardsNotice = Self.cardsNotice(store.addGuideCards(guideId: guide.id))
-                       })
+                       onRemove: { store.deleteStudyGuide($0.id) })
             if page.parts.isEmpty {
                 ContentUnavailableView(
                     "No parts found",
@@ -48,29 +44,11 @@ struct ExamGuideContent: View {
                 }
             }
         }
-        .alert("Questions as cards", isPresented: Binding(get: { cardsNotice != nil }, set: { if !$0 { cardsNotice = nil } })) {
-            Button("OK") { cardsNotice = nil }
-        } message: { Text(cardsNotice ?? "") }
         // Write the skills' explanations in the background, so "What is this?" is instant.
         .task(id: page.exam.id) {
             store.prefetchSkillExplanations(skills: page.parts.flatMap(\.skills),
                                             terms: page.parts.flatMap(\.terms), subject: page.exam.title)
         }
-    }
-
-    /// What the "Add Questions as Cards" menu item reports.
-    static func cardsNotice(_ result: GuideCards.Result?) -> String {
-        guard let result else { return "Couldn't add the cards. Try again." }
-        if result.added == 0 {
-            return result.alreadyThere > 0
-                ? "Every question in this guide already has a card, so nothing was added."
-                : "This guide has no questions with answers to turn into cards."
-        }
-        var text = "Added \(result.added) \(result.added == 1 ? "card" : "cards") to \"\(result.deckName)\". "
-            + "They are active, so they show in All Cards and in Study, Learn and Test."
-        if result.alreadyThere > 0 { text += " \(result.alreadyThere) already had cards." }
-        if result.skipped > 0 { text += " \(result.skipped) were left out because they have no answer or need a table or figure." }
-        return text
     }
 
     private func partView(_ part: StudyGuideActions.PagePart, showsSkills: Bool) -> some View {
@@ -171,7 +149,6 @@ private struct ExamHeader: View {
     let fileURL: (StudyGuide) -> URL?
     let onOpen: (StudyGuide, URL) -> Void
     let onRemove: (StudyGuide) -> Void
-    let onAddCards: (StudyGuide) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -227,9 +204,6 @@ private struct ExamHeader: View {
                                 .graspType(.meta)
                         }
                         Menu {
-                            Button { onAddCards(guide) } label: {
-                                Label("Add Questions as Cards", systemImage: "rectangle.stack.badge.plus")
-                            }
                             Button(page.isPracticeSet ? "Delete This Practice Set" : "Remove from This Exam",
                                    role: .destructive) { onRemove(guide) }
                         } label: {

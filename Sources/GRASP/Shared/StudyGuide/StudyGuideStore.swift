@@ -221,14 +221,6 @@ extension AppStore {
         }
     }
 
-    /// Makes a card of each worked example in a guide (see `GuideCards`).
-    @discardableResult
-    func addGuideCards(guideId: String) -> GuideCards.Result? {
-        let result = try? database.queue.write { db in try GuideCards.addCards(guideId: guideId, db: db) }
-        reload()
-        return result
-    }
-
     func setGuideExam(guideId: String, examEventId: String?) {
         try? database.queue.write { db in
             try StudyGuideActions.setExam(guideId: guideId, examEventId: examEventId, db: db)
