@@ -668,6 +668,18 @@ struct TestRunView: View {
 
     @ViewBuilder
     private func questionPrompt(_ question: LearnEngine.RoundQuestion) -> some View {
+        VStack(spacing: 14) {
+            promptText(question)
+            // A practice question that refers to a figure shows it, drawn from its own numbers.
+            if let figure = QuestionFigure.detect(in: question.prompt) {
+                QuestionFigureView(figure: figure)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func promptText(_ question: LearnEngine.RoundQuestion) -> some View {
         if question.problem != nil || (question.cardId == nil && question.prompt.contains("\n")) {
             // Long or code-bearing prompts read left to right; a matrix only
             // lines up that way.

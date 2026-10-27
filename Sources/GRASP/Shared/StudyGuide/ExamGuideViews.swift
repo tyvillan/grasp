@@ -745,6 +745,9 @@ private struct PracticeProblem: View {
                 .buttonStyle(.borderless)
             }
             GuideText(text: example.question, style: .prose, color: GRASPColor.textPrimary)
+            if let figure = QuestionFigure.detect(in: example.question) {
+                QuestionFigureView(figure: figure)
+            }
             if example.isPractice {
                 if revealed {
                     VStack(alignment: .leading, spacing: 8) {
