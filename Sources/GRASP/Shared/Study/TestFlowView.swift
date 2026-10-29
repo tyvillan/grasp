@@ -981,11 +981,18 @@ struct TestResultsView: View {
     @State private var graded: [GradedQuestion]
     /// Each card's stage after this test, read as its row appears.
     @State private var cardStates: [String: UnderstandingState] = [:]
+    /// Each saved or guide question's stage, by `QuestionUnderstanding.key`.
+    @State private var questionStates: [String: UnderstandingState] = [:]
+    /// A study guide's test: its questions that are not cards are the
+    /// guide's own examples, which have a meter. Elsewhere only saved
+    /// questions do; a one-off AI question has none.
+    let isGuideTest: Bool
 
     init(deckName: String, attemptId: String, graded: [GradedQuestion], deckIds: [String] = [],
-         onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
+         isGuideTest: Bool = false, onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
         self.deckName = deckName
         self.deckIds = deckIds
+        self.isGuideTest = isGuideTest
         self.onRetry = onRetry
         self.attemptId = attemptId
         self._graded = State(initialValue: graded)
@@ -1120,7 +1127,7 @@ struct TestResultsView: View {
                     WhyBlock(text: item.question.whyText)
                         .padding(.top, 2)
                     // Where this card stands now, in its stage colour.
-                    if let cardId = item.question.cardId, let state = cardStates[cardId] {
+                    if let state = item.question.cardId.flatMap({ cardStates[$0] }) ?? questionState(of: item.question) {
                         HStack(spacing: 8) {
                             PipMeter(state: state, size: .card, showsWord: true)
                             Text("Now")
@@ -1162,6 +1169,7 @@ struct TestResultsView: View {
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
+            .task(id: attemptId) { loadQuestionStates() }
 
             HStack {
                 Spacer()
@@ -1203,6 +1211,23 @@ struct TestResultsView: View {
             store.rememberAcceptedAnswer(item.givenAnswer, forCard: cardId)
         }
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: item.ordinal, cardId: item.question.cardId)
+        loadQuestionStates()
+    }
+
+    /// A question that is not a card has a meter when it is saved or comes
+    /// from the guide.
+    private func hasQuestionMeter(_ question: LearnEngine.RoundQuestion) -> Bool {
+        question.cardId == nil && (question.bankQuestionId != nil || isGuideTest)
+    }
+
+    private func questionState(of question: LearnEngine.RoundQuestion) -> UnderstandingState? {
+        hasQuestionMeter(question) ? questionStates[QuestionUnderstanding.key(of: question)] : nil
+    }
+
+    /// One read for the whole list.
+    private func loadQuestionStates() {
+        let keys = graded.map(\.question).filter(hasQuestionMeter).map(QuestionUnderstanding.key(of:))
+        questionStates = store.questionStates(forKeys: Set(keys))
     }
 }
 

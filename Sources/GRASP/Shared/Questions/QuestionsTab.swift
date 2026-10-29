@@ -23,6 +23,7 @@ struct QuestionsTab: View {
 
     @State private var questions: [TestQuestion] = []
     @State private var history: [String: QuestionHistory] = [:]
+    @State private var states: [String: UnderstandingState] = [:]
     @State private var noteTitles: [String: String] = [:]
     @State private var hasLoaded = false
     @State private var filter: Filter = .all
@@ -72,7 +73,7 @@ struct QuestionsTab: View {
                 LazyVStack(spacing: 0) {
                     ForEach(shown) { question in
                         QuestionRow(
-                            question: question, history: history[question.id],
+                            question: question, history: history[question.id], state: states[question.id],
                             noteTitle: question.materialId.flatMap { noteTitles[$0] },
                             notApprovedReason: notApproved[question.id],
                             onEdit: { editing = question },
@@ -233,6 +234,7 @@ struct QuestionsTab: View {
     private func load() {
         questions = store.savedQuestions(inDecks: deckIds)
         history = store.questionHistory(of: questions.map(\.id))
+        states = store.questionStates(of: questions)
         noteTitles = store.noteTitles(forMaterials: Array(Set(questions.compactMap(\.materialId))))
         if drafts.isEmpty, filter == .review { filter = .all }
         hasLoaded = true
@@ -328,6 +330,9 @@ private struct QuestionsEmptyState: View {
 private struct QuestionRow: View {
     let question: TestQuestion
     let history: QuestionHistory?
+    /// Where the question stands on the understanding meter, the same
+    /// three steps as a card.
+    var state: UnderstandingState? = nil
     let noteTitle: String?
     var notApprovedReason: String? = nil
     let onEdit: () -> Void
@@ -373,6 +378,9 @@ private struct QuestionRow: View {
                                 .foregroundStyle(GRASPColor.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
+                            if let state {
+                                PipMeter(state: state, isSuspended: isSuspended)
+                            }
                             Text(history?.line ?? "Not asked yet")
                                 .font(.graspUI(size: 12))
                                 .foregroundStyle(GRASPColor.textTertiary)

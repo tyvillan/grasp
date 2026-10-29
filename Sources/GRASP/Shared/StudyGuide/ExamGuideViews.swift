@@ -16,6 +16,9 @@ struct ExamGuideContent: View {
     /// can't carry.
     let onOpenPage: (PDFPageTarget) -> Void
     @State private var questionsNotice: String?
+    /// Each worked example's understanding meter, by `QuestionUnderstanding.key`.
+    /// Shared with the saved question made from it.
+    @State private var exampleStates: [String: UnderstandingState] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -56,6 +59,11 @@ struct ExamGuideContent: View {
             store.prefetchSkillExplanations(skills: page.parts.flatMap(\.skills),
                                             terms: page.parts.flatMap(\.terms), subject: page.exam.title)
         }
+        .task(id: "\(page.exam.id)-\(store.revision)") {
+            let keys = page.parts.flatMap(\.examples).map(\.example)
+                .filter { $0.answer?.isEmpty == false }.map(QuestionUnderstanding.key(of:))
+            exampleStates = store.questionStates(forKeys: Set(keys))
+        }
     }
 
     /// What the "Save Questions" menu item reports.
@@ -80,6 +88,7 @@ struct ExamGuideContent: View {
             total: page.questionCount,
             decks: decks,
             showsSkills: showsSkills,
+            exampleStates: exampleStates,
             allTerms: page.parts.flatMap(\.terms),
             subject: page.exam.title,
             onSetDecks: { deckIds in
@@ -253,6 +262,7 @@ private struct PartSection: View {
     let total: Int?
     let decks: [Deck]
     let showsSkills: Bool
+    let exampleStates: [String: UnderstandingState]
     let allTerms: [StudyGuideDocument.Term]
     let subject: String
     let onSetDecks: ([String]) -> Void
@@ -358,7 +368,7 @@ private struct PartSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("Practice")
                     ForEach(practice) { item in
-                        PracticeProblem(item: item, onOpenPage: onOpenPage)
+                        PracticeProblem(item: item, state: state(of: item), onOpenPage: onOpenPage)
                     }
                 }
             }
@@ -366,11 +376,17 @@ private struct PartSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("Examples")
                     ForEach(illustrations) { item in
-                        PracticeProblem(item: item, onOpenPage: onOpenPage)
+                        PracticeProblem(item: item, state: state(of: item), onOpenPage: onOpenPage)
                     }
                 }
             }
         }
+    }
+
+    /// An example a test can ask (it has an answer) has a meter.
+    private func state(of item: StudyGuideActions.PageExample) -> UnderstandingState? {
+        guard item.example.answer?.isEmpty == false else { return nil }
+        return exampleStates[QuestionUnderstanding.key(of: item.example)]
     }
 
     private var header: some View {
@@ -723,6 +739,9 @@ private extension SkillConfidence {
 /// can be tried cold -- the way both guides say to use their examples.
 private struct PracticeProblem: View {
     let item: StudyGuideActions.PageExample
+    /// Where this question stands, from every test that asked it here or
+    /// as a saved question. nil for an example a test can't ask.
+    var state: UnderstandingState? = nil
     let onOpenPage: (String, Int) -> Void
     @State private var revealed = false
 
@@ -735,6 +754,9 @@ private struct PracticeProblem: View {
                     .graspType(.rowTitle)
                     .foregroundStyle(GRASPColor.textSecondary)
                 Spacer()
+                if let state {
+                    PipMeter(state: state, size: .card, showsWord: true)
+                }
             }
             if example.usesFigure == true, let page = example.page {
                 Button { onOpenPage(item.guideId, page) } label: {

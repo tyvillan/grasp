@@ -1259,11 +1259,15 @@ final class AppStore {
         // the examples GRASP wrote and checked for these lectures.
         let bankRoom = max(config.questionCount - fromGuide.count, config.questionCount / 3)
         let (written, choice) = (config.allowWritten, config.allowMultipleChoice)
-        let bank: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
+        // A guide example saved as a question is the same question: ask it
+        // once. Picks extra so leaving those out still fills the room.
+        let guideKeys = Set(fromGuide.map(QuestionUnderstanding.key(of:)))
+        let picked: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
             var rng = SystemRandomNumberGenerator()
-            return try CodeQuestionBank.pickRound(count: bankRoom, inDecks: bankDecks, allowWritten: written,
-                                                  allowMultipleChoice: choice, using: &rng, db: db)
+            return try CodeQuestionBank.pickRound(count: bankRoom + fromGuide.count, inDecks: bankDecks,
+                                                  allowWritten: written, allowMultipleChoice: choice, using: &rng, db: db)
         }) ?? []
+        let bank = Array(picked.filter { !guideKeys.contains(QuestionUnderstanding.key(of: $0)) }.prefix(bankRoom))
         var questions = Array(fromGuide.prefix(config.questionCount - min(bank.count, bankRoom))) + bank
         questions.shuffle(using: &rng)
         guard !questions.isEmpty else { return ("", [], nil) }

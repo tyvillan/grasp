@@ -12,6 +12,18 @@ extension AppStore {
         (try? database.queue.read { try QuestionBank.history(of: ids, db: $0) }) ?? [:]
     }
 
+    /// Each saved question's understanding meter, by question id. Shared
+    /// with the guide example it came from, if any.
+    func questionStates(of questions: [TestQuestion]) -> [String: UnderstandingState] {
+        (try? database.queue.read { try QuestionUnderstanding.states(of: questions, db: $0) }) ?? [:]
+    }
+
+    /// The meter for questions known by `QuestionUnderstanding.key`: a
+    /// guide's examples, or a test's questions that are not cards.
+    func questionStates(forKeys keys: Set<String>) -> [String: UnderstandingState] {
+        (try? database.queue.read { try QuestionUnderstanding.states(forKeys: keys, db: $0) }) ?? [:]
+    }
+
     /// How many questions a test could draw from these decks (active only).
     func activeQuestionCount(inDecks deckIds: [String]) -> Int {
         (try? database.queue.read { try QuestionBank.activeCount(inDecks: deckIds, db: $0) }) ?? 0

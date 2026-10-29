@@ -150,7 +150,8 @@ struct ExamScreen: View {
                 $testPhase.advance(to: .results(attemptId: attemptId, graded: graded), store: store)
             }
         case .results(let attemptId, let graded):
-            TestResultsView(deckName: page.exam.title, attemptId: attemptId, graded: graded, deckIds: page.deckIds) { id, questions in
+            TestResultsView(deckName: page.exam.title, attemptId: attemptId, graded: graded, deckIds: page.deckIds,
+                            isGuideTest: true) { id, questions in
                 $testPhase.advance(to: .running(attemptId: id, questions: questions, aiWarning: nil), store: store)
             }
         }
