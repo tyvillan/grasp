@@ -1193,14 +1193,19 @@ final class AppStore {
         let flashcards = config.includeFlashcards
         if includeQuestions ?? isSavedQuestionsEnabled {
             let share = Study.savedQuestionShare(for: config.questionCount, withFlashcards: flashcards)
-            savedQuestions = (try? await database.queue.read { db in
+            // Every question that fits, so understood ones can come up less.
+            let pool: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
                 var rng = SystemRandomNumberGenerator()
-                return try CodeQuestionBank.pickRound(count: share, inDecks: deckIds,
+                return try CodeQuestionBank.pickRound(count: .max, inDecks: deckIds,
                                                       allowWritten: config.allowWritten,
                                                       allowMultipleChoice: config.allowMultipleChoice,
                                                       allowTrueFalse: config.allowTrueFalse,
                                                       using: &rng, db: db)
             }) ?? []
+            let understood = understoodKeys(Set(pool.map(QuestionUnderstanding.key(of:))))
+            var rng = SystemRandomNumberGenerator()
+            savedQuestions = QuestionPicking.favorUnlearned(
+                pool, count: share, isUnderstood: { understood.contains(QuestionUnderstanding.key(of: $0)) }, using: &rng)
         }
         // One-line AI questions stay with the flashcard side: only when
         // flashcards are on, Written is on, and the AI setting is on, and only
@@ -1246,28 +1251,47 @@ final class AppStore {
     /// "what is the output" becomes predict-the-output), then the checked
     /// practice problems GRASP saved for the lectures the guide covers.
     /// No flashcards: those are what the deck's own test is for.
+    /// Which of these question keys are understood on the meter.
+    private func understoodKeys(_ keys: Set<String>) -> Set<String> {
+        Set(questionStates(forKeys: keys).filter { $0.value.isMastered }.keys)
+    }
+
     func startGuideTest(page: StudyGuideActions.ExamPage, scopeKey: String, config: TestBuilder.Config) async throws
         -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
         var deckIds = page.deckIds
         if deckIds.isEmpty, let courseId = page.exam.courseId { deckIds = self.deckIds(in: .course(courseId)) }
         let bankDecks = deckIds
         var rng = SystemRandomNumberGenerator()
-        let fromGuide = GuideExamples.round(GuideExamples.items(from: page), count: config.questionCount,
-                                            allowWritten: config.allowWritten,
+        // Understood examples come up less: most sit out this test, and fill
+        // in only when the others run short.
+        let items = GuideExamples.items(from: page)
+        let understoodItems = understoodKeys(Set(items.map(\.understandingKey)))
+        let (first, heldBack) = QuestionPicking.split(items, isUnderstood: { understoodItems.contains($0.understandingKey) },
+                                                      using: &rng)
+        var fromGuide = GuideExamples.round(first, count: config.questionCount, allowWritten: config.allowWritten,
                                             allowMultipleChoice: config.allowMultipleChoice, using: &rng)
+        if fromGuide.count < config.questionCount {
+            fromGuide += GuideExamples.round(heldBack, count: config.questionCount - fromGuide.count,
+                                             allowWritten: config.allowWritten,
+                                             allowMultipleChoice: config.allowMultipleChoice, using: &rng)
+        }
         // Saved problems fill the rest, and always get some room: they're
         // the examples GRASP wrote and checked for these lectures.
         let bankRoom = max(config.questionCount - fromGuide.count, config.questionCount / 3)
         let (written, choice) = (config.allowWritten, config.allowMultipleChoice)
         // A guide example saved as a question is the same question: ask it
-        // once. Picks extra so leaving those out still fills the room.
+        // once. Picks every one that fits, so leaving those out still fills
+        // the room and understood ones can come up less.
         let guideKeys = Set(fromGuide.map(QuestionUnderstanding.key(of:)))
         let picked: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
             var rng = SystemRandomNumberGenerator()
-            return try CodeQuestionBank.pickRound(count: bankRoom + fromGuide.count, inDecks: bankDecks,
+            return try CodeQuestionBank.pickRound(count: .max, inDecks: bankDecks,
                                                   allowWritten: written, allowMultipleChoice: choice, using: &rng, db: db)
         }) ?? []
-        let bank = Array(picked.filter { !guideKeys.contains(QuestionUnderstanding.key(of: $0)) }.prefix(bankRoom))
+        let open = picked.filter { !guideKeys.contains(QuestionUnderstanding.key(of: $0)) }
+        let understoodSaved = understoodKeys(Set(open.map(QuestionUnderstanding.key(of:))))
+        let bank = QuestionPicking.favorUnlearned(
+            open, count: bankRoom, isUnderstood: { understoodSaved.contains(QuestionUnderstanding.key(of: $0)) }, using: &rng)
         var questions = Array(fromGuide.prefix(config.questionCount - min(bank.count, bankRoom))) + bank
         questions.shuffle(using: &rng)
         guard !questions.isEmpty else { return ("", [], nil) }
