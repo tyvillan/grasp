@@ -11,7 +11,13 @@ private final class DraftGenerator: CardGenerator, @unchecked Sendable {
     var written: [GeneratedTestQuestion] = []
     var solverDisagreesWith: String?
     var calls = 0
-    var delay: Duration?
+    /// When set, a problems call tells the test it has started, then waits
+    /// until the run is cancelled. No clock is involved.
+    var holdsUntilCancelled = false
+    let started: AsyncStream<Void>
+    private let startedSignal: AsyncStream<Void>.Continuation
+
+    init() { (started, startedSignal) = AsyncStream.makeStream(of: Void.self) }
 
     var isAvailable: Bool { get async { available } }
     func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] { [] }
@@ -26,7 +32,11 @@ private final class DraftGenerator: CardGenerator, @unchecked Sendable {
     func generateProblems(deckName: String, courseName: String, noteContext: String, cardTerms: [String],
                           subject: ProblemSubject, kinds: [ProblemKind], count: Int) async -> [GeneratedProblem] {
         calls += 1
-        if let delay { try? await Task.sleep(for: delay) }
+        if holdsUntilCancelled {
+            startedSignal.yield()
+            // Cancelling the run ends this sleep at once; the long length is only a backstop.
+            try? await Task.sleep(for: .seconds(600))
+        }
         return problems
     }
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
@@ -162,9 +172,9 @@ struct QuestionDraftTests {
         let lib = try makeLibrary()
         let generator = DraftGenerator()
         generator.problems = [mc("Which perspective collects data through direct contact and full immersion?")]
-        generator.delay = .milliseconds(300)
+        generator.holdsUntilCancelled = true
         let task = Task { await run(lib, generator) }
-        try await Task.sleep(for: .milliseconds(60))
+        for await _ in generator.started { break }
         task.cancel()
         let outcome = await task.value
         #expect(outcome.wasCancelled)

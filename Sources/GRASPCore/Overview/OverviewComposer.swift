@@ -95,14 +95,48 @@ public enum OverviewComposer {
             // writing about a lecture got real statements wrong -- which
             // swap makes a reflection, what "one-to-one" means -- and a
             // study tool must not teach those with confidence.
-            if !document.sections.isEmpty {
-                progress?.expect(document.sections.count)
-                for index in document.sections.indices {
+            //
+            // Checks run only where `reviewsWholeOverview` says so (the
+            // cloud model). A local model goes without them, as it always
+            // has in practice: they were never reachable through
+            // `any CardGenerator` until `reviewSection` became a protocol
+            // requirement, and running one call per section on a local
+            // model is a cost and quality change that is the student's to
+            // choose.
+            if !document.sections.isEmpty, generator.reviewsWholeOverview {
+                var reviewed: [[OverviewFix]]?
+                // One call over the whole lesson and the note: the note
+                // is read once, not once per section.
+                progress?.expect(1)
+                progress?.begin("Checking the lesson against your note")
+                reviewed = await generator.reviewOverview(noteContext: chunk.text, sections: document.sections)
+                progress?.advance()
+                if let fixes = reviewed, fixes.count == document.sections.count {
+                    for index in document.sections.indices {
+                        document.sections[index] = OverviewReview.apply(fixes[index], to: document.sections[index])
+                    }
+                } else {
+                    // Unusable reply: section by section.
+                    progress?.expect(document.sections.count)
                     if Task.isCancelled { return .empty }
-                    progress?.begin("Checking section \(index + 1) of \(document.sections.count)")
-                    let fixes = await generator.reviewSection(noteContext: chunk.text, section: document.sections[index])
-                    document.sections[index] = OverviewReview.apply(fixes, to: document.sections[index])
-                    progress?.advance()
+                    let width = max(1, generator.maxConcurrentCalls)
+                    let sections = document.sections
+                    let noteChunk = chunk.text
+                    progress?.begin(width > 1 ? "Checking \(sections.count) sections"
+                                              : "Checking section 1 of \(sections.count)")
+                    let found = await AIConcurrency.map(Array(sections.enumerated()), limit: width) { item -> [OverviewFix] in
+                        let (position, section) = item
+                        if width == 1 {
+                            progress?.begin("Checking section \(position + 1) of \(sections.count)")
+                        }
+                        let fixes = await generator.reviewSection(noteContext: noteChunk, section: section)
+                        progress?.advance()
+                        return fixes
+                    }
+                    if Task.isCancelled { return .empty }
+                    for index in document.sections.indices {
+                        document.sections[index] = OverviewReview.apply(found[index] ?? [], to: document.sections[index])
+                    }
                 }
                 document.sections = document.sections.filter { !$0.paragraphs.isEmpty }
             }
@@ -181,7 +215,7 @@ public enum OverviewComposer {
         // can tell -- measured on real lessons, two sections teaching the
         // same idea shared no more words than two that merely shared a
         // topic.
-        if merged.sections.count > 2 {
+        if merged.sections.count > 2, generator.reviewsWholeOverview {
             progress?.expect(1)
             progress?.begin("Removing repetition")
             merged = OverviewReview.apply(await generator.findRepetition(in: merged), to: merged)

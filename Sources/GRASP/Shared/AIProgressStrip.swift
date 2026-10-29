@@ -64,6 +64,15 @@ struct AIProgressStrip: View {
                     .foregroundStyle(GRASPColor.textSecondary)
                     .lineLimit(2)
             }
+            if !activity.snapshot.finished.isEmpty {
+                Label(activity.snapshot.finished.suffix(3).joined(separator: "  ·  "),
+                      systemImage: "checkmark.circle")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.success)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help("Written so far: " + activity.snapshot.finished.joined(separator: ", "))
+            }
             // Re-evaluated on a clock as well as on each step, so the time
             // left keeps counting down during a long call rather than
             // freezing between steps.

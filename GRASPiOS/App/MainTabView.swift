@@ -53,8 +53,29 @@ struct MainTabView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        // Feedback: the soft asks sit just above the tab bar.
+        .feedbackAskHost()
         .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
         .tint(GRASPColor.accent)
+        // The first-run tutorial: it lights up the real controls and only
+        // navigates (a tab, or a deck pushed on Today).
+        .environment(store.tutorial)
+        .overlay { TutorialOverlay().environment(store.tutorial) }
+        .onChange(of: store.tutorial.token) { _, _ in prepareTutorialScreen() }
+        .task { store.startTutorialIfFirstTime() }
+        .feedbackSheet()
+        .task { store.startFeedback() }
+        .onChange(of: tab, initial: true) { _, new in
+            let screen: FeedbackScreen = switch new {
+            case "study": .courses
+            case "calendar": .calendar
+            case "settings": .settings
+            case "search": .search
+            default: .today
+            }
+            FeedbackScreen.base = screen
+            FeedbackScreen.current = screen
+        }
         .onAppear(perform: openWidgetLink)
         .onChange(of: WidgetRouter.shared.pending) { _, _ in openWidgetLink() }
     }
@@ -82,11 +103,40 @@ struct MainTabView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(spec.title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
+                .tutorialTarget(spec.id == "study" ? TutorialTarget.coursesTab : spec.id == "settings" ? .settingsTab : nil)
             }
         }
         .background(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
         .background(GRASPColor.surface.ignoresSafeArea(edges: .bottom))
     }
+
+    /// Puts the screen the tutorial step is about behind it. Navigation only:
+    /// a tab, or the first deck pushed on Today. Closing the tour puts it back.
+    private func prepareTutorialScreen() {
+        let tutorial = store.tutorial
+        guard tutorial.isActive else {
+            if let before = preTutorialScreen {
+                preTutorialScreen = nil
+                tab = before.tab
+                widgetDeck = before.deck
+            }
+            return
+        }
+        let step = tutorial.current
+        let needsDeck = step.needsDeckPage && !tutorial.ignoresDeckPage
+        let needsCourses = step.targets.contains(.importNotes)
+        guard needsDeck || needsCourses else { return }
+        if preTutorialScreen == nil { preTutorialScreen = PreTutorialScreen(tab: tab, deck: widgetDeck) }
+        if needsCourses {
+            tab = "study"
+        } else if let course = store.firstCourseWithDeck() {
+            tab = "today"
+            widgetDeck = DeckRoute(scope: .course(course.id), name: course.name)
+        }
+    }
+
+    private struct PreTutorialScreen { let tab: String; let deck: DeckRoute? }
+    @State private var preTutorialScreen: PreTutorialScreen?
 
     private func openWidgetLink() {
         guard let link = WidgetRouter.shared.consume() else { return }

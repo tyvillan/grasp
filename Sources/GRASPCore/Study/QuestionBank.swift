@@ -201,6 +201,38 @@ public enum QuestionBank {
         return "It can't be read."
     }
 
+    /// The marker a photo question carries while its answer is one the AI
+    /// worked out rather than one the page printed.
+    public static let answerCheckMarker = "answer written by AI: check it"
+
+    /// The marker a photo question carries when the reader was unsure of the page, so its
+    /// words may be misread.
+    public static let readCheckMarker = "photo hard to read: check the wording"
+
+    /// Whether a draft still needs you to check it against its photo: its answer was written
+    /// by AI, or the photo was hard to read.
+    public static func needsAnswerCheck(_ record: TestQuestion) -> Bool {
+        record.verifiedBy.contains(answerCheckMarker) || record.verifiedBy.contains(readCheckMarker)
+    }
+
+    /// What to tell you to check: "Check the answer", "Check the wording" or both.
+    public static func checkLabel(_ record: TestQuestion) -> String? {
+        let answer = record.verifiedBy.contains(answerCheckMarker), words = record.verifiedBy.contains(readCheckMarker)
+        switch (answer, words) {
+        case (true, true): return "Check the wording and the answer"
+        case (true, false): return "Check the answer"
+        case (false, true): return "Check the wording"
+        default: return nil
+        }
+    }
+
+    /// Why a draft that needs checking is not approved in bulk.
+    public static func checkReason(_ record: TestQuestion) -> String {
+        record.verifiedBy.contains(readCheckMarker)
+            ? "The photo was hard to read. Check the wording against it, then approve it yourself."
+            : "Its answer was written by AI. Check it, then approve it yourself."
+    }
+
     /// Approves one draft: it becomes active, and from then on it syncs.
     /// Returns why it was not approved, or nil on success. Nothing that fails
     /// a check is approved.
@@ -209,6 +241,14 @@ public enum QuestionBank {
         guard let record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil,
               record.statusKind == .draft else { return nil }
         if let why = approvalProblem(record) { return why }
+        // Approving it yourself is the check.
+        if needsAnswerCheck(record) {
+            var checked = record
+            checked.verifiedBy = record.verifiedBy
+                .replacingOccurrences(of: answerCheckMarker, with: "answer written by AI, checked by you")
+                .replacingOccurrences(of: readCheckMarker, with: "photo hard to read, checked by you")
+            try checked.save(db)
+        }
         try setStatus(id, to: .active, db: db)
         return nil
     }
@@ -227,6 +267,11 @@ public enum QuestionBank {
     public static func approveAll(inDecks deckIds: [String], db: Database) throws -> ApproveAllResult {
         var result = ApproveAllResult()
         for draft in try drafts(inDecks: deckIds, db: db) {
+            // An answer the AI wrote is approved one question at a time, after you have looked at it.
+            if needsAnswerCheck(draft) {
+                result.skipped.append((draft.id, checkReason(draft)))
+                continue
+            }
             if let why = try approve(draft.id, db: db) { result.skipped.append((draft.id, why)) } else { result.approved += 1 }
         }
         return result
@@ -236,6 +281,76 @@ public enum QuestionBank {
         guard var record = try TestQuestion.fetchOne(db, key: id), record.status != status.rawValue else { return }
         record.status = status.rawValue
         try record.save(db)
+        if status == .active, let imageId = record.imageId { try QuestionImages.markReady(imageId, db: db) }
+    }
+
+    // MARK: Moving and copying
+
+    public struct MoveResult: Sendable, Equatable {
+        /// Questions moved or copied.
+        public var changed = 0
+        /// Copies not made because the deck already has that question.
+        public var skippedRepeats = 0
+        public init(changed: Int = 0, skippedRepeats: Int = 0) { self.changed = changed; self.skippedRepeats = skippedRepeats }
+    }
+
+    /// Moves questions to another deck. A question keeps its history, source
+    /// and status. Its note link stays only when the note is in the new
+    /// deck's course, and its card link only when that card is in the new deck.
+    @discardableResult
+    public static func move(_ ids: [String], toDeck deckId: String, db: Database) throws -> MoveResult {
+        guard let deck = try Deck.fetchOne(db, key: deckId), deck.deletedAt == nil else {
+            throw QuestionBankError.invalid("That deck is gone.")
+        }
+        var result = MoveResult()
+        for id in ids {
+            guard var record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil,
+                  record.deckId != deckId else { continue }
+            relink(&record, toDeck: deck, db: db)
+            record.deckId = deckId
+            record.courseId = deck.courseId
+            try record.save(db)
+            result.changed += 1
+        }
+        return result
+    }
+
+    /// Copies questions into another deck as new questions (no history). A
+    /// question the deck already has, word for word, is not copied again.
+    @discardableResult
+    public static func copy(_ ids: [String], toDeck deckId: String, now: Date = Date(), db: Database) throws -> MoveResult {
+        guard let deck = try Deck.fetchOne(db, key: deckId), deck.deletedAt == nil else {
+            throw QuestionBankError.invalid("That deck is gone.")
+        }
+        var have = Set(try listing(inDecks: [deckId], db: db).map { $0.promptText.lowercased() })
+        var result = MoveResult()
+        for id in ids {
+            guard var record = try TestQuestion.fetchOne(db, key: id), record.deletedAt == nil else { continue }
+            if !record.promptText.isEmpty, have.contains(record.promptText.lowercased()) { result.skippedRepeats += 1; continue }
+            relink(&record, toDeck: deck, db: db)
+            record.id = UUID().uuidString
+            record.deckId = deckId
+            record.courseId = deck.courseId
+            record.createdAt = now
+            try record.insert(db)
+            have.insert(record.promptText.lowercased())
+            result.changed += 1
+        }
+        return result
+    }
+
+    private static func relink(_ record: inout TestQuestion, toDeck deck: Deck, db: Database) {
+        if let materialId = record.materialId,
+           (try? Material.fetchOne(db, key: materialId))?.courseId != deck.courseId { record.materialId = nil }
+        if let cardId = record.cardId,
+           (try? DeckCard.filter(Column("deckId") == deck.id && Column("cardId") == cardId).fetchCount(db)) ?? 0 == 0 {
+            record.cardId = nil
+        }
+    }
+
+    /// Sets the status of several questions at once.
+    public static func setStatus(_ ids: [String], to status: QuestionStatus, db: Database) throws {
+        for id in ids { try setStatus(id, to: status, db: db) }
     }
 
     /// The card a saved question helps, if that card still exists.

@@ -190,6 +190,10 @@ final class AppStore {
     /// order were everyone's.
     let preferences: UserDefaults
 
+    /// The first-run tutorial. It only navigates and highlights; the one thing
+    /// it saves is its own "seen" flag, in `preferences`.
+    let tutorial: TutorialFlow
+
     private static let perProfilePreferenceKeys = [
         "dailyCardGoal", "focusWorkMinutes", "focusBreakMinutes", "focusCardTarget",
         "deckSortOption", "cardSortOption", "deckListCollapsed",
@@ -253,6 +257,11 @@ final class AppStore {
         self.database = db
         self.databaseOpenError = openError
         self.preferences = Self.preferences(for: profile)
+        #if os(macOS)
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .mac)
+        #else
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .phone)
+        #endif
         self.scanner = VaultScanner(database: db)
         // A new profile starts with no vault. Defaulting to this Mac owner's
         // vault meant a second person's first Import pulled the owner's
@@ -511,6 +520,8 @@ final class AppStore {
         case .noSourceNotes:
             return "None of these cards came from a note, so there is nothing to write new cards from."
         case .modelGaveNoAnswer(let reason):
+            // A cloud failure already says what happened and what to do.
+            if CloudFailureText.isOwn(reason) { return reason }
             return "The AI model didn't give a usable answer. \(reason) Try again, or check Settings → AI."
         case .writeFailed(let created, _):
             return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
@@ -822,7 +833,7 @@ final class AppStore {
     /// re-read, so a review graded while the edit sheet was open survives
     /// (see `CardActions.updateText`).
     func updateCard(_ card: Card) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try CardActions.updateText(cardId: card.id, front: card.front, back: card.back, db: db)
         }
         reload()
@@ -1506,6 +1517,7 @@ final class AppStore {
     /// punished, so it doesn't also tighten the flashcard schedule.
     func finishTest(attemptId: String) throws -> (correct: Int, total: Int) {
         let result = try database.queue.write { db in try Study.finishTest(attemptId: attemptId, db: db) }
+        FeedbackAsks.shared.noteTestFinished()
         reload()
         return result
     }
@@ -1773,7 +1785,7 @@ final class AppStore {
     }
 
     func addManualCourse(name: String, code: String?, semesterId: String? = nil) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try LibraryActions.addManualCourse(name: name, code: code, semesterId: semesterId, db: db)
         }
         reload()

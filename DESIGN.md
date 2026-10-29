@@ -129,6 +129,34 @@ A view that uses the tokens needs no check of its own.
   Debug builds with `-GRASPAllowStubs 1` and `GRASP_STUB_QUESTIONS=1` never read the
   Keychain (`AIKeyStore.skipsKeychain`), so demo and screenshot runs cannot raise a
   password prompt.
+- **Select, move and copy.** A "Select" button above the list turns on select mode: a
+  tick circle in front of each row, a bar with Done, the count, All and an Actions menu
+  (Approve for drafts, Move to deck, Copy to deck, Suspend, Reactivate, Delete). On the
+  Mac the bar stays at the top while the list scrolls; on the iPhone it scrolls with the
+  list (the tab sits in a List row, where a pinned header does not work). Each row's menu
+  also has Move to deck and Copy to deck. The picker lists the other decks of the same
+  course. A moved question keeps its history, source and status; a copy is new, with no
+  history, and is skipped if the deck already has that question word for word.
+- **From a photo (branch `photo-import`).** The Add menu's "From a photo"
+  opens a sheet to choose pictures (Library and camera on the iPhone; Choose Images and
+  Paste on the Mac). Text is read on the device with Vision, split into questions, and
+  saved as drafts under To review with source "From a photo". An answer the page prints
+  is kept as printed; one it does not print is written by AI and marked "answer written
+  by AI: check it", which Approve all skips. The picture is a small JPEG row that stays
+  on the device until its question is approved. A draft row shows a small thumbnail of its photo (tap to enlarge)
+  and "Check the answer" when the AI wrote the answer; the editor shows the photo above the fields.
+  A title above the first numbered question is ignored (one line, two lines, or a course
+  code and date).
+  The reader turns a sideways or upside-down photo upright (it tries the four ways up and
+  keeps the one whose numbers count up), reads a tilted page line by line, and stores the
+  upright picture. A draft's thumbnail is cropped to its own question (Vision gives each
+  line's box; `testQuestion.imageCrop` holds "x,y,width,height" as page fractions) and
+  the viewer shows the whole page with that question framed. A photo that starts partway
+  through a question (options or an answer with no question above) is joined onto the
+  question at the end of the photo before it; alone, it is reported as starting partway.
+  Notes with no question in them make no question and say so. A photo the reader is unsure of
+  (low confidence, or many words the spell checker does not know, as with handwriting)
+  marks every draft from it "Check the wording", and Approve all skips them.
 - **Test sources.** Test setup has two independent switches under the question
   types: "Quiz me on flashcards" and "Include questions". With both on, saved
   questions are about a third of the test; with only questions on, the whole test.
@@ -218,6 +246,53 @@ A view that uses the tokens needs no check of its own.
   One 0.32 s entrance (flame scales in, six embers rise once and fade); under
   Reduce Motion the flame only fades in. Flame and embers use `accent` and
   `brand`, no new colour. Rule lives in `LearnStreak` (core).
+
+- **First-run tutorial** (`Sources/GRASP/Shared/Tutorial/`, shared by the Mac and iPhone).
+  It points at the real controls and never draws a copy. Three parts:
+  - **Dim.** The window goes to black at 62% with a rounded hole over the control
+    (`SpotlightShape`, even-odd fill) and a 2 pt cream ring (`textPrimary`) 6 pt
+    outside it. The dim swallows every tap, so nothing behind it can change. Only
+    on a step that waits for a real tap (the deck tabs) is the lit area left open,
+    and only for navigation. The hole moves at `Motion.thumb` and the dim fades at
+    `Motion.base`, so under Reduce Motion both are instant.
+  - **Coach card.** A `surface` card, 14 pt radius, hairline border, no shadow, at most
+    360 pt wide. Top to bottom: "Step 3 of 8" (meta), title (title), one or two lines
+    (body), the AI line with the sparkle only on the AI step, "Tap Cards." while a step
+    waits, then buttons. Skip and Back are outlined (`GRASPQuietButton`); Next, Start
+    and Done are the one filled yellow primary (`GRASPProminentButton`). Next is hidden
+    while a step waits for a tap. The card goes in the largest open space beside the lit
+    control, so it never covers it, and scrolls inside that space if the text is long.
+  - **Fallback.** When the control is not on screen (a first-time user has no course, so
+    no deck page, or it has scrolled off), the step is a plain card with the real icon
+    in a small `inset` tile and "Once you add a course you'll see this." It never waits.
+  A control opts in with `.tutorialTarget(_)`. On the iPhone the Import Notes and Add
+  buttons live in the navigation bar, which reports no position, so
+  `.tutorialTrailingBarTarget(_, width:)` points at the bar's right edge instead.
+  The steps are data (`TutorialSteps`), with the wording in one place. The tour only
+  navigates and highlights: it never imports, generates or writes, and the one thing it
+  saves is its own "seen" flag in the profile's preferences. Mac keys: Return or Right
+  arrow is Next, Left arrow is Back, Escape is Skip. VoiceOver focuses the card and reads
+  the step; the lit control keeps its own label.
+
+- **Send feedback** (`Sources/GRASP/Shared/Feedback/`, Mac and iPhone). A `GRASPSheet`
+  opened from the footer of the sidebar, just above the profile button (Mac), the top right of Settings (iPhone), Help > Send feedback (Mac) and the soft asks. Top to bottom: what
+  kind (Bug, Confusing, Idea, Love it, in a `GRASPSegmented`), an optional 1 to 5 rating
+  in round pills (tap again to clear), the message with a counter that appears at 3,600 of
+  4,000, "Send anonymously" (on by default; off adds an optional Name and Email with "So
+  Tyler can ask you a follow-up."), an optional screenshot (Choose image and Capture this
+  window on the Mac, Photos on the iPhone) with a preview, Remove, and one plain warning
+  that a screenshot can show notes and cards, and a collapsible "What gets sent" listing
+  exactly the seven facts attached. Cancel is outlined, Send is the one yellow button,
+  and there is no sparkle. A Mac sheet scrolls inside 350 pt so it fits a short window.
+  After sending the sheet says "Thanks. Your feedback was sent." or, when the network is
+  down, "Saved. It will send when you're online." with Done as the yellow button. At 5
+  sends a day Send is disabled and the footer says so.
+- **Soft asks.** A small `surface` card with one line and three outlined buttons (Send
+  feedback, Not now, Don't ask again). It floats at the bottom right on the Mac and sits
+  just above the tab bar on the iPhone. It is non-blocking, never uses yellow, never
+  appears during Study, Learn, a Test or the tutorial, and never over a sheet. Two asks
+  only, each shown once ever per device: after the first finished Test, and 7 days after
+  first launch. Any choice ends that ask for good; "Don't ask again" ends both.
 
 **Naming AI actions.** Name an AI action by what it produces: cards, overview,
 study guide, test questions. Never "questions" for card generation. The deck

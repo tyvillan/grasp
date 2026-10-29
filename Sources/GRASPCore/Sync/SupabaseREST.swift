@@ -307,8 +307,9 @@ public struct SupabaseRESTTransport: SyncTransport {
         try await send()
     }
 
-    public func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] {
+    public func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope = .rows) async throws -> [SyncRecord] {
         var query = [
+            URLQueryItem(name: "table_name", value: (scope == .rows ? "neq." : "eq.") + SyncPullScope.pictureTable),
             URLQueryItem(name: "select", value: Self.columns),
             URLQueryItem(name: "order", value: "updated_at,table_name,row_key"),
             URLQueryItem(name: "offset", value: String(offset)),

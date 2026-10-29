@@ -70,6 +70,10 @@ Supabase's built-in email sender allows only a few emails an hour. That's plenty
   Original files (PDFs, slides, images) stay where they are. A second Mac needs its own copy of your notes folder to import new notes, but it has everything already imported.
 - **Signing out** keeps the library on that device as a local profile. It just stops syncing.
 
+## Feedback from people you show the app to
+
+Separate from sync: a Send feedback sheet that writes to a `feedback` table in the same project, with no sign-in. Setup is in [supabase/FEEDBACK_SETUP.md](supabase/FEEDBACK_SETUP.md).
+
 ## Windows and phones
 
 The Mac app is the only client so far. The server side is general on purpose: every synced row sits in one table as plain JSON under your account. A future web app for Windows and phones, or a native iPhone app, signs into the same account and reads and writes the same rows. The only difference is which device writes them.

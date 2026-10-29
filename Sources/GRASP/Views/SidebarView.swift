@@ -56,6 +56,10 @@ struct SidebarView: View {
             .scrollIndicators(.never)
 
             Rectangle().fill(GRASPColor.hairline).frame(height: 1).padding(.horizontal, 16)
+            FeedbackFooterButton()
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             ProfileMenuButton(showsName: true)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -211,5 +215,27 @@ private struct SidebarRow<Label: View>: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// "Send feedback", quiet, just above the profile button at the bottom of the sidebar.
+private struct FeedbackFooterButton: View {
+    @State private var hovering = false
+
+    var body: some View {
+        Button { FeedbackLauncher.open() } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.text.bubble.right")
+                    .font(.graspUI(size: 12.5, weight: .medium))
+                Text("Send feedback")
+                    .font(.graspUI(size: 13, weight: .medium))
+            }
+            .foregroundStyle(hovering ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Tell us what's working, what's confusing, or what you wish it did")
+        .accessibilityLabel("Send feedback")
     }
 }

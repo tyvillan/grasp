@@ -366,3 +366,27 @@ UI parity item for the Windows session, plus the data it needs. **Do not edit un
 
 ### Stage 2 follow-up: Keychain skip for demo runs (Mac session note, 2026-10-16, branch `questions-tab`)
 `AIKeyStore` (core) gained a DEBUG-only `skipsKeychain` flag, on only when the app is launched with `-GRASPAllowStubs 1` and `GRASP_STUB_QUESTIONS=1`. It makes `read`, `state`, `save` and `delete` return without touching the Keychain, so screenshot runs cannot raise a password prompt. It uses only Foundation, so it builds on Windows unchanged and does nothing in a release build. A `keychainCalls` counter exists for the test that proves no call is made.
+
+
+### Move and copy questions (Mac session note, 2026-10-20, branch `question-move-copy`)
+Core: `QuestionBank.move(_:toDeck:db:)` and `copy(_:toDeck:now:db:)` return a `MoveResult` (changed, skippedRepeats), and `setStatus(_ ids:...)` sets several at once. Move changes `deckId` and `courseId` only (history is by `questionId`, so it follows); the note link is cleared when the note is in another course and the card link when the card is not in the new deck. No schema change; the updates sync as ordinary `testQuestion` edits. UI is shared (`QuestionsTab`: Select mode, Actions menu, `QuestionDeckPickerSheet`); Windows needs its own screen for it.
+
+
+### Photo import, core part (Mac session note, 2026-10-20, branch `photo-import`, unfinished)
+Migration `v20_question_images` adds synced table `questionImage` (id, courseId, jpegBase64, width, height, status draft|ready, createdAt, deletedAt), local while `status` is draft, registered after `testQuestion`. Core: `QuestionSplitter`, `PhotoQuestionImporter`, `QuestionImages`, `QuestionBank.needsAnswerCheck` and `checkLabel`, and `CardGenerator.structurePhotoQuestion` (requirement with a nil default). v20 also adds `testQuestion.imageCrop` (a nullable "x,y,width,height" of page fractions). Sync sends pictures in requests of about 1.5 MB at most (`SyncEngine.pushBatchBytes`). `SyncTransport.pull` now takes a `scope`: `.rows` (everything but `questionImage`) and `.pictures`, pulled two per page with their own `syncState.pictureCursor` (v20); a picture failure is reported in `Report.pictureProblem` and retried, never blocking other rows. Any new transport must implement the scoped pull. Windows needs the migration and table entry to sync; reading photos (Vision) is Mac and iPhone only.
+
+## Parity item: Send feedback (UI only, Mac session, 2026)
+
+The Mac and iPhone apps can send feedback to the maintainer's own Supabase (`Sources/GRASP/Shared/Feedback/`, pattern in `DESIGN.md`, setup in `supabase/FEEDBACK_SETUP.md`). The Windows app should get the same sheet, as UI only. Place the entry as on the Mac: a quiet "Send feedback" button at the bottom of the sidebar, just above the profile button. No core or schema change is needed: it is two plain HTTP calls with the public key, `POST /rest/v1/feedback` and `POST /storage/v1/object/feedback-screenshots/<id>.jpg`.
+- Fields: kind (bug, confusing, idea, love), optional rating 1 to 5, a message up to 4000 characters, anonymous on by default (off adds optional name and email), an optional screenshot (scaled to 1600 px, JPEG, under 500 KB, never attached on its own).
+- A "What gets sent" list shows exactly: app version and build, platform, OS version, device model, the screen in plain words, AI cloud / local / off, and a random install id. Never notes, cards, questions, answers, deck or course names, or keys.
+- Offline or failed sends are kept in a local file queue and retried; at most 5 sends a day per install. Two soft asks, each once ever: after the first finished Test, and 7 days after first launch; never during Study, Learn or a Test, never over a sheet, and never for a library that already had content.
+
+## Parity item: first-run tutorial (UI only, Mac session, 2026)
+
+The Mac and iPhone apps now have an interactive first-run tutorial (`Sources/GRASP/Shared/Tutorial/`, pattern in `DESIGN.md`). The Windows app should get the same thing, as UI only: no core or schema change is needed.
+- Eight steps, in this order: welcome, courses, adding notes, deck tabs (waits for a tap on Cards, then Questions), Study / Learn / Test, the Add menus, "AI is optional", done. The wording is data in `TutorialSteps`; reuse it.
+- Dim the window, light up the real control, show a small coach card. Skip is always available. It only navigates and highlights: it must never import, generate or write anything but its own flag.
+- Runs on its own once, for a profile with no courses and no cards, and not for a profile signed in to an account. Replay from Settings and from the Help menu. The "seen" flag is per device and per profile and is not synced.
+- If a control is not on screen, show a plain card instead of faking it.
+

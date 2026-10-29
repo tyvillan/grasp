@@ -18,8 +18,11 @@ struct QuestionEditorSheet: View {
     @State private var cards: [Card] = []
     @State private var saveError: String?
     @FocusState private var promptFocused: Bool
+    @State private var enlarging = false
 
     private var isEditing: Bool { editing != nil }
+    /// The picture a photo question was read from, if this device has it.
+    private var photoData: Data? { editing?.imageId.flatMap { store.questionImage($0)?.jpegData } }
 
     var body: some View {
         GRASPSheet(eyebrow: "Question", title: isEditing ? "Edit question" : "Write a question",
@@ -34,6 +37,28 @@ struct QuestionEditorSheet: View {
                 } else {
                     Text(input.kind.label)
                         .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                }
+
+                if let photo = photoData {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel("Photo")
+                        Button { enlarging = true } label: {
+                            MarkedPhoto(data: photo, box: PhotoBox(encoded: editing?.imageCrop))
+                                .frame(maxWidth: .infinity, maxHeight: 220)
+                                .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                                .clipShape(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .help("See the whole photo")
+                        .accessibilityLabel("Enlarge the photo")
+                        if let editing, QuestionBank.needsAnswerCheck(editing) {
+                            Text(editing.verifiedBy.contains(QuestionBank.readCheckMarker)
+                                 ? "The photo was hard to read, so the words may be wrong. Check them against the photo before you save."
+                                 : "The photo did not print this answer. The AI wrote it, so check it against the photo before you save.")
+                                .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
 
                 if !isEditing, decks.count > 1 {
@@ -99,7 +124,17 @@ struct QuestionEditorSheet: View {
                 deckId = decks.first?.id
             }
             cards = store.linkableCards(inDecks: deckId.map { [$0] } ?? decks.map(\.id))
-            promptFocused = true
+            // With a photo to compare against, the keyboard stays down until you tap the text.
+            promptFocused = photoData == nil
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["GRASP_EDITOR_ENLARGE"] == "1" {
+                try? await Task.sleep(for: .milliseconds(900))
+                enlarging = true
+            }
+            #endif
+        }
+        .sheet(isPresented: $enlarging) {
+            if let photo = photoData { QuestionPhotoSheet(data: photo, box: PhotoBox(encoded: editing?.imageCrop)) }
         }
         .onChange(of: deckId) { _, new in
             cards = store.linkableCards(inDecks: new.map { [$0] } ?? [])

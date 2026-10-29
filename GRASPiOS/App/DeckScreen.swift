@@ -15,6 +15,7 @@ struct DeckScreen: View {
     @State private var writingQuestion = false
     /// Opens "Generate questions with AI" on the Questions tab.
     @State private var generatingQuestions = false
+    @State private var importingPhoto = false
     /// Saved questions a test could ask, and drafts waiting for review.
     @State private var activeQuestionCount = 0
     @State private var draftQuestionCount = 0
@@ -73,6 +74,11 @@ struct DeckScreen: View {
     }
 
     private var courseId: String? { store.courseId(of: route.scope) }
+
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = studying ? .study : learning ? .learn : testPhase != nil ? .test
+            : tab == .questions ? .deckQuestions : tab == .overview ? .deckOverview : .deckCards
+    }
 
     /// The AI job running on this course, if any -- owned by the store, so
     /// it keeps going (with its Stop button) when this screen closes.
@@ -159,8 +165,10 @@ struct DeckScreen: View {
                     selection: $tab,
                     options: Tab.allCases.map { ($0, $0 == .questions && draftQuestionCount > 0
                                                     ? "\($0.rawValue) \(draftQuestionCount)" : $0.rawValue) },
-                    fillsWidth: true
+                    fillsWidth: true,
+                    onTap: { store.tutorial.didTap(.deckTab($0.rawValue)) }
                 )
+                .tutorialTarget(.deckTabs)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
             .listRowBackground(Color.clear)
@@ -171,7 +179,8 @@ struct DeckScreen: View {
             case .questions:
                 Section {
                     QuestionsTab(deckIds: deckIds, courseId: courseId, query: query, isWriting: $writingQuestion,
-                                 isGenerating: $generatingQuestions, decks: deckChoices, scopeName: route.name)
+                                 isGenerating: $generatingQuestions, isImportingPhoto: $importingPhoto,
+                                 decks: deckChoices, scopeName: route.name)
                         .listRowInsets(EdgeInsets())
                 }
                 .listRowBackground(Color.clear)
@@ -186,10 +195,20 @@ struct DeckScreen: View {
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
+        // The Add and ⋯ buttons sit in the navigation bar, which gives no
+        // frame; the tutorial points at that corner instead.
+        .tutorialTrailingBarTarget(.addMenu, width: 150)
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: tab == .questions ? "Search questions" : "Search cards")
         .onChange(of: tab) { _, new in UserDefaults.standard.set(new.rawValue, forKey: "deckContentTab") }
+        // Which screen this is, in plain words, for the feedback sheet.
+        .onAppear { noteFeedbackScreen() }
+        .onDisappear { FeedbackScreen.current = FeedbackScreen.base }
+        .onChange(of: tab) { _, _ in noteFeedbackScreen() }
+        .onChange(of: studying) { _, _ in noteFeedbackScreen() }
+        .onChange(of: learning) { _, _ in noteFeedbackScreen() }
+        .onChange(of: testPhase != nil) { _, _ in noteFeedbackScreen() }
         .task(id: store.revision) { load() }
         .onAppear {
             if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {
@@ -211,6 +230,7 @@ struct DeckScreen: View {
             case "questions": tab = .questions
             case "writequestion": tab = .questions; writingQuestion = true
             case "generatequestions": tab = .questions; generatingQuestions = true
+            case "photoimport": tab = .questions; importingPhoto = true
             case "addmenu": tab = .questions; showingAddItemsPreview = DebugLaunch.showAddMenu
             default: break
             }
@@ -327,8 +347,8 @@ struct DeckScreen: View {
         Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
         Button { generatingQuestions = true } label: { Label("Generate questions with AI", systemImage: AIGlyph.symbol) }
             .disabled(!store.isGeneratorAvailable || store.aiJob(store.questionDraftJobKey(courseId: courseId)) != nil)
-        Button {} label: { Label("From a photo (coming soon)", systemImage: "camera") }
-            .disabled(true)
+        Button { importingPhoto = true } label: { Label("From a photo", systemImage: "camera") }
+            .disabled(store.aiJob(store.photoImportJobKey(courseId: courseId)) != nil)
     }
 
     private var actionsMenu: some View {
@@ -396,7 +416,7 @@ struct DeckScreen: View {
             aiMessage = "Every note here already has an overview."
             return
         }
-        let run = AIActivity(headline: "Writing overviews", units: targets.count)
+        let run = AIActivity(headline: "Writing overviews", units: targets.count, unitName: "Note")
         store.runAIJob(store.overviewJobKey(courseId: courseId), activity: run) { [store] run in
             var written = 0
             for (index, target) in targets.enumerated() {
@@ -441,8 +461,10 @@ struct DeckScreen: View {
         HStack(spacing: 8) {
             StudyPill(title: "Study", icon: "rectangle.stack.fill", style: .primary,
                       detail: dueCount > 0 ? "\(dueCount)" : nil) { studying = true }
+                .tutorialTarget(.studyButton)
                 .disabled(dueCount == 0)
             StudyPill(title: "Learn", icon: "graduationcap.fill", style: .quiet, detail: nil) { learning = true }
+                .tutorialTarget(.learnButton)
                 .disabled(activeCount == 0)
             StudyPill(title: unfinishedTest == nil ? "Test" : "Continue test", icon: "checklist", style: .quiet,
                       detail: unfinishedTest.map { "\($0.answered)/\($0.total)" }) {
@@ -452,6 +474,7 @@ struct DeckScreen: View {
                     testPhase = .setup
                 }
             }
+            .tutorialTarget(.testButton)
             .disabled(!testAvailability.isAvailable && unfinishedTest == nil)
         }
     }
@@ -697,6 +720,7 @@ struct DeckScreen: View {
     // MARK: - Generating and empty states
 
     private var generatingStrip: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
@@ -714,6 +738,13 @@ struct DeckScreen: View {
             if let job = runningJob {
                 Button("Stop") { store.stopAIJob(job.key) }
                     .font(.graspUI(size: 13, weight: .semibold))
+            }
+        }
+            if let note = runningJob?.activity.snapshot.note {
+                Label(note, systemImage: "hourglass")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(3)
             }
         }
     }

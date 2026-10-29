@@ -520,6 +520,36 @@ enum Schema {
             try SyncSchema.installTriggers(db)
         }
 
+        // Photo import (Stage 3): the picture a question was read from, as a
+        // compressed JPEG kept in the row so it syncs like any other row. It
+        // stays on the device while its question is a draft (`status` draft),
+        // exactly like the question, and syncs once the question is approved.
+        // The question's `imageId` points at it; the link has no foreign key,
+        // so a question that arrives before its picture never fails.
+        migrator.registerMigration("v20_question_images") { db in
+            try db.create(table: "questionImage") { t in
+                t.column("id", .text).primaryKey()
+                t.column("courseId", .text).references("course", onDelete: .cascade)
+                t.column("jpegBase64", .text).notNull()
+                t.column("width", .integer).notNull()
+                t.column("height", .integer).notNull()
+                t.column("status", .text).notNull().defaults(to: "draft")
+                t.column("createdAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            // Where on the picture the question is ("x,y,width,height", fractions of
+            // the page from its top left corner), so a thumbnail can show just that part.
+            try db.alter(table: "testQuestion") { t in
+                t.add(column: "imageCrop", .text)
+            }
+            // Pictures are pulled apart from the other rows, in small pages, with their own
+            // cursor, so a picture that fails to arrive never holds back cards or reviews.
+            try db.alter(table: "syncState") { t in
+                t.add(column: "pictureCursor", .text)
+            }
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 

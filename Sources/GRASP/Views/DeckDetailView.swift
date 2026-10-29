@@ -170,6 +170,7 @@ struct DeckDetailView: View {
     @State private var isWritingQuestion = false
     /// Opens "Generate questions with AI" on the Questions tab.
     @State private var isGeneratingQuestions = false
+    @State private var isImportingPhoto = false
 
     private enum ContentTab: String, CaseIterable, Identifiable {
         case overview = "Overview", cards = "Cards", questions = "Questions"
@@ -428,7 +429,8 @@ struct DeckDetailView: View {
             case .questions:
                 ScrollView {
                     QuestionsTab(deckIds: scopeDeckIds, courseId: courseId, isWriting: $isWritingQuestion,
-                                 isGenerating: $isGeneratingQuestions, decks: scopeDecksForQuestions, scopeName: deckName)
+                                 isGenerating: $isGeneratingQuestions, isImportingPhoto: $isImportingPhoto,
+                                 decks: scopeDecksForQuestions, scopeName: deckName)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -446,6 +448,12 @@ struct DeckDetailView: View {
             MenuAnchor.closeOpenMenu()
             UserDefaults.standard.set(tab.rawValue, forKey: "deckContentTab")
         }
+        // Which screen this is, in plain words, for the feedback sheet.
+        .onAppear { noteFeedbackScreen() }
+        .onChange(of: contentTab) { _, _ in noteFeedbackScreen() }
+        .onChange(of: isStudying) { _, _ in noteFeedbackScreen() }
+        .onChange(of: isLearning) { _, _ in noteFeedbackScreen() }
+        .onChange(of: testPhase != nil) { _, _ in noteFeedbackScreen() }
         .onChange(of: hasSourceNotes) { _, hasNotes in
             if !hasNotes, contentTab == .overview { contentTab = .cards }
         }
@@ -601,6 +609,11 @@ struct DeckDetailView: View {
         return sections
     }
 
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = isStudying ? .study : isLearning ? .learn : testPhase != nil ? .test
+            : contentTab == .questions ? .deckQuestions : contentTab == .overview ? .deckOverview : .deckCards
+    }
+
     /// Deck name, its one-line composition, and the four actions. Study,
     /// Learn, and Test stay in a fixed order and at a neutral weight --
     /// only New Card is accented, since it's the one action that adds
@@ -714,10 +727,12 @@ struct DeckDetailView: View {
     @ViewBuilder
     private var studyModeButtons: some View {
         modeButton("Study", "rectangle.stack.fill", prominent: true, help: "Study the cards that are due, one at a time") { isStudying = true }
+            .tutorialTarget(.studyButton)
             .disabled(dueCount == 0)
         modeButton("Learn", "graduationcap.fill", prominent: false, help: "Learn this deck in short rounds") {
             isLearning = true
         }
+        .tutorialTarget(.learnButton)
         .disabled(activeCount == 0)
         if let unfinishedTest {
             modeButton("Continue Test (\(unfinishedTest.answered)/\(unfinishedTest.total))", "play.fill", prominent: false,
@@ -728,6 +743,7 @@ struct DeckDetailView: View {
         // Test is available whenever the deck has approved cards or active
         // saved questions; with neither it says what to add.
         modeButton("Test", "checklist", prominent: false, help: testHelp) { testPhase = .setup }
+            .tutorialTarget(.testButton)
             .disabled(!testAvailability.isAvailable)
     }
 
@@ -900,10 +916,11 @@ struct DeckDetailView: View {
             items += addSourceItems
             return items
         }
+        .tutorialTarget(.addMenu)
         .help("Generate cards, add a card, practice problems, files or a study guide")
     }
 
-    /// Questions view: write a question now; the other two ways in are coming.
+    /// Questions view: write a question, generate them with AI, or read them from a photo.
     /// Outlined like the other Add menus (Study stays the one yellow button).
     private var questionsAddMenuButton: some View {
         PillMenu(title: "Add", systemImage: "plus", showsTitle: !isCompact) {
@@ -917,9 +934,13 @@ struct DeckDetailView: View {
                     isGeneratingQuestions = true
                 },
                 .divider,
-                .action("From a photo (coming soon)", systemImage: "camera", disabled: true, help: "Coming soon") {},
+                .action("From a photo…", systemImage: "camera", disabled: questionJobRunning,
+                        help: "Read questions from a picture of an exam or worksheet. They wait for your review") {
+                    isImportingPhoto = true
+                },
             ]
         }
+        .tutorialTarget(.addMenu)
         .help("Write a question")
     }
 
@@ -974,6 +995,7 @@ struct DeckDetailView: View {
             ForEach(availableTabs) { tab in
                 let selected = contentTab == tab
                 Button {
+                    store.tutorial.didTap(.deckTab(tab.rawValue))
                     withAnimation(Motion.thumb) { contentTab = tab }
                 } label: {
                     HStack(spacing: 7) {
@@ -1018,6 +1040,7 @@ struct DeckDetailView: View {
         .padding(3)
         .background(GRASPColor.surface, in: Capsule())
         .overlay(Capsule().strokeBorder(GRASPColor.hairline))
+        .tutorialTarget(.deckTabs)
     }
 
     @ViewBuilder
@@ -1371,7 +1394,8 @@ struct DeckDetailView: View {
     /// when the drafts strip returns with the final count.
     private var generatingStrip: some View {
         let written = DeckCardCounts.newCount(recent: recentAIIds, held: countHeldIds)
-        return HStack(spacing: 10) {
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
                 .foregroundStyle(GRASPColor.accent)
@@ -1393,6 +1417,15 @@ struct DeckDetailView: View {
             .buttonStyle(GRASPQuietButton())
             .disabled(aiActivity?.stopRequested == true)
             .help("Stops now. Cards already written are kept.")
+            }
+            // Why it is slow, in plain words: set by the transport after a
+            // long wait for a turn or for Google's answer.
+            if let note = aiActivity?.snapshot.note {
+                Label(note, systemImage: "hourglass")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

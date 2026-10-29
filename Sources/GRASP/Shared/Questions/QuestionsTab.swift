@@ -15,6 +15,8 @@ struct QuestionsTab: View {
     @Binding var isWriting: Bool
     /// Opens "Generate questions with AI" (the Add menu sets it).
     @Binding var isGenerating: Bool
+    /// Opens "From a photo" (the Add menu sets it).
+    @Binding var isImportingPhoto: Bool
     /// The decks a new question can go in.
     let decks: [Deck]
     var scopeName = ""
@@ -33,13 +35,42 @@ struct QuestionsTab: View {
     /// Why a draft stayed under To review after Approve all or Approve.
     @State private var notApproved: [String: String] = [:]
     @State private var showingDrops = false
+    /// Select mode: tick several questions, then move, copy, suspend or delete them together.
+    @State private var selecting = false
+    @State private var selectedIds: Set<String> = []
+    @State private var pick: DeckPick?
+    /// Every deck of this course, for moving and copying.
+    @State private var courseDecks: [Deck] = []
+    /// The pictures of photo questions, by image id, and the one being looked at.
+    @State private var photos: [String: Data] = [:]
+    @State private var viewingPhoto: ViewedPhoto?
+    /// A question's thumbnail: its own part of the page when the reader found where it is.
+    @State private var thumbs: [String: Data] = [:]
+    @State private var pendingBulkDelete = false
 
     #if DEBUG
     private var debugShow: String? { ProcessInfo.processInfo.environment["GRASP_QUESTIONS_SHOW"] }
     #endif
 
+    /// On the Mac the bar stays put while the list scrolls under it. On the iPhone
+    /// the tab sits inside a List row, where a pinned header has nothing to pin to.
+    private static var pinnedBar: PinnedScrollableViews {
+        #if os(macOS)
+        [.sectionHeaders]
+        #else
+        []
+        #endif
+    }
+
     private var drafts: [TestQuestion] { questions.filter { $0.statusKind == .draft } }
     private var jobKey: String { store.questionDraftJobKey(courseId: courseId) }
+    /// The writing or photo-reading job running for this course, if any.
+    private var runningJob: (String, AppStore.AIJob)? {
+        for key in [jobKey, store.photoImportJobKey(courseId: courseId)] {
+            if let job = store.aiJob(key) { return (key, job) }
+        }
+        return nil
+    }
     private var run: AppStore.QuestionDraftRunResult? {
         store.lastQuestionDraftRun.flatMap { Set($0.deckIds) == Set(deckIds) ? $0 : nil }
     }
@@ -55,8 +86,8 @@ struct QuestionsTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let job = store.aiJob(jobKey) {
-                AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(jobKey) },
+            if let (key, job) = runningJob {
+                AIProgressStrip(activity: job.activity, onStop: { store.stopAIJob(key) },
                                 stopHelp: "Stops now. Questions already written are kept as drafts.")
                     .padding(.horizontal, 18).padding(.top, 12)
             }
@@ -65,26 +96,40 @@ struct QuestionsTab: View {
                 notice(approveMessage, icon: "checkmark.circle", tint: GRASPColor.success) { self.approveMessage = nil }
                     .padding(.horizontal, 18).padding(.top, 12)
             }
-            if !drafts.isEmpty { filterBar.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 4) }
-
             if hasLoaded && questions.isEmpty {
                 QuestionsEmptyState { isWriting = true }
             } else if hasLoaded {
-                LazyVStack(spacing: 0) {
-                    ForEach(shown) { question in
-                        QuestionRow(
-                            question: question, history: history[question.id], state: states[question.id],
-                            noteTitle: question.materialId.flatMap { noteTitles[$0] },
-                            notApprovedReason: notApproved[question.id],
-                            onEdit: { editing = question },
-                            onApprove: { approve(question) },
-                            onSetStatus: { store.setQuestionStatus(question.id, to: $0) },
-                            onDelete: {
-                                // A draft was never approved: deleting it needs no second question.
-                                if question.statusKind == .draft { store.deleteCodeQuestion(question.id) } else { pendingDelete = question }
-                            }
-                        )
-                        Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                // The bar stays at the top while a long list scrolls under it.
+                LazyVStack(spacing: 0, pinnedViews: Self.pinnedBar) {
+                    Section {
+                        ForEach(shown) { question in
+                            QuestionRow(
+                                question: question, history: history[question.id], state: states[question.id],
+                                noteTitle: question.materialId.flatMap { noteTitles[$0] },
+                                notApprovedReason: notApproved[question.id],
+                                photo: thumbs[question.id] ?? question.imageId.flatMap { photos[$0] },
+                                photoIsCrop: thumbs[question.id] != nil,
+                                onOpenPhoto: {
+                                    if let data = question.imageId.flatMap({ photos[$0] }) {
+                                        viewingPhoto = ViewedPhoto(data: data, box: PhotoBox(encoded: question.imageCrop))
+                                    }
+                                },
+                                selecting: selecting, isSelected: selectedIds.contains(question.id),
+                                onToggle: { toggle(question.id) },
+                                onEdit: { editing = question },
+                                onApprove: { approve(question) },
+                                onSetStatus: { store.setQuestionStatus(question.id, to: $0) },
+                                onMove: { pick = DeckPick(mode: .move, ids: [question.id]) },
+                                onCopy: { pick = DeckPick(mode: .copy, ids: [question.id]) },
+                                onDelete: {
+                                    // A draft was never approved: deleting it needs no second question.
+                                    if question.statusKind == .draft { store.deleteCodeQuestion(question.id) } else { pendingDelete = question }
+                                }
+                            )
+                            Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                        }
+                    } header: {
+                        listBar
                     }
                 }
             }
@@ -94,14 +139,31 @@ struct QuestionsTab: View {
         .onChange(of: store.lastQuestionDraftRun) { _, new in
             if let new, new.outcome.saved > 0 { filter = .review }
             #if DEBUG
-            if new != nil, debugShow == "drops" { showingDrops = true }
+            if new != nil, debugShow == "drops" || ProcessInfo.processInfo.environment["GRASP_SHOW_DROPS"] == "1" { showingDrops = true }
             #endif
         }
         #if DEBUG
-        .task {
-            // Screenshots only, with the canned writer on.
-            guard StubHooks.enabled("GRASP_STUB_QUESTIONS"), debugShow == "approveall" || debugShow == "editdraft" else { return }
+        .task(id: deckIds.joined()) {
+            // Screenshots only, with the canned writer on. It starts over when the decks
+            // arrive, so it never acts on a copy of this view made before they were known.
+            guard !deckIds.isEmpty, StubHooks.enabled("GRASP_STUB_QUESTIONS"), ["approveall", "editdraft", "select", "pick", "editphoto", "viewphoto", "photoimport"].contains(debugShow ?? "") else { return }
             try? await Task.sleep(for: .milliseconds(900))
+            if debugShow == "select" || debugShow == "pick" {
+                selecting = true
+                selectedIds = Set(shown.prefix(2).map(\.id))
+                if debugShow == "pick" { pick = DeckPick(mode: .move, ids: Array(selectedIds)) }
+                return
+            }
+            if debugShow == "photoimport" { isImportingPhoto = true; return }
+            if debugShow == "editphoto" || debugShow == "viewphoto" {
+                filter = .review
+                let wanted = ProcessInfo.processInfo.environment["GRASP_PHOTO_QUESTION"] ?? ""
+                guard let question = questions.first(where: { $0.imageId != nil && $0.promptText.contains(wanted) }) else { return }
+                if debugShow == "editphoto" { editing = question } else if let data = question.imageId.flatMap({ photos[$0] }) {
+                    viewingPhoto = ViewedPhoto(data: data, box: PhotoBox(encoded: question.imageCrop))
+                }
+                return
+            }
             if debugShow == "editdraft" {
                 filter = .review
                 editing = questions.first { $0.statusKind == .draft }
@@ -112,6 +174,9 @@ struct QuestionsTab: View {
         }
         #endif
         .sheet(isPresented: $isWriting) { QuestionEditorSheet(decks: decks) }
+        .sheet(isPresented: $isImportingPhoto) {
+            PhotoImportSheet(decks: decks, defaultDeckId: deckIds.first, courseId: courseId)
+        }
         .sheet(isPresented: $isGenerating) {
             GenerateQuestionsSheet(deckIds: deckIds, courseId: courseId, scopeName: scopeName)
         }
@@ -120,6 +185,25 @@ struct QuestionsTab: View {
         }
         .sheet(item: $editing, onDismiss: { notApproved = [:] }) { question in
             QuestionEditorSheet(decks: decks, editing: question)
+        }
+        .sheet(item: $viewingPhoto) { viewed in
+            QuestionPhotoSheet(data: viewed.data, box: viewed.box)
+        }
+        .sheet(item: $pick) { pick in
+            QuestionDeckPickerSheet(mode: pick.mode, count: pick.ids.count, decks: courseDecks,
+                                    excluding: pick.mode == .move ? currentDeckIds(of: pick.ids) : []) { deck in
+                finishPick(pick, deck: deck)
+            }
+        }
+        .sheet(isPresented: $pendingBulkDelete) {
+            ConfirmationSheet(
+                icon: "trash", title: "Delete \(selectedIds.count) Questions?",
+                message: "They will no longer appear in tests. Past test results are kept.",
+                confirmTitle: "Delete"
+            ) {
+                store.deleteCodeQuestions(Array(selectedIds))
+                endSelecting()
+            }
         }
         .sheet(item: $pendingDelete) { question in
             ConfirmationSheet(
@@ -134,17 +218,137 @@ struct QuestionsTab: View {
 
     // MARK: Filter and approving
 
-    private var filterBar: some View {
+    /// The bar above the list: the filter pills and Select, or, while selecting, the count and Actions.
+    private var listBar: some View {
         HStack(spacing: 8) {
-            pill("All \(questions.count)", selected: filter == .all) { filter = .all }
-            pill("To review \(drafts.count)", selected: filter == .review) { filter = .review }
-            Spacer(minLength: 8)
-            if filter == .review {
-                Button("Approve all") { approveAll() }
-                    .buttonStyle(GRASPQuietButton())
-                    .help("Approves every draft that passes its checks. A draft that fails one stays here.")
+            if selecting {
+                Button("Done") { endSelecting() }.buttonStyle(GRASPQuietButton())
+                Text(selectedIds.isEmpty ? "Tick questions" : "\(selectedIds.count) selected")
+                    .graspType(.meta).foregroundStyle(GRASPColor.textSecondary).monospacedDigit()
+                Spacer(minLength: 8)
+                Button(selectedIds.count == shown.count ? "None" : "All") {
+                    selectedIds = selectedIds.count == shown.count ? [] : Set(shown.map(\.id))
+                }
+                .buttonStyle(.plain).font(.graspUI(size: 12, weight: .semibold)).foregroundStyle(GRASPColor.textSecondary)
+                actionsMenu
+            } else {
+                // One line when it fits; on a narrow screen the buttons drop under the pills.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { filterPills; Spacer(minLength: 8); barButtons }
+                    VStack(alignment: .leading, spacing: 8) {
+                        filterPills
+                        HStack(spacing: 8) { Spacer(minLength: 0); barButtons }
+                    }
+                }
             }
         }
+        .padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(GRASPColor.canvas)
+    }
+
+    private var filterPills: some View {
+        HStack(spacing: 8) {
+            if !drafts.isEmpty {
+                pill("All \(questions.count)", selected: filter == .all) { filter = .all }
+                pill("To review \(drafts.count)", selected: filter == .review) { filter = .review }
+            }
+        }
+    }
+
+    private var barButtons: some View {
+        HStack(spacing: 8) {
+            if filter == .review, !drafts.isEmpty {
+                Button("Approve all") { approveAll() }
+                    .buttonStyle(GRASPQuietButton())
+                    .lineLimit(1).fixedSize()
+                    .help("Approves every draft that passes its checks. A draft that fails one stays here.")
+            }
+            Button("Select") { selecting = true }
+                .buttonStyle(GRASPQuietButton())
+                .lineLimit(1).fixedSize()
+                .help("Pick several questions to move, copy, suspend or delete")
+        }
+    }
+
+    private var actionsMenu: some View {
+        let chosen = questions.filter { selectedIds.contains($0.id) }
+        return Menu {
+            if chosen.contains(where: { $0.statusKind == .draft }) {
+                Button { approveSelected(chosen) } label: { Label("Approve", systemImage: "checkmark.circle") }
+            }
+            if courseDecks.count > 1 {
+                Button { pick = DeckPick(mode: .move, ids: Array(selectedIds)) } label: { Label("Move to deck…", systemImage: "arrow.right.circle") }
+                Button { pick = DeckPick(mode: .copy, ids: Array(selectedIds)) } label: { Label("Copy to deck…", systemImage: "doc.on.doc") }
+            }
+            if chosen.contains(where: { $0.statusKind == .active }) {
+                Button { store.setQuestionStatus(chosen.filter { $0.statusKind == .active }.map(\.id), to: .suspended) } label: {
+                    Label("Suspend", systemImage: "pause.circle")
+                }
+            }
+            if chosen.contains(where: { $0.statusKind == .suspended }) {
+                Button { store.setQuestionStatus(chosen.filter { $0.statusKind == .suspended }.map(\.id), to: .active) } label: {
+                    Label("Reactivate", systemImage: "play.circle")
+                }
+            }
+            Button(role: .destructive) { pendingBulkDelete = true } label: { Label("Delete…", systemImage: "trash") }
+        } label: {
+            Text("Actions")
+                .font(.graspUI(size: 13, weight: .semibold))
+                .foregroundStyle(GRASPColor.textPrimary)
+                .padding(.horizontal, 14).frame(height: 30)
+                .overlay(Capsule().strokeBorder(GRASPColor.hairlineStrong))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(selectedIds.isEmpty)
+    }
+
+    // MARK: Selecting, moving and copying
+
+    private func toggle(_ id: String) {
+        if selectedIds.contains(id) { selectedIds.remove(id) } else { selectedIds.insert(id) }
+    }
+
+    private func endSelecting() {
+        selecting = false
+        selectedIds = []
+    }
+
+    private func currentDeckIds(of ids: [String]) -> Set<String> {
+        Set(questions.filter { ids.contains($0.id) }.map(\.deckId))
+    }
+
+    private func approveSelected(_ chosen: [TestQuestion]) {
+        var reasons: [String: String] = [:]
+        var approved = 0
+        for question in chosen where question.statusKind == .draft {
+            if QuestionBank.needsAnswerCheck(question) {
+                reasons[question.id] = QuestionBank.checkReason(question)
+                continue
+            }
+            if let why = store.approveQuestion(question.id) { reasons[question.id] = why } else { approved += 1 }
+        }
+        notApproved = reasons
+        approveMessage = "Approved \(approved) question\(approved == 1 ? "" : "s")."
+            + (reasons.isEmpty ? "" : " \(reasons.count) stayed under To review because \(reasons.count == 1 ? "it" : "they") failed a check.")
+        selectedIds = Set(reasons.keys)
+    }
+
+    private func finishPick(_ pick: DeckPick, deck: Deck) {
+        let noun = pick.ids.count == 1 ? "question" : "questions"
+        switch pick.mode {
+        case .move:
+            let result = store.moveQuestions(pick.ids, toDeck: deck.id)
+            approveMessage = result.map { "Moved \($0.changed) \(noun) to \(deck.name)." } ?? "That deck is gone."
+        case .copy:
+            let result = store.copyQuestions(pick.ids, toDeck: deck.id)
+            approveMessage = result.map {
+                "Copied \($0.changed) \(noun) to \(deck.name)."
+                    + ($0.skippedRepeats > 0 ? " \($0.skippedRepeats) already there." : "")
+            } ?? "That deck is gone."
+        }
+        endSelecting()
     }
 
     private func pill(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -152,6 +356,7 @@ struct QuestionsTab: View {
             Text(title)
                 .font(.graspUI(size: 13, weight: .semibold))
                 .monospacedDigit()
+                .lineLimit(1).fixedSize()
                 .foregroundStyle(selected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                 .padding(.horizontal, 12).frame(height: 28)
                 .background(selected ? GRASPColor.surfaceRaised : GRASPColor.inset, in: Capsule())
@@ -236,6 +441,18 @@ struct QuestionsTab: View {
         history = store.questionHistory(of: questions.map(\.id))
         states = store.questionStates(of: questions)
         noteTitles = store.noteTitles(forMaterials: Array(Set(questions.compactMap(\.materialId))))
+        if let courseId { courseDecks = (try? store.decks(inCourse: courseId)) ?? [] }
+        var loaded: [String: Data] = [:]
+        for id in Set(questions.compactMap(\.imageId)) {
+            if let data = photos[id] ?? store.questionImage(id)?.jpegData { loaded[id] = data }
+        }
+        photos = loaded
+        var cropped: [String: Data] = [:]
+        for question in questions {
+            if let imageId = question.imageId, let data = loaded[imageId], let box = PhotoBox(encoded: question.imageCrop),
+               let part = thumbs[question.id] ?? PhotoSupport.cropJPEG(data, to: box) { cropped[question.id] = part }
+        }
+        thumbs = cropped
         if drafts.isEmpty, filter == .review { filter = .all }
         hasLoaded = true
     }
@@ -265,8 +482,8 @@ struct DroppedQuestionsSheet: View {
     }
 
     var body: some View {
-        GRASPSheet(eyebrow: "Generate with AI", title: "What was dropped",
-                   message: "These were written but not kept. Each failed a check or repeated a question you already have.",
+        GRASPSheet(eyebrow: "Questions", title: "What was dropped",
+                   message: "These were not kept. Each failed a check, repeated a question you already have, or needs something from you.",
                    icon: "tray", width: 520, height: sheetHeight) {
             #if os(macOS)
             ScrollView { dropList }
@@ -335,17 +552,55 @@ private struct QuestionRow: View {
     var state: UnderstandingState? = nil
     let noteTitle: String?
     var notApprovedReason: String? = nil
+    /// The photo this question was read from, when this device has it.
+    var photo: Data? = nil
+    /// The thumbnail is one question's part of the page, wider than tall.
+    var photoIsCrop = false
+    var onOpenPhoto: () -> Void = {}
+    var selecting = false
+    var isSelected = false
+    var onToggle: () -> Void = {}
     let onEdit: () -> Void
     let onApprove: () -> Void
     let onSetStatus: (QuestionStatus) -> Void
+    var onMove: () -> Void = {}
+    var onCopy: () -> Void = {}
     let onDelete: () -> Void
 
     private var canEdit: Bool { UserQuestionInput(question) != nil }
+    /// Narrower on the iPhone, where the text needs the room.
+    private static func thumbWidth(crop: Bool) -> CGFloat {
+        #if os(iOS)
+        return crop ? 64 : 46
+        #else
+        return crop ? 92 : 46
+        #endif
+    }
+
     private var isSuspended: Bool { question.statusKind == .suspended }
     private var isDraft: Bool { question.statusKind == .draft }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            if selecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.graspUI(size: 18))
+                    .foregroundStyle(isSelected ? GRASPColor.textPrimary : GRASPColor.textTertiary)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+            }
+            if let photo {
+                Button(action: onOpenPhoto) {
+                    DataImage(data: photo, contentMode: photoIsCrop ? .fit : .fill)
+                        .frame(width: Self.thumbWidth(crop: photoIsCrop), height: photoIsCrop ? 50 : 60)
+                        .background(GRASPColor.inset)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(GRASPColor.hairlineStrong))
+                }
+                .buttonStyle(.plain)
+                .help("See the photo this was read from")
+                .accessibilityLabel("Photo this question was read from")
+            }
             VStack(alignment: .leading, spacing: 7) {
                 Text(question.promptText.isEmpty ? "(No text)" : question.promptText)
                     .font(.graspUI(size: 14, weight: .medium))
@@ -365,12 +620,25 @@ private struct QuestionRow: View {
                             .foregroundStyle(GRASPColor.textTertiary)
                             .lineLimit(1)
                     }
+                    if isDraft, QuestionBank.needsAnswerCheck(question) {
+                        Label(QuestionBank.checkLabel(question) ?? "Check it", systemImage: "exclamationmark.circle")
+                            .font(.graspUI(size: 12, weight: .medium))
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .help("Check this against its photo before you approve it")
+                    }
                     if isDraft, let notApprovedReason {
                         Label("Not approved. " + notApprovedReason, systemImage: "exclamationmark.circle")
                             .font(.graspUI(size: 12, weight: .medium))
                             .foregroundStyle(GRASPColor.rejected)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    #if os(iOS)
+                    if isDraft, !selecting {
+                        Button("Approve", action: onApprove)
+                            .buttonStyle(GRASPQuietButton())
+                            .lineLimit(1).fixedSize()
+                    }
+                    #endif
                     HStack(spacing: 8) {
                         if isDraft {
                             Text(noteTitle.map { "From \($0)" } ?? "Draft")
@@ -395,20 +663,27 @@ private struct QuestionRow: View {
                 }
             }
             Spacer(minLength: 4)
-            if isDraft {
-                Button("Approve", action: onApprove)
-                    .buttonStyle(GRASPQuietButton())
-                    .help("Approve this question so tests can ask it")
+            if !selecting {
+                #if os(macOS)
+                if isDraft {
+                    Button("Approve", action: onApprove)
+                        .buttonStyle(GRASPQuietButton())
+                        .help("Approve this question so tests can ask it")
+                }
+                #endif
+                QuestionRowMenu(
+                    canEdit: canEdit, isSuspended: isSuspended, isDraft: isDraft, onEdit: onEdit, onApprove: onApprove,
+                    onSuspend: { onSetStatus(.suspended) }, onReactivate: { onSetStatus(.active) },
+                    onMove: onMove, onCopy: onCopy, onDelete: onDelete
+                )
             }
-            QuestionRowMenu(
-                canEdit: canEdit, isSuspended: isSuspended, isDraft: isDraft, onEdit: onEdit, onApprove: onApprove,
-                onSuspend: { onSetStatus(.suspended) }, onReactivate: { onSetStatus(.active) }, onDelete: onDelete
-            )
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+        .onTapGesture { if selecting { onToggle() } }
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
     }
 }
 
@@ -436,6 +711,7 @@ struct SourceBadge: View {
                     .foregroundStyle(GRASPColor.accent)
             }
             Text(source.label)
+                .lineLimit(1).fixedSize()
                 .font(.graspUI(size: 11, weight: .semibold))
                 .foregroundStyle(GRASPColor.textSecondary)
         }
@@ -456,6 +732,8 @@ private struct QuestionRowMenu: View {
     let onApprove: () -> Void
     let onSuspend: () -> Void
     let onReactivate: () -> Void
+    var onMove: () -> Void = {}
+    var onCopy: () -> Void = {}
     let onDelete: () -> Void
 
     var body: some View {
@@ -470,6 +748,8 @@ private struct QuestionRowMenu: View {
                     : .action("Suspend", systemImage: "pause.circle",
                               help: "Keeps it, but it won't come up in tests") { onSuspend() })
             }
+            items.append(.action("Move to deck…", systemImage: "arrow.right.circle") { onMove() })
+            items.append(.action("Copy to deck…", systemImage: "doc.on.doc") { onCopy() })
             items.append(.divider)
             items.append(.action(isDraft ? "Delete" : "Delete…", systemImage: "trash", destructive: true) { onDelete() })
             return items
@@ -485,6 +765,8 @@ private struct QuestionRowMenu: View {
                     Button { onSuspend() } label: { Label("Suspend", systemImage: "pause.circle") }
                 }
             }
+            Button { onMove() } label: { Label("Move to deck", systemImage: "arrow.right.circle") }
+            Button { onCopy() } label: { Label("Copy to deck", systemImage: "doc.on.doc") }
             Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis")
@@ -495,5 +777,100 @@ private struct QuestionRowMenu: View {
         }
         .accessibilityLabel("Question actions")
         #endif
+    }
+}
+
+
+// MARK: - Moving and copying
+
+enum DeckPickMode { case move, copy }
+
+struct DeckPick: Identifiable {
+    let id = UUID()
+    let mode: DeckPickMode
+    let ids: [String]
+}
+
+/// Which deck to move or copy questions to, within the same course.
+struct QuestionDeckPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let mode: DeckPickMode
+    let count: Int
+    let decks: [Deck]
+    /// Decks that make no sense to pick (the one a moved question is already in).
+    let excluding: Set<String>
+    let onPick: (Deck) -> Void
+
+    private var choices: [Deck] { decks.filter { !excluding.contains($0.id) } }
+
+    var body: some View {
+        GRASPSheet(
+            eyebrow: "Questions",
+            title: mode == .move ? "Move to Deck" : "Copy to Deck",
+            message: mode == .move
+                ? "\(count) question\(count == 1 ? "" : "s") will move, keeping their history."
+                : "\(count) question\(count == 1 ? "" : "s") will be copied. The copies start with no history.",
+            icon: mode == .move ? "arrow.right.circle" : "doc.on.doc", width: 420
+        ) {
+            if choices.isEmpty {
+                Text("There is no other deck in this course.")
+                    .graspType(.body).foregroundStyle(GRASPColor.textSecondary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                    ForEach(choices) { deck in
+                        Button {
+                            onPick(deck)
+                            dismiss()
+                        } label: {
+                            HStack {
+                                Text(deck.name).graspType(.body).foregroundStyle(GRASPColor.textPrimary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.right").font(.graspUI(size: 11, weight: .semibold))
+                                    .foregroundStyle(GRASPColor.textTertiary)
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 11)
+                            .background(GRASPColor.inset, in: RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    }
+                }
+                .frame(maxHeight: 360)
+            }
+        } footer: {
+            Spacer()
+            Button("Cancel") { dismiss() }
+        }
+    }
+}
+
+
+struct ViewedPhoto: Identifiable {
+    let id = UUID()
+    let data: Data
+    let box: PhotoBox?
+}
+
+/// The photo a question was read from, the whole page with the question framed.
+struct QuestionPhotoSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let data: Data
+    var box: PhotoBox?
+
+    var body: some View {
+        GRASPSheet(eyebrow: "Question", title: "Photo", icon: "camera", width: 520) {
+            ScrollView {
+                MarkedPhoto(data: data, box: box)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: GRASPRadius.inner, style: .continuous))
+            }
+            .frame(maxHeight: 520)
+        } footer: {
+            Spacer()
+            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }
     }
 }

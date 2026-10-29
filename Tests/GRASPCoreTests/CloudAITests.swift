@@ -281,7 +281,10 @@ struct CloudAITests {
         defer { NotificationCenter.default.removeObserver(observer) }
 
         let finished = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        // A thread of its own, not the global queue: when the test run keeps
+        // every pooled thread busy, a queued closure never starts, and this
+        // test would report a deadlock that is only a wait for a thread.
+        Thread.detachNewThread {
             for _ in 0..<50 { usage.recordRequest() }
             usage.recordFallback("Gemini is busy right now, so this is running on qwen3.5:9b.")
             usage.pauseForQuota()

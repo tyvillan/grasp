@@ -51,6 +51,32 @@ extension AppStore {
         reload()
     }
 
+    /// Moves questions to another deck. Nil when the deck is gone.
+    @discardableResult
+    func moveQuestions(_ ids: [String], toDeck deckId: String) -> QuestionBank.MoveResult? {
+        let result = try? database.queue.write { try QuestionBank.move(ids, toDeck: deckId, db: $0) }
+        reload()
+        return result
+    }
+
+    /// Copies questions into another deck. Nil when the deck is gone.
+    @discardableResult
+    func copyQuestions(_ ids: [String], toDeck deckId: String) -> QuestionBank.MoveResult? {
+        let result = try? database.queue.write { try QuestionBank.copy(ids, toDeck: deckId, db: $0) }
+        reload()
+        return result
+    }
+
+    func setQuestionStatus(_ ids: [String], to status: QuestionStatus) {
+        try? database.queue.write { try QuestionBank.setStatus(ids, to: status, db: $0) }
+        reload()
+    }
+
+    func deleteCodeQuestions(_ ids: [String]) {
+        try? database.queue.write { db in for id in ids { try CodeQuestionBank.delete(id, db: db) } }
+        reload()
+    }
+
     /// How many approved cards these decks have (what a test's flashcards come from).
     func activeCardCount(inDecks deckIds: [String]) -> Int {
         ((try? cards(inDecks: deckIds)) ?? []).filter { $0.status == .active }.count

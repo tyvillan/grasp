@@ -26,7 +26,8 @@ public struct CloudGenerator: CardGenerator {
         // a piece must still fit Ollama's 8K context if a call lands there.
         let budget = local == nil ? 6_000 : 3_000
         self.init(model: model, localModelName: local?.modelName, hasKey: !apiKey.isEmpty, failures: failures,
-                  pipeline: OllamaGenerator(transport: transport, model: model, wordBudget: budget))
+                  pipeline: OllamaGenerator(transport: transport, model: model, wordBudget: budget,
+                                            concurrency: { AIPreferences.geminiPlan.concurrency }))
     }
 
     init(model: String, localModelName: String?, hasKey: Bool, failures: FailureLog, pipeline: OllamaGenerator) {
@@ -42,6 +43,24 @@ public struct CloudGenerator: CardGenerator {
     public var isAvailable: Bool { get async { hasKey } }
 
     public var overviewContextWordBudget: Int { pipeline.overviewContextWordBudget }
+
+    /// A cloud model keeps five cards apart in one reply; a small local
+    /// one does not, so only this generator batches.
+    public var contextCheckBatchSize: Int { 5 }
+
+    public var maxConcurrentCalls: Int { AIPreferences.geminiPlan.concurrency }
+
+    public var reviewsWholeOverview: Bool { true }
+
+    public func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
+        await pipeline.reviewOverview(noteContext: noteContext, sections: sections)
+    }
+
+    public func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] {
+        await pipeline.validateContextBatch(items: items, noteContext: noteContext, courseName: courseName)
+    }
 
     public func refine(_ candidates: [CandidatePair], noteContext: String) async -> [GeneratedCard] {
         await pipeline.refine(candidates, noteContext: noteContext)
@@ -60,7 +79,14 @@ public struct CloudGenerator: CardGenerator {
     public func generateAdditionalResult(
         existing: [CandidatePair], noteContext: String, maxCount: Int, topic: String?
     ) async -> AdditionalNoteResult {
-        await pipeline.generateAdditionalResult(existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        failures.reset()
+        let result = await pipeline.generateAdditionalResult(
+            existing: existing, noteContext: noteContext, maxCount: maxCount, topic: topic)
+        // "The model didn't answer" says nothing; the transport knows why.
+        if case .failed = result, let error = failures.lastError {
+            return .failed(CloudFailureText.text(for: error))
+        }
+        return result
     }
 
     public func generateTestQuestions(
@@ -124,6 +150,10 @@ public struct CloudGenerator: CardGenerator {
 
     public func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
         await pipeline.solveMultipleChoice(prompt: prompt, choices: choices)
+    }
+
+    public func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        await pipeline.structurePhotoQuestion(text: text, courseName: courseName)
     }
 
     public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {
@@ -250,6 +280,33 @@ struct FallbackTransport: ChatTransport {
     }
 }
 
+/// Why a cloud call failed, in a sentence a student can act on.
+public enum CloudFailureText {
+    /// Whether `text` is one of these sentences, which already says what to
+    /// do, so a caller does not wrap it in more advice.
+    public static func isOwn(_ text: String) -> Bool {
+        let all: [AIBackendError] = [.unreachable, .overloaded(status: 0), .rateLimited(retryAfter: nil),
+                                     .quotaExhausted, .unauthorized, .badResponse("")]
+        return all.contains { Self.text(for: $0) == text }
+    }
+    public static func text(for error: AIBackendError) -> String {
+        switch error {
+        case .unreachable:
+            return "GRASP can't reach Google. Check your internet connection and try again."
+        case .overloaded:
+            return "Google's Gemini models are overloaded right now. Try again in a few minutes."
+        case .rateLimited:
+            return "Google asked GRASP to slow down and is still busy. Wait a minute and try again."
+        case .quotaExhausted:
+            return "Today's free Gemini limit is used up. It comes back at midnight Pacific time, or you can switch to Local in Settings."
+        case .unauthorized:
+            return "Google did not accept your API key. Check it in Settings, under AI."
+        case .badResponse:
+            return "Google sent back something GRASP could not use. Try again."
+        }
+    }
+}
+
 enum FallbackMessage {
     static func text(for error: AIBackendError, local: String) -> String {
         switch error {
@@ -291,6 +348,33 @@ public struct FallbackGenerator: CardGenerator {
 
     /// The local model's budget: a call that falls back must fit there too.
     public var overviewContextWordBudget: Int { local.overviewContextWordBudget }
+
+    public var contextCheckBatchSize: Int { cloud.contextCheckBatchSize }
+
+    public var maxConcurrentCalls: Int { cloud.maxConcurrentCalls }
+
+    public var reviewsWholeOverview: Bool { cloud.reviewsWholeOverview }
+
+    /// Cloud only. If the cloud can't take it the answer is nil and the
+    /// composer reviews section by section, which falls back as usual.
+    public func reviewOverview(noteContext: String, sections: [OverviewSection]) async -> [[OverviewFix]]? {
+        await run(
+            cloud: { await cloud.reviewOverview(noteContext: noteContext, sections: sections) },
+            local: { nil }
+        )
+    }
+
+    /// Batches go to the cloud only. When the cloud can't take one, the
+    /// answer is empty and the caller asks card by card, which then falls
+    /// back to the local model the usual way.
+    public func validateContextBatch(
+        items: [ContextCheckItem], noteContext: String, courseName: String
+    ) async -> [String: ContextValidation] {
+        await run(
+            cloud: { await cloud.validateContextBatch(items: items, noteContext: noteContext, courseName: courseName) },
+            local: { [:] }
+        )
+    }
 
     /// Runs on the cloud, then again locally if a cloud call failed in a way
     /// the cloud won't fix by itself. `keep` lets a partly written result
@@ -445,6 +529,12 @@ public struct FallbackGenerator: CardGenerator {
         await run(keep: { $0 != nil },
                   cloud: { await cloud.solveMultipleChoice(prompt: prompt, choices: choices) },
                   local: { await local.solveMultipleChoice(prompt: prompt, choices: choices) })
+    }
+
+    public func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        await run(keep: { $0 != nil },
+                  cloud: { await cloud.structurePhotoQuestion(text: text, courseName: courseName) },
+                  local: { await local.structurePhotoQuestion(text: text, courseName: courseName) })
     }
 
     public func explainSkill(_ skill: String, subject: String, context: String) async -> String? {

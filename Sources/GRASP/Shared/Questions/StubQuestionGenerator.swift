@@ -89,6 +89,29 @@ struct StubQuestionGenerator: CardGenerator {
 
     /// The second opinion agrees with the key, except for one question, so
     /// one draft fails its check.
+    /// Photo import stand-in: reads the text as a question and writes the answer it "knows".
+    func structurePhotoQuestion(text: String, courseName: String) async -> GeneratedProblem? {
+        let lower = text.lowercased()
+        let stem = text.components(separatedBy: "\n").first ?? text
+        if lower.contains("true or false") {
+            let statement = stem.replacingOccurrences(of: "True or false:", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespaces)
+            let sentence = statement.prefix(1).uppercased() + statement.dropFirst()
+            return GeneratedProblem(kind: .trueFalse, prompt: sentence, claimedAnswer: "True",
+                                    explanation: "The statement on the photo is true.", answerGiven: false)
+        }
+        var choices: [String] = []
+        for line in text.components(separatedBy: "\n").dropFirst() {
+            if let range = line.range(of: #"^\(?[A-Fa-f][\)\.]\s*"#, options: .regularExpression) { choices.append(String(line[range.upperBound...])) }
+        }
+        if choices.count >= 2 {
+            return GeneratedProblem(kind: .multipleChoice, prompt: stem, choices: choices, correct: 0,
+                                    explanation: "Worked out by the stand-in writer.", answerGiven: false)
+        }
+        return GeneratedProblem(kind: .written, prompt: stem, claimedAnswer: "A short answer written by the stand-in.",
+                                explanation: "Worked out by the stand-in writer.", answerGiven: false)
+    }
+
     func solveMultipleChoice(prompt: String, choices: [String]) async -> Int? {
         if prompt.contains("fitness") { return 0 }
         if prompt.contains("heterozygous") { return choices.firstIndex(of: "Different alleles from each parent") }

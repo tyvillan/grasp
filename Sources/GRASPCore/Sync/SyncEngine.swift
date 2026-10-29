@@ -90,7 +90,30 @@ public protocol SyncTransport: Sendable {
     func push(_ records: [SyncRecord]) async throws
     /// Rows changed after `since` (every row when nil), oldest first, in
     /// pages -- `offset` rows in, at most `limit` of them.
-    func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord]
+    func pull(since: String?, offset: Int, limit: Int, scope: SyncPullScope) async throws -> [SyncRecord]
+}
+
+public extension SyncTransport {
+    /// Every row except pictures.
+    func pull(since: String?, offset: Int, limit: Int) async throws -> [SyncRecord] {
+        try await pull(since: since, offset: offset, limit: limit, scope: .rows)
+    }
+}
+
+/// Which rows a pull asks for. Pictures are big, so they come separately, a couple at a time.
+public enum SyncPullScope: Sendable {
+    /// Every synced row except question pictures.
+    case rows
+    /// Only question pictures.
+    case pictures
+
+    public static let pictureTable = "questionImage"
+    public func includes(table: String) -> Bool {
+        switch self {
+        case .rows: return table != Self.pictureTable
+        case .pictures: return table == Self.pictureTable
+        }
+    }
 }
 
 /// Moves changes between this device's database and a `SyncTransport`.
@@ -114,11 +137,23 @@ public struct SyncEngine: Sendable {
     public struct Report: Sendable, Equatable {
         public var pushed = 0
         public var pulled = 0
+        /// Why question pictures did not all go up or come down this time, if they did not. They
+        /// are tried again on the next sync; nothing else is held back by it.
+        public var pictureProblem: String?
     }
 
     private let database: GRASPDatabase
     static let pushBatchSize = 500
+    /// A push stops adding rows once it holds about this much, so a handful of
+    /// pictures (a question's photo is a row of up to 800 KB) never make one huge
+    /// request. The rest goes in the next request of the same sync.
+    static let pushBatchBytes = 1_500_000
     static let pullPageSize = 1000
+    /// A page of pictures holds about this many bytes: a picture row is at most about 800 KB, so a
+    /// page is two pictures at most.
+    static let pullPictureBytes = 1_500_000
+    static let pullPictureMaxRow = 800_000
+    static var pullPicturePageSize: Int { max(1, pullPictureBytes / pullPictureMaxRow) }
 
     public init(database: GRASPDatabase) {
         self.database = database
@@ -176,8 +211,11 @@ public struct SyncEngine: Sendable {
     public func sync(using transport: some SyncTransport) async throws -> Report {
         var report = Report()
         guard try status().enabled else { return report }
-        report.pushed = try await push(using: transport)
+        var pictureProblems: [String] = []
+        report.pushed = try await push(using: transport, pictureProblems: &pictureProblems)
         report.pulled = try await pull(using: transport)
+        report.pulled += await pullPictures(using: transport, pictureProblems: &pictureProblems)
+        report.pictureProblem = pictureProblems.first
         try await database.queue.write { db in
             try db.execute(sql: "UPDATE syncState SET lastSyncedAt = ? WHERE id = 1", arguments: [Date()])
         }
@@ -186,20 +224,37 @@ public struct SyncEngine: Sendable {
 
     // MARK: - Push
 
-    private func push(using transport: some SyncTransport) async throws -> Int {
+    /// About how many bytes a row takes in a request: its text, plus a little for the rest.
+    static func approximateSize(_ record: SyncRecord) -> Int {
+        (record.data ?? [:]).values.reduce(64) { total, value in
+            switch value {
+            case .text(let text): return total + text.utf8.count
+            case .blob(let data): return total + data.count * 4 / 3
+            default: return total + 16
+            }
+        }
+    }
+
+    private func push(using transport: some SyncTransport, pictureProblems: inout [String]) async throws -> Int {
         var pushed = 0
+        // Set once a picture fails to send: the rest of this sync leaves pictures queued.
+        var skipPictures = false
         // Bounded, so a row that fails to send can't spin forever; what's
         // left goes on the next sync.
         for _ in 0..<1_000 {
             try Task.checkCancellation()
+            let leavePictures = skipPictures
             let (batch, sent) = try await database.queue.read { db -> ([SyncRecord], [(String, String, Int64)]) in
                 let deviceId = try String.fetchOne(db, sql: "SELECT deviceId FROM syncState WHERE id = 1")
                 let entries = try Row.fetchAll(db, sql: """
-                    SELECT tableName, rowKey, seq FROM syncOutbox ORDER BY seq LIMIT ?
-                    """, arguments: [Self.pushBatchSize])
+                    SELECT tableName, rowKey, seq FROM syncOutbox
+                    WHERE (? = 0 OR tableName <> ?) ORDER BY seq LIMIT ?
+                    """, arguments: [leavePictures ? 1 : 0, SyncPullScope.pictureTable, Self.pushBatchSize])
                 var records: [SyncRecord] = []
                 var sent: [(String, String, Int64)] = []
+                var bytes = 0
                 for entry in entries {
+                    if bytes > Self.pushBatchBytes, !records.isEmpty { break }
                     let tableName: String = entry["tableName"]
                     let rowKey: String = entry["rowKey"]
                     sent.append((tableName, rowKey, entry["seq"]))
@@ -213,22 +268,37 @@ public struct SyncEngine: Sendable {
                         deleted: false, deviceId: deviceId
                     ))
                     if records[records.count - 1].data == nil { records[records.count - 1].deleted = true }
+                    bytes += Self.approximateSize(records[records.count - 1])
                 }
                 return (records, sent)
             }
             guard !sent.isEmpty else { break }
-            if !batch.isEmpty { try await transport.push(batch) }
+            var unsent = Set<String>()
+            if !batch.isEmpty {
+                let pictures = batch.filter { $0.table == SyncPullScope.pictureTable }
+                let others = batch.filter { $0.table != SyncPullScope.pictureTable }
+                if !others.isEmpty { try await transport.push(others) }
+                if !pictures.isEmpty {
+                    do { try await transport.push(pictures) } catch {
+                        // A picture that will not go up waits in the queue; everything else carries on.
+                        skipPictures = true
+                        pictureProblems.append("Pictures could not be sent: \(error.localizedDescription)")
+                        unsent = Set(pictures.map(\.rowKey))
+                    }
+                }
+            }
+            let held = unsent
             try await database.queue.write { db in
                 // Only entries that haven't changed again since they were
                 // read: a newer edit made mid-push stays queued.
-                for (table, key, seq) in sent {
+                for (table, key, seq) in sent where !(table == SyncPullScope.pictureTable && held.contains(key)) {
                     try db.execute(
                         sql: "DELETE FROM syncOutbox WHERE tableName = ? AND rowKey = ? AND seq = ?",
                         arguments: [table, key, seq]
                     )
                 }
             }
-            pushed += batch.count
+            pushed += batch.count - unsent.count
         }
         return pushed
     }
@@ -285,7 +355,7 @@ public struct SyncEngine: Sendable {
         var offset = 0
         while true {
             try Task.checkCancellation()
-            let page = try await transport.pull(since: since, offset: offset, limit: Self.pullPageSize)
+            let page = try await transport.pull(since: since, offset: offset, limit: Self.pullPageSize, scope: .rows)
             incoming += page
             if page.count < Self.pullPageSize { break }
             offset += page.count
@@ -300,6 +370,35 @@ public struct SyncEngine: Sendable {
             }
         }
         return applied
+    }
+
+    /// Question pictures, two at a time (about 1.5 MB a page), each page applied and its place kept
+    /// before the next is asked for. A failure is reported, not thrown, and the next sync carries on
+    /// from where this one stopped, so pictures never hold back cards, questions or reviews.
+    private func pullPictures(using transport: some SyncTransport, pictureProblems: inout [String]) async -> Int {
+        do {
+            let (stored, deviceId) = try await database.queue.read { db in
+                (try String.fetchOne(db, sql: "SELECT pictureCursor FROM syncState WHERE id = 1"),
+                 try String.fetchOne(db, sql: "SELECT deviceId FROM syncState WHERE id = 1") ?? "")
+            }
+            let since = stored.map(Self.withOverlap)
+            var offset = 0
+            var applied = 0
+            var newest = stored
+            while true {
+                try Task.checkCancellation()
+                let page = try await transport.pull(since: since, offset: offset, limit: Self.pullPicturePageSize, scope: .pictures)
+                if page.isEmpty { break }
+                newest = ([newest] + page.map(\.updatedAt)).compactMap { $0 }.max()
+                applied += try await apply(page, deviceId: deviceId, newCursor: newest, cursorColumn: "pictureCursor")
+                offset += page.count
+                if page.count < Self.pullPicturePageSize { break }
+            }
+            return applied
+        } catch {
+            pictureProblems.append("Pictures could not be received: \(error.localizedDescription)")
+            return 0
+        }
     }
 
     /// Pulls re-read the last minute before the cursor. Rows committed
@@ -320,7 +419,7 @@ public struct SyncEngine: Sendable {
     /// belongs to. Every query in the app joins rather than trusting a
     /// reference, so a dangling one mid-sync (or from a device that never
     /// synced a parent) degrades to "not shown", never a crash.
-    func apply(_ records: [SyncRecord], deviceId: String, newCursor: String?) async throws -> Int {
+    func apply(_ records: [SyncRecord], deviceId: String, newCursor: String?, cursorColumn: String = "pullCursor") async throws -> Int {
         try await database.queue.writeWithoutTransaction { db in
             try db.execute(sql: "PRAGMA foreign_keys = OFF")
             defer { try? db.execute(sql: "PRAGMA foreign_keys = ON") }
@@ -364,7 +463,7 @@ public struct SyncEngine: Sendable {
                     applied += 1
                 }
                 try db.execute(
-                    sql: "UPDATE syncState SET applyingRemote = 0, pullCursor = ? WHERE id = 1",
+                    sql: "UPDATE syncState SET applyingRemote = 0, \(cursorColumn) = ? WHERE id = 1",
                     arguments: [newCursor]
                 )
                 return .commit
