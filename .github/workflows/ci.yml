@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [study-guides, windows-app, main]
+  pull_request:
+
+# One run per branch; a newer push cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-and-app-tests:
+    name: swift test (GRASPCore + GRASP)
+    # Package.swift needs swift-tools 6.2, which means Xcode 26.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      # Same command as CLAUDE.md. OCR is skipped because it needs Vision on real hardware.
+      - name: Test
+        run: GRASP_SKIP_OCR=1 swift test 2>&1 | tee test.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: test.log
