@@ -72,7 +72,7 @@ struct GlyphShape: Shape {
 }
 
 /// A 20pt sidebar icon: cream at rest; on hover it turns yellow, grows to
-/// 1.15 and tilts -5° with a spring (no movement under Reduce Motion).
+/// 1.15 with a spring (no movement under Reduce Motion). It never tilts.
 struct SidebarIcon: View {
     let glyph: SidebarGlyph
     var isHovering: Bool
@@ -85,7 +85,6 @@ struct SidebarIcon: View {
                     style: StrokeStyle(lineWidth: 1.7 * size / 24 * 1.2, lineCap: .round, lineJoin: .round))
             .frame(width: size, height: size)
             .scaleEffect(isHovering && !reduceMotion ? 1.15 : 1)
-            .rotationEffect(.degrees(isHovering && !reduceMotion ? -5 : 0))
             .animation(Motion.bouncy, value: isHovering)
             .accessibilityHidden(true)
     }
