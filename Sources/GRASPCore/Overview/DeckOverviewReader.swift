@@ -37,6 +37,9 @@ public struct RenderedOverview: Identifiable, Sendable {
     public let generatedAt: Date
     public let generator: OverviewOrigin
     public let chunkCount: Int
+    /// The note's pictures that no section discusses, shown together after
+    /// the lesson rather than dropped.
+    public let noteVisuals: [NoteVisual]
 
     public var hasContent: Bool { !sections.isEmpty }
 }
@@ -56,6 +59,9 @@ public struct RenderedSection: Identifiable, Sendable {
     public let isMath: Bool
     /// Code from the note that this section talks about.
     public let code: NoteCode.Snippet?
+    /// Pipelines, tables, annotated code and memory boxes the note has, for
+    /// this section. Found in the note's own text, never written by a model.
+    public let visuals: [NoteVisual]
 }
 
 /// A figure with its geometry already computed from the model's numbers.
@@ -272,7 +278,14 @@ public enum DeckOverviewReader {
         // The clean-up rules run on read too, so lessons written before a
         // rule existed get it without being rewritten.
         let document = OverviewReview.cleaned(storedDocument, noteText: noteText)
-        let codePlacements = NoteCode.placements(of: NoteCode.snippets(in: note?.raw ?? ""), in: document.sections)
+        var codePlacements = NoteCode.placements(of: NoteCode.snippets(in: note?.raw ?? ""), in: document.sections)
+        let visuals = NoteVisuals.placements(of: NoteVisuals.visuals(in: note?.raw ?? "", noteTitle: material.title),
+                                             in: document.sections)
+        // An annotated listing replaces the same listing shown plain.
+        for (index, shown) in visuals.bySection {
+            if let code = codePlacements[index]?.code,
+               shown.contains(where: { $0.sourceCode == code }) { codePlacements[index] = nil }
+        }
         let links = OverviewCardLinker.link(terms: document.allTerms.map(\.term), to: cards)
         let figures = document.sections.map { $0.figure.flatMap(renderFigure) }
         // Contrasts are computed at read time, so every lesson gets them --
@@ -323,7 +336,8 @@ public enum DeckOverviewReader {
                     example: section.example,
                     check: section.check,
                     isMath: isMath,
-                    code: codePlacements[index]
+                    code: codePlacements[index],
+                    visuals: visuals.bySection[index] ?? []
                 )
             },
             takeaways: document.takeaways,
@@ -339,7 +353,8 @@ public enum DeckOverviewReader {
             isStale: stored.isStale(for: material),
             generatedAt: stored.generatedAt,
             generator: stored.generator,
-            chunkCount: stored.chunkCount
+            chunkCount: stored.chunkCount,
+            noteVisuals: visuals.rest
         )
     }
 

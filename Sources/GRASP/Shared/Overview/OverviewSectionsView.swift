@@ -79,6 +79,17 @@ struct OverviewSectionsView: View {
                     .padding(.bottom, 36)
             }
 
+            // Pictures the note has that no section discusses.
+            if !overview.noteVisuals.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Pictures from your note")
+                        .graspType(.proseH2)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    ForEach(overview.noteVisuals) { NoteVisualView(visual: $0) }
+                }
+                .padding(.bottom, 36)
+            }
+
             if !overview.formulas.isEmpty {
                 Callout(label: "Formulas", tint: GRASPColor.accent) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -244,6 +255,11 @@ private struct LessonSectionView: View {
             if let code = section.code {
                 CodeSnippetView(snippet: code,
                                 sectionText: ([section.heading] + section.paragraphs).joined(separator: " "))
+                    .padding(.top, 2)
+            }
+
+            ForEach(section.visuals) { visual in
+                NoteVisualView(visual: visual)
                     .padding(.top, 2)
             }
 
