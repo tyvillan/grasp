@@ -1139,8 +1139,9 @@ public struct OllamaGenerator: CardGenerator {
         a summary, and not their notes handed back in different words.
 
         How to write it:
-        - Start from a concrete question or puzzle the lecture answers, something that makes the \
-        reader want to know.
+        - Start from a concrete question the lecture answers, in everyday words a beginner \
+        understands, something that makes the reader want to know.
+        \(beginnerRules)
         - Show a concrete case with real numbers before the general rule. Let the reader see the \
         pattern, then give it its name.
         - Explain why each idea has to be true, not just that it is. Say what someone would \
@@ -1170,7 +1171,8 @@ public struct OllamaGenerator: CardGenerator {
 
         \(partLine)Produce:
         - title: the lesson's title, a short claim that captures the lecture's central insight.
-        - hook: two or three sentences opening with the question or puzzle this lecture answers.
+        - hook: two or three plain sentences opening with the question this lecture answers, in \
+        everyday words with no technical term the notes have not explained yet.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with \
         a verb.
         - sections: 3 to 5 sections in the order a learner should meet them. Each has a claim \
@@ -1212,6 +1214,23 @@ public struct OllamaGenerator: CardGenerator {
     /// own instructions no two prompts shared more than their first few
     /// tokens -- so every call re-read the whole note. Measured on a real
     /// 950-word lecture: 7.8s to read it cold, 3.0s once the opening matched.
+    /// How a lesson starts for someone new to the subject. Shared by the
+    /// plan, the section and the single-shot prompts so they can't drift.
+    /// An overview of an early note read as being thrown in: jargon in the
+    /// first line, terms used a paragraph before they were explained, and
+    /// course admin (a lab's weight, the software used) written up as if it
+    /// were the subject.
+    static let beginnerRules = """
+        - Write for someone meeting this subject for the first time. Before you use any technical \
+        term, say what it means in everyday words, in the same sentence or the one before. Never \
+        use a term in a section before the section that introduces it.
+        - If the notes give nothing concrete for an idea, explain it in everyday words and say \
+        less. Never fill the gap with course logistics (grades, lab weights, platforms, software \
+        versions) or with a scene you made up, like a student who writes some code.
+        - If you are not sure a statement is true, leave it out. A short correct paragraph beats a \
+        longer one with a doubtful claim.
+        """
+
     static func noteOpening(courseName: String, noteContext: String) -> String {
         """
         These are a student's lecture notes from the course "\(courseName)".
@@ -1232,12 +1251,18 @@ public struct OllamaGenerator: CardGenerator {
     static func reviewPrompt(noteContext: String, section: OverviewSection) -> String {
         var lines = ["Heading: \(section.heading)"]
         lines += section.paragraphs.map { "Paragraph: \($0)" }
-        lines += section.terms.map { "Term: \($0.term) -- \($0.text)" }
+        for term in section.terms {
+            lines.append("Term: \(term.term) -- \(term.text)")
+            if let example = term.example { lines.append("Term example: \(example)") }
+            if let nonExample = term.nonExample { lines.append("Term near miss: \(nonExample)") }
+        }
         if let check = section.check {
             lines.append("Question: \(check.question)")
             lines.append("Answer: \(check.answer)")
         }
         if let example = section.example {
+            if let title = example.title { lines.append("Example title: \(title)") }
+            if let setup = example.setup { lines.append("Example setup: \(setup)") }
             for step in example.steps {
                 lines.append("Example step: \(step.action)" + (step.result.map { " -> \($0)" } ?? ""))
             }
@@ -1246,9 +1271,13 @@ public struct OllamaGenerator: CardGenerator {
         return noteOpening(courseName: "this course", noteContext: noteContext) + """
         You are checking a lesson section a student will study from, written about the notes \
         above. Find only statements that are false: they contradict the notes, get the subject's \
-        facts or math wrong, or give a wrong answer to the question. A true statement the notes \
-        don't happen to mention is NOT an error -- leave it alone. Style, wording and missing \
-        detail are not errors either. Most sections have no errors, and at most one or two \
+        facts or math wrong, reverse what the subject says (claiming a thing prevents what it \
+        causes, say), or give a wrong answer to the question. Also find any made-up scene: a \
+        student, program or situation the notes never describe, used as an example or setup. \
+        Remove it, or rewrite it as a plain statement the notes support. A term's example that is \
+        really a fact about the course (a lab's weight, the software used) rather than the term \
+        in use is an error too. A true statement the notes don't happen to mention is NOT an \
+        error -- leave it alone. Style, wording and missing detail are not errors either. Most sections have no errors, and at most one or two \
         sentences in a section are ever wrong -- an empty list is the normal result.
 
         The section:
@@ -1295,8 +1324,8 @@ public struct OllamaGenerator: CardGenerator {
             ? ", \"formulas\": [{\"name\": \"...\", \"latex\": \"...\", \"plain\": \"...\", \"meaning\": \"...\"}]"
             : ""
         let hookRule = isMath
-            ? "posed through the math itself"
-            : "posed through the notes' own examples"
+            ? "posed through the math itself, in words a beginner understands"
+            : "posed in everyday words a beginner understands, with no technical term the notes have not explained yet"
         return noteOpening(courseName: courseName, noteContext: noteContext) + """
         You are planning a short lesson on the notes above, taught in the style of 3Blue1Brown. \
         List the ideas they teach, in the order a learner should meet them.
@@ -1317,14 +1346,18 @@ public struct OllamaGenerator: CardGenerator {
 
         \(partLine)Produce:
         - title: a short claim capturing the lecture's central insight.
-        - hook: one real question this lecture answers, \(hookRule), then a sentence on why it \
-        matters. A single question, not a list of them. No stories, characters or metaphors.
+        - hook: the start of the lesson, two plain sentences. First one real question this lecture \
+        answers, \(hookRule). Then a sentence on why it matters to the reader. A single question, \
+        not a list of them, and a complete grammatical sentence. No stories, characters or \
+        metaphors.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with a \
         verb.
         - sections: 4 or 5, each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it teaches, including any example equations or \
-        numbers it should use. Combine closely related parts rather than giving each its own; no \
-        two sections may teach the same idea.
+        numbers it should use, and which technical terms it introduces. Order the sections from \
+        the most familiar idea to the least: a section may only rely on terms an earlier section \
+        introduced. Combine closely related parts rather than giving each its own; no two \
+        sections may teach the same idea.
         - takeaways: 3 to 5 sentences, each one idea worth remembering.
 
         Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
@@ -1404,9 +1437,10 @@ public struct OllamaGenerator: CardGenerator {
 
         How to write it:
         - Two or three paragraphs, each two to four sentences.
-        - Open with a specific example from the notes. Show what happens to it, then name the \
-        general idea. Say what this section adds -- the lesson's other sections cover their own \
-        claims, so don't repeat them.
+        - Open with the idea in everyday words, then a specific example from the notes if they \
+        have one. Show what happens to it, then name the general idea. Say what this section \
+        adds -- the lesson's other sections cover their own claims, so don't repeat them.
+        \(beginnerRules)
         \(concreteRules)
         - Explain why the claim has to be true, and point at what the reader should see.
         - Vary how paragraphs begin. Never open two paragraphs the same way, and don't lean on \
@@ -1415,9 +1449,10 @@ public struct OllamaGenerator: CardGenerator {
         - You may use what you know about the subject to explain this claim, but stay on it.
         - Never copy the notes' sentences. If a line could be pasted into the notes without \
         anyone noticing, rewrite it.
-        - terms: at most three key terms this section introduces, each defined in one sentence \
+        - terms: at most two key terms this section introduces, each defined in one sentence \
         and worded the way the notes word it. For each, also give example: one concrete case from \
-        the notes that is this, and nonExample: a near miss that is not this, and exactly what \
+        the notes that is this -- the term itself in use, never a fact about the course -- and \
+        nonExample: a near miss that is not this, and exactly what \
         disqualifies it -- the boundary is how a definition is learned. Leave either empty if the \
         notes give nothing to base it on. An empty list is fine.
         - example: if this part of the notes works through something step by step -- a \
@@ -1429,7 +1464,8 @@ public struct OllamaGenerator: CardGenerator {
         terms. A title naming what is worked, a setup stating the starting point, two to six \
         steps each with a label of two to four words, the action taken, the result it produced \
         copied from the notes, and why that step, then the outcome. Use only steps and values the \
-        notes actually show. Use null if the notes don't work one through here.
+        notes actually show. Never make up a student, program or situation to carry the steps. Use \
+        null if the notes don't work one through here.
         - visual: for any step where a picture would make it clearer to someone new to the \
         subject, add one. \(visualShapes) Use null for a step a picture wouldn't help.
         - check: one question that makes the reader think, of whichever kind fits this section \

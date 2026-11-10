@@ -48,6 +48,7 @@ public enum OverviewReview {
             return term
         }.filter { !$0.text.isEmpty }
         if var example = section.example {
+            example.setup = example.setup.map(fix).flatMap { $0.isEmpty ? nil : $0 }
             example.steps = example.steps.map { step in
                 var step = step
                 step.action = fix(step.action)
