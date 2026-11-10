@@ -153,10 +153,18 @@ public struct GeminiTransport: ChatTransport {
     /// How long to wait before each retry of an overloaded model.
     let overloadPauses: [TimeInterval]
 
+    /// Seconds to wait for a reply before trying another model.
+    static let requestTimeout: TimeInterval = 45
+
     static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 120
-        config.timeoutIntervalForResource = 180
+        // A healthy model answers a whole section in well under half a
+        // minute. Measured on a day the newest model hung: every request to
+        // it sat the full two minutes before failing, and a lesson that
+        // needed a dozen calls spent most of its time waiting on a model
+        // that was never going to answer.
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = 90
         return URLSession(configuration: config)
     }()
 
@@ -218,6 +226,9 @@ public struct GeminiTransport: ChatTransport {
         var index = 0
         var retries = 0
         var overloadedModels = 0
+        // Models in a row that did not answer in time. Each one costs the
+        // whole timeout, so two in a row is the service, not the model.
+        var timedOutModels = 0
         #if DEBUG
         var pacerWaited = 0.0
         #endif
@@ -305,6 +316,19 @@ public struct GeminiTransport: ChatTransport {
                     throw AIBackendError.overloaded(status: status)
                 }
                 moveToNext("\(current) is overloaded")
+            } catch AIBackendError.timedOut {
+                // No second try on a model that just made the student wait
+                // the whole timeout: skip it for ten minutes and ask the next.
+                usage.avoid(current, for: 600, reason: "too slow to answer")
+                timedOutModels += 1
+                if isLast || timedOutModels >= 2 {
+                    usage.recordTransportError(timedOutModels >= 2
+                        ? "Google's Gemini models took too long to answer: \(timedOutModels) in a row timed out after \(Int(Self.requestTimeout)) seconds."
+                        : "\(current) took longer than \(Int(Self.requestTimeout)) seconds to answer.")
+                    failures?.record(.timedOut)
+                    throw AIBackendError.timedOut
+                }
+                moveToNext("\(current) took too long")
             } catch AIBackendError.quotaExhausted {
                 // Daily free quotas are per model: this one is done until
                 // the reset, but the next may have plenty left.
@@ -479,6 +503,9 @@ public struct GeminiTransport: ChatTransport {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            usage.recordTransportError(Self.describe(error))
+            throw AIBackendError.timedOut
         } catch {
             usage.recordTransportError(Self.describe(error))
             throw AIBackendError.unreachable

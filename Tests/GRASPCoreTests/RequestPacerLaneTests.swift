@@ -272,7 +272,7 @@ struct CloudStopAndNotesTests {
 
     @Test("each failure reads as a sentence with something to do, and none uses a double hyphen")
     func failureWording() {
-        let all: [AIBackendError] = [.unreachable, .overloaded(status: 503), .rateLimited(retryAfter: nil),
+        let all: [AIBackendError] = [.unreachable, .timedOut, .overloaded(status: 503), .rateLimited(retryAfter: nil),
                                      .quotaExhausted, .unauthorized, .badResponse("x")]
         for error in all {
             let text = CloudFailureText.text(for: error)

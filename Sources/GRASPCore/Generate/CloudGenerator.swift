@@ -214,6 +214,8 @@ public struct CloudGenerator: CardGenerator {
             return ConnectionReport(status: .quotaUsedUp, models: [])
         } catch AIBackendError.unreachable {
             return ConnectionReport(status: .offline, models: [])
+        } catch AIBackendError.timedOut {
+            return ConnectionReport(status: .failed(CloudFailureText.text(for: .timedOut)), models: [])
         } catch AIBackendError.overloaded(let status) {
             return ConnectionReport(status: .failed("Google isn't answering right now (HTTP \(status)). Try again in a few minutes."), models: [])
         } catch AIBackendError.badResponse(let detail) {
@@ -240,6 +242,8 @@ public struct CloudGenerator: CardGenerator {
             return ConnectionReport(status: .ok(models: models), models: models)
         } catch AIBackendError.unreachable {
             return ConnectionReport(status: .offline, models: models)
+        } catch AIBackendError.timedOut {
+            return ConnectionReport(status: .failed(CloudFailureText.text(for: .timedOut)), models: models)
         } catch AIBackendError.overloaded {
             return ConnectionReport(
                 status: .failed(CloudUsage.shared.lastTransportError
@@ -285,7 +289,7 @@ public enum CloudFailureText {
     /// Whether `text` is one of these sentences, which already says what to
     /// do, so a caller does not wrap it in more advice.
     public static func isOwn(_ text: String) -> Bool {
-        let all: [AIBackendError] = [.unreachable, .overloaded(status: 0), .rateLimited(retryAfter: nil),
+        let all: [AIBackendError] = [.unreachable, .timedOut, .overloaded(status: 0), .rateLimited(retryAfter: nil),
                                      .quotaExhausted, .unauthorized, .badResponse("")]
         return all.contains { Self.text(for: $0) == text }
     }
@@ -293,6 +297,8 @@ public enum CloudFailureText {
         switch error {
         case .unreachable:
             return "GRASP can't reach Google. Check your internet connection and try again."
+        case .timedOut:
+            return "Google's Gemini models took too long to answer. Try again in a few minutes, or pick another model in Settings, under AI."
         case .overloaded:
             return "Google's Gemini models are overloaded right now. Try again in a few minutes."
         case .rateLimited:
@@ -316,6 +322,8 @@ enum FallbackMessage {
             return "Gemini is busy right now, so this is running on \(local)."
         case .unreachable:
             return "Gemini can't be reached, so this is running on \(local)."
+        case .timedOut:
+            return "Gemini took too long to answer, so this is running on \(local)."
         case .overloaded:
             return "Gemini is overloaded right now, so this is running on \(local)."
         case .unauthorized, .badResponse:

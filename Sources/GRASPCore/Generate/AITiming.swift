@@ -44,6 +44,7 @@ public enum AITiming {
             case .rateLimited: return "rate limited (429)"
             case .overloaded(let status): return "overloaded (HTTP \(status))"
             case .unreachable: return "unreachable"
+            case .timedOut: return "timed out"
             case .badResponse(let body):
                 return body.lowercased().hasPrefix("empty_answer") ? "empty answer" : "bad response"
             default: return "error"

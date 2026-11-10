@@ -15,6 +15,9 @@ public enum AIBackendError: Error, Equatable, Sendable {
     case unauthorized
     /// No connection.
     case unreachable
+    /// Google is reachable but this model did not answer in time. Not the
+    /// same as no connection: another model usually answers at once.
+    case timedOut
     /// Google is up but this model is overloaded or erroring (HTTP 5xx):
     /// try again shortly, or use another model.
     case overloaded(status: Int)
@@ -25,7 +28,7 @@ public enum AIBackendError: Error, Equatable, Sendable {
     /// quietly run everything somewhere else.
     var warrantsFallback: Bool {
         switch self {
-        case .rateLimited, .quotaExhausted, .unreachable, .overloaded: return true
+        case .rateLimited, .quotaExhausted, .unreachable, .timedOut, .overloaded: return true
         case .unauthorized, .badResponse: return false
         }
     }

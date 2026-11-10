@@ -5,9 +5,13 @@ import Foundation
 /// harness cannot pick differently.
 ///
 /// - A model the student pinned in Settings is used alone: no walking.
-/// - Otherwise the primary is "the best model" remembered from the last
-///   connection check (the first of `CloudProvider.chatModels`), or the
-///   built-in fallback if there never was a check. It does not refresh by
+/// - Otherwise the primary is the model that answered most recently, if
+///   it is still on the list: the newest model is often the one that is
+///   overloaded or hangs, and a model that worked an hour ago is a better
+///   first ask than one that is merely newer. With no such model, "the best
+///   model" remembered from the last connection check (the first of
+///   `CloudProvider.chatModels`), or the built-in fallback if there never
+///   was a check. It does not refresh by
 ///   itself: the list is only read again when the student presses Test
 ///   connection, so a stale list keeps being used.
 /// - The alternates are the rest of that remembered list, in order.
@@ -28,6 +32,7 @@ public struct CloudModelSelection: Equatable, Sendable {
     static let pinnedKey = AIPreferences.cloudModelKey
     static let bestKey = "GRASP.cloudBestModel"
     static let listKey = "GRASP.cloudModelList"
+    static let lastWorkingKey = CloudUsage.lastWorkingModelKey
 
     /// What the app uses, from its preferences (the standard defaults in the
     /// app; another domain's, to read what the app would do).
@@ -36,6 +41,10 @@ public struct CloudModelSelection: Equatable, Sendable {
         let list = defaults.stringArray(forKey: listKey) ?? []
         if !pinned.isEmpty {
             return CloudModelSelection(primary: pinned, alternates: [], source: "pinned")
+        }
+        if let worked = defaults.string(forKey: lastWorkingKey), !worked.isEmpty,
+           list.isEmpty || list.contains(worked) {
+            return CloudModelSelection(primary: worked, alternates: rest(of: list, besides: worked), source: "last working")
         }
         if let best = defaults.string(forKey: bestKey), !best.isEmpty {
             return CloudModelSelection(primary: best, alternates: rest(of: list, besides: best), source: "remembered")

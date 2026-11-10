@@ -206,6 +206,7 @@ public final class CloudUsage: @unchecked Sendable {
         // Read now, while nothing else can hold the lock or be writing.
         paused = defaults.object(forKey: Self.pausedUntilKey) as? Date
         fallback = defaults.string(forKey: Self.lastFallbackKey)
+        usedModel = defaults.string(forKey: Self.lastWorkingModelKey)
         let day = Self.quotaDay(of: now())
         countDay = day
         count = defaults.integer(forKey: Self.usageKey(day))
@@ -230,6 +231,9 @@ public final class CloudUsage: @unchecked Sendable {
     private static func usageKey(_ day: String) -> String { "GRASP.cloudUsage.\(day)" }
     private static let pausedUntilKey = "GRASP.cloudPausedUntil"
     private static let lastFallbackKey = "GRASP.cloudLastFallback"
+    /// The model that answered most recently. Requests start here, so a
+    /// newest model that hangs or is overloaded isn't asked first every time.
+    static let lastWorkingModelKey = "GRASP.cloudLastWorkingModel"
 
     /// Rolls the counter over when the quota day changes. Called before
     /// taking the lock: it reads `UserDefaults`, and a defaults write in
@@ -383,7 +387,10 @@ public final class CloudUsage: @unchecked Sendable {
         let changed = usedModel != model
         usedModel = model
         lock.unlock()
-        if changed { notify() }
+        if changed {
+            persist { $0.set(model, forKey: Self.lastWorkingModelKey) }
+            notify()
+        }
     }
 
     private func notify() {
