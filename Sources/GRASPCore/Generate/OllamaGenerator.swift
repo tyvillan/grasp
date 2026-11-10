@@ -215,9 +215,10 @@ public struct OllamaGenerator: CardGenerator {
         let progress = AIProgress.current
         let assumed = OverviewComposer.assumedSectionsPerPart
 
+        let orientation = OverviewOrientation.isOrientation(noteTitle: noteTitle, noteContext: noteContext)
         let planPrompt = Self.lessonPlanPrompt(
             noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
-            includeFormulas: includeFormulas, partLabel: partLabel
+            includeFormulas: includeFormulas && !orientation, partLabel: partLabel, orientation: orientation
         )
         // One retry before giving up on the plan. The same prompt on the
         // same note parses cleanly most of the time and occasionally
@@ -251,7 +252,7 @@ public struct OllamaGenerator: CardGenerator {
                 let prompt = Self.sectionPrompt(
                     courseName: courseName, noteContext: noteContext,
                     heading: planned.heading, covers: planned.covers,
-                    lessonHeadings: headings
+                    lessonHeadings: headings, orientation: orientation
                 )
                 if width == 1 { progress?.begin("Writing section \(index + 1) of \(total)") }
                 // Room for a worked example, its pictures and is/isn't pairs
@@ -284,7 +285,7 @@ public struct OllamaGenerator: CardGenerator {
         // over 3,000 tokens and ran into the five-minute timeout.
         let prompt = Self.overviewPrompt(
             noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
-            includeFormulas: includeFormulas, partLabel: partLabel
+            includeFormulas: includeFormulas && !orientation, partLabel: partLabel, orientation: orientation
         )
         guard let content = try? await chat(prompt: prompt, maxTokens: 2_000) else { return .empty }
         return GeneratedOverview(document: Self.parseOverviewResponse(content))
@@ -1111,8 +1112,9 @@ public struct OllamaGenerator: CardGenerator {
     /// it doesn't raise.
     static func overviewPrompt(
         noteTitle: String, courseName: String, noteContext: String,
-        includeFormulas: Bool, partLabel: String? = nil
+        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false
     ) -> String {
+        let orientationLine = orientation ? orientationRules + "\n" : ""
         let partLine = partLabel.map { label in
             """
             This note is long, so you are being shown one piece of it: \(label). Cover only what \
@@ -1139,7 +1141,7 @@ public struct OllamaGenerator: CardGenerator {
         a summary, and not their notes handed back in different words.
 
         How to write it:
-        - Start from a concrete question the lecture answers, in everyday words a beginner \
+        \(orientationLine)- Start from a concrete question the lecture answers, in everyday words a beginner \
         understands, something that makes the reader want to know.
         \(beginnerRules)
         - Show a concrete case with real numbers before the general rule. Let the reader see the \
@@ -1231,6 +1233,22 @@ public struct OllamaGenerator: CardGenerator {
         longer one with a doubtful claim.
         """
 
+    /// What an orientation says, for a syllabus or first-day note (see
+    /// `OverviewOrientation`). The note teaches no concepts yet, so the
+    /// lesson is the course itself in plain words, and its facts are the
+    /// content: quoted as the note gives them, never interpreted.
+    static let orientationRules = """
+        - This note is a syllabus or first-day overview. It does not teach the subject yet, so \
+        this is an orientation to the course, not a lesson on the subject.
+        - Say what the notes say about the course, in everyday words. Numbers, dates, weights \
+        and rules are given exactly as the notes give them. Never work out, soften or add a rule.
+        - Name each subject the course covers in one plain sentence saying what it is, and say \
+        later lectures teach it. Do not explain how it works, and do not argue why it matters \
+        beyond what the notes say.
+        - Never make up a scene, a student, a program or an example. If the notes give no example, \
+        give none.
+        """
+
     static func noteOpening(courseName: String, noteContext: String) -> String {
         """
         These are a student's lecture notes from the course "\(courseName)".
@@ -1249,6 +1267,9 @@ public struct OllamaGenerator: CardGenerator {
     /// random -- and told plainly that finding nothing is the usual result,
     /// or it will invent problems to report.
     static func reviewPrompt(noteContext: String, section: OverviewSection) -> String {
+        // An orientation's course facts are its content, so the rule that
+        // calls a course fact in a term's example an error does not apply.
+        let courseFactsAreContent = OverviewOrientation.isOrientation(noteContext: noteContext)
         var lines = ["Heading: \(section.heading)"]
         lines += section.paragraphs.map { "Paragraph: \($0)" }
         for term in section.terms {
@@ -1274,9 +1295,7 @@ public struct OllamaGenerator: CardGenerator {
         facts or math wrong, reverse what the subject says (claiming a thing prevents what it \
         causes, say), or give a wrong answer to the question. Also find any made-up scene: a \
         student, program or situation the notes never describe, used as an example or setup. \
-        Remove it, or rewrite it as a plain statement the notes support. A term's example that is \
-        really a fact about the course (a lab's weight, the software used) rather than the term \
-        in use is an error too. A true statement the notes don't happen to mention is NOT an \
+        Remove it, or rewrite it as a plain statement the notes support. \(courseFactsAreContent ? "A number, date or rule that differs from the notes is an error: correct it to what the notes say." : "A term's example that is really a fact about the course (a lab's weight, the software used) rather than the term in use is an error too.") A true statement the notes don't happen to mention is NOT an \
         error -- leave it alone. Style, wording and missing detail are not errors either. Most sections have no errors, and at most one or two \
         sentences in a section are ever wrong -- an empty list is the normal result.
 
@@ -1314,8 +1333,12 @@ public struct OllamaGenerator: CardGenerator {
 
     static func lessonPlanPrompt(
         noteTitle: String, courseName: String, noteContext: String,
-        includeFormulas: Bool, partLabel: String? = nil
+        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false
     ) -> String {
+        if orientation {
+            return orientationPlanPrompt(noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
+                                         partLabel: partLabel)
+        }
         let isMath = NoteMath.isMathematical(noteContext)
         let partLine = partLabel.map {
             "You are being shown one piece of a longer note: \($0). Plan only what this piece teaches.\n\n"
@@ -1371,6 +1394,97 @@ public struct OllamaGenerator: CardGenerator {
         """
     }
 
+    /// Stage one for a syllabus or first-day note: what the course is, what
+    /// the student will be able to do, how the work runs, how it is graded.
+    /// Only what the notes give; a part with nothing is left out.
+    static func orientationPlanPrompt(noteTitle: String, courseName: String, noteContext: String,
+                                      partLabel: String? = nil) -> String {
+        let partLine = partLabel.map {
+            "You are being shown one piece of a longer note: \($0). Plan only what this piece says.\n\n"
+        } ?? ""
+        return noteOpening(courseName: courseName, noteContext: noteContext) + """
+        You are planning a short orientation for a student's first look at this course, from the \
+        notes above. Write for someone who has not started: plain, calm and welcoming, with no \
+        jargon they have not been given.
+
+        \(orientationRules)
+
+        Cover only what the notes give, in this order, leaving out whatever they do not cover:
+        - what the course is about and what the student will be able to do by the end
+        - the tools and how the work is done week to week
+        - how grades are made up, and the rules that matter: deadlines, late work, exams
+
+        Each section heading is a full claim that states the point, never a bare topic. Examples \
+        from other courses, to show the pattern -- write your own for these notes:
+        - Bad: Grading. Good: Your grade is mostly weekly work, with two exams on top.
+        - Bad: Tools. Good: Everything you write runs on the same free tools from week one.
+        The title follows the same rule: a claim, never a phrase like Understanding X or \
+        Introduction to Y.
+
+        \(partLine)Produce:
+        - title: a short claim saying what this course will give the student.
+        - hook: the start, two plain sentences. First what this course is, in everyday words. Then \
+        what the student will be able to do by the end. A complete grammatical sentence each, no \
+        technical term, no question needed.
+        - objectives: 2 to 4 things the reader will know or be able to do after reading this, each \
+        starting with a verb, such as say what the course covers or work out how grades are weighted. \
+        Never an objective that needs lessons the note does not give, such as writing code.
+        - sections: 3 or 4, each with a claim heading of at most twelve words and a covers field \
+        naming exactly which part of the notes it uses. Combine closely related parts; no two \
+        sections may say the same thing.
+        - takeaways: 3 to 5 sentences, each one fact worth remembering.
+
+        Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
+        no quotation marks inside the text.
+
+        Note title: \(noteTitle)
+
+        Respond with ONLY one JSON object shaped {"title": "...", "hook": "...", "objectives": \
+        ["..."], "sections": [{"heading": "...", "covers": "..."}], "takeaways": ["..."]}. \
+        No other text.
+        """
+    }
+
+    /// Stage two for an orientation: one section, said plainly. No worked
+    /// example and no picture -- there is nothing to work through yet.
+    static func orientationSectionPrompt(courseName: String, noteContext: String, heading: String,
+                                         covers: String, lessonHeadings: [String]) -> String {
+        let outline = lessonHeadings.map { "- \($0)" }.joined(separator: "\n")
+        return noteOpening(courseName: courseName, noteContext: noteContext) + """
+        You are writing one section of a short orientation to this course, from the notes above.
+
+        The whole orientation, for context:
+        \(outline)
+
+        Write only this section:
+        Claim: \(heading)
+        It uses: \(covers)
+
+        How to write it:
+        - Two or three short paragraphs, each two to four sentences, calm and plain.
+        - Say the point in everyday words first. Before you use any technical term, say what it \
+        means in the same sentence or the one before.
+        \(orientationRules)
+        - Say what this section adds -- the other sections cover their own claims, so don't \
+        repeat them.
+        - Talk to the reader as you.
+        - terms: at most two terms the reader needs, each defined in one sentence and worded the \
+        way the notes word it. Leave example and nonExample empty unless the notes give one.
+        - example: null. There is nothing to work through yet.
+        - check: one simple question the notes answer, such as what share of the grade a part is \
+        worth, with the fact as the answer in one sentence.
+        - claim: last of all, one sentence of at most twelve words stating the point of what you \
+        just wrote. A full sentence, never a topic name.
+
+        Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
+        no quotation marks inside the text.
+
+        Respond with ONLY one JSON object shaped {"paragraphs": ["..."], "terms": [{"term": \
+        "...", "definition": "...", "example": "", "nonExample": ""}], "example": null, "check": \
+        {"question": "...", "answer": "..."}, "claim": "..."}. No other text.
+        """
+    }
+
     /// Stage two: teach one claim well.
     ///
     /// The concrete case is pinned to the note's own examples, and invented
@@ -1381,8 +1495,12 @@ public struct OllamaGenerator: CardGenerator {
     /// around them.
     static func sectionPrompt(
         courseName: String, noteContext: String, heading: String, covers: String,
-        lessonHeadings: [String]
+        lessonHeadings: [String], orientation: Bool = false
     ) -> String {
+        if orientation {
+            return orientationSectionPrompt(courseName: courseName, noteContext: noteContext, heading: heading,
+                                            covers: covers, lessonHeadings: lessonHeadings)
+        }
         let outline = lessonHeadings.map { "- \($0)" }.joined(separator: "\n")
         // Rules about equations and row operations only make sense for a
         // math note. Given to a lecture on AI agents they read as an
