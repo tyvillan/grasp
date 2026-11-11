@@ -49,9 +49,11 @@ struct OverviewOrientationTests {
         let plan = OllamaGenerator.lessonPlanPrompt(noteTitle: "Syllabus", courseName: "Systems Programming",
                                                     noteContext: Self.syllabus, includeFormulas: false, orientation: true)
         #expect(plan.contains("orientation for a student's first look at this course"))
-        #expect(plan.contains("Numbers, dates, weights and rules are given exactly as the notes give them"))
+        #expect(plan.contains("Leave out grading, weights, deadlines, late work and exam dates"))
         #expect(plan.contains("what the course is about and what the student will be able to do"))
-        #expect(plan.contains("how grades are made up"))
+        #expect(plan.contains("the tools and how the work is done week to week"))
+        #expect(!plan.contains("how grades are made up"))
+        #expect(plan.contains("sections: 2 or 3"))
         #expect(plan.contains("Never an objective that needs lessons the note does not give"))
         let lesson = OllamaGenerator.lessonPlanPrompt(noteTitle: "Pointers", courseName: "Systems Programming",
                                                       noteContext: "Pointers hold addresses.", includeFormulas: false)
@@ -65,6 +67,9 @@ struct OverviewOrientationTests {
                                                    heading: "Your grade is mostly weekly work", covers: "grade weights",
                                                    lessonHeadings: ["Your grade is mostly weekly work"], orientation: true)
         #expect(prompt.contains("example: null"))
+        #expect(prompt.contains("check: null. An orientation asks no questions."))
+        #expect(prompt.contains("\"check\": \\\n        null") || prompt.contains("null, \"claim\""))
+        #expect(prompt.contains("One or two short paragraphs, each at most two sentences"))
         #expect(prompt.contains("Never make up a scene, a student, a program or an example"))
         #expect(prompt.contains("say later lectures teach it"))
         #expect(prompt.contains("\"example\": null"))
@@ -79,6 +84,17 @@ struct OverviewOrientationTests {
                                                  includeFormulas: false)
         #expect(on.contains(OllamaGenerator.orientationRules))
         #expect(!off.contains(OllamaGenerator.orientationRules))
+    }
+
+    @Test("an orientation's section can't come back with a question, and a lecture's still does")
+    func noQuestionForOrientation() {
+        let orientation = OllamaGenerator.sectionPrompt(courseName: "C", noteContext: Self.syllabus, heading: "H", covers: "c",
+                                                        lessonHeadings: ["H"], orientation: true)
+        let lecture = OllamaGenerator.sectionPrompt(courseName: "C", noteContext: "Pointers hold addresses.", heading: "H",
+                                                    covers: "c", lessonHeadings: ["H"])
+        #expect(!orientation.contains("\"question\""))
+        #expect(lecture.contains("\"question\""))
+        #expect(lecture.contains("check: one question that makes the reader think"))
     }
 
     @Test("the fact-check stops calling an orientation's course facts an error, and checks its numbers instead")

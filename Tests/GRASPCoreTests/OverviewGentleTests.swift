@@ -44,6 +44,28 @@ struct OverviewGentleTests {
         #expect(prompt.contains("If you are not sure a statement is true, leave it out"))
     }
 
+    @Test("a section shows before it explains: short prose, processes as flow steps, listings line by line")
+    func showRules() {
+        let prompt = OllamaGenerator.sectionPrompt(courseName: "Systems Programming", noteContext: note,
+                                                   heading: "A program is built in stages", covers: "compile and link",
+                                                   lessonHeadings: ["A program is built in stages"])
+        #expect(prompt.contains("Show, don't explain"))
+        #expect(prompt.contains("one or two short paragraphs of at most two sentences each"))
+        #expect(prompt.contains("one step per stage, each with a flow visual"))
+        #expect(prompt.contains("never explain it in paragraphs"))
+        #expect(prompt.contains("the action is the line exactly as the notes write it"))
+        #expect(prompt.contains("a pipeline or a code listing"))
+        #expect(!prompt.contains("Two or three paragraphs, each two to four sentences"))
+        #expect(!prompt.contains("Explain why the claim has to be true"))
+    }
+
+    @Test("the plan says whether each section is a process to draw, a listing to walk through, or an idea")
+    func planForm() {
+        let prompt = OllamaGenerator.lessonPlanPrompt(noteTitle: "Module 1", courseName: "Systems Programming",
+                                                      noteContext: note, includeFormulas: false)
+        #expect(prompt.contains("a process to draw, a code listing to walk through line by line, or an idea to say in a sentence"))
+    }
+
     @Test("the single-shot fallback carries the same rules")
     func singleShot() {
         let prompt = OllamaGenerator.overviewPrompt(noteTitle: "Module 1", courseName: "Systems Programming",

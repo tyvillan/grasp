@@ -1151,7 +1151,8 @@ public struct OllamaGenerator: CardGenerator {
         - Talk to the reader: use you and we, and phrases like notice that, or what if.
         - Every section heading is a full claim that states the insight, like Swapping two \
         equations cannot change the answer -- never a bare topic like Interchange.
-        - Keep paragraphs to two to four sentences, two or three paragraphs per section.
+        - Keep paragraphs to one or two short sentences, one or two paragraphs per section. The \
+        reader skims; never explain how code works in prose.
         - Write math in plain text, like x + 5y = 7 or R2 -> R2 - 2R1.
         - Use the note's own examples as the concrete case. Never invent a story, character or \
         metaphor -- no treasure, maps, detectives, recipes or games.
@@ -1233,6 +1234,21 @@ public struct OllamaGenerator: CardGenerator {
         longer one with a doubtful claim.
         """
 
+    /// A lesson is skimmed, so pictures and steps carry it and prose stays
+    /// short. The first lessons read as paragraphs explaining how code
+    /// works, which is the reverse of what helps: a process is drawn, a
+    /// listing is walked through line by line in the example's steps.
+    static let showRules = """
+        - Show, don't explain. The reader skims, so a picture or a short list of steps beats a \
+        paragraph. Write one or two short paragraphs of at most two sentences each, and cut any \
+        sentence that only repeats what the steps show.
+        - When the notes describe a process, a pipeline or an order of stages (compile, link, run), \
+        give it as the example below: one step per stage, each with a flow visual, not as prose.
+        - When the notes show a code listing, never explain it in paragraphs. Give its important \
+        lines, up to six, as the example's steps: the action is the line exactly as the notes write \
+        it, the result is what it does in a few plain words.
+        """
+
     /// What an orientation says, for a syllabus or first-day note (see
     /// `OverviewOrientation`). The note teaches no concepts yet, so the
     /// lesson is the course itself in plain words, and its facts are the
@@ -1240,8 +1256,9 @@ public struct OllamaGenerator: CardGenerator {
     static let orientationRules = """
         - This note is a syllabus or first-day overview. It does not teach the subject yet, so \
         this is an orientation to the course, not a lesson on the subject.
-        - Say what the notes say about the course, in everyday words. Numbers, dates, weights \
-        and rules are given exactly as the notes give them. Never work out, soften or add a rule.
+        - Say what the notes say about the course, in everyday words, and never work out, soften \
+        or add a rule. Leave out grading, weights, deadlines, late work and exam dates: an \
+        orientation is for seeing what the course is, not for being quizzed on how it runs.
         - Name each subject the course covers in one plain sentence saying what it is, and say \
         later lectures teach it. Do not explain how it works, and do not argue why it matters \
         beyond what the notes say.
@@ -1382,7 +1399,9 @@ public struct OllamaGenerator: CardGenerator {
         verb.
         - sections: 4 or 5, each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it teaches, including any example equations or \
-        numbers it should use, and which technical terms it introduces. Order the sections from \
+        numbers it should use, which technical terms it introduces, and whether it is a process \
+        to draw, a code listing to walk through line by line, or an idea to say in a sentence. \
+        Order the sections from \
         the most familiar idea to the least: a section may only rely on terms an earlier section \
         introduced. Combine closely related parts rather than giving each its own; no two \
         sections may teach the same idea.
@@ -1400,7 +1419,7 @@ public struct OllamaGenerator: CardGenerator {
     }
 
     /// Stage one for a syllabus or first-day note: what the course is, what
-    /// the student will be able to do, how the work runs, how it is graded.
+    /// the student will be able to do, the tools and how the work runs.
     /// Only what the notes give; a part with nothing is left out.
     static func orientationPlanPrompt(noteTitle: String, courseName: String, noteContext: String,
                                       partLabel: String? = nil) -> String {
@@ -1417,12 +1436,11 @@ public struct OllamaGenerator: CardGenerator {
         Cover only what the notes give, in this order, leaving out whatever they do not cover:
         - what the course is about and what the student will be able to do by the end
         - the tools and how the work is done week to week
-        - how grades are made up, and the rules that matter: deadlines, late work, exams
 
         Each section heading is a full claim that states the point, never a bare topic. Examples \
         from other courses, to show the pattern -- write your own for these notes:
-        - Bad: Grading. Good: Your grade is mostly weekly work, with two exams on top.
         - Bad: Tools. Good: Everything you write runs on the same free tools from week one.
+        - Bad: Overview. Good: The course starts with how a program is built, then how it holds data.
         The title follows the same rule: a claim, never a phrase like Understanding X or \
         Introduction to Y.
 
@@ -1432,12 +1450,12 @@ public struct OllamaGenerator: CardGenerator {
         what the student will be able to do by the end. A complete grammatical sentence each, no \
         technical term, no question needed.
         - objectives: 2 to 4 things the reader will know or be able to do after reading this, each \
-        starting with a verb, such as say what the course covers or work out how grades are weighted. \
+        starting with a verb, such as say what the course covers or name the tools it uses. \
         Never an objective that needs lessons the note does not give, such as writing code.
-        - sections: 3 or 4, each with a claim heading of at most twelve words and a covers field \
+        - sections: 2 or 3, each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it uses. Combine closely related parts; no two \
         sections may say the same thing.
-        - takeaways: 3 to 5 sentences, each one fact worth remembering.
+        - takeaways: 2 to 4 short sentences, each one fact worth remembering.
 
         Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
         no quotation marks inside the text.
@@ -1466,7 +1484,8 @@ public struct OllamaGenerator: CardGenerator {
         It uses: \(covers)
 
         How to write it:
-        - Two or three short paragraphs, each two to four sentences, calm and plain.
+        - One or two short paragraphs, each at most two sentences, calm and plain. The reader \
+        skims; cut anything that is not the point.
         - Say the point in everyday words first. Before you use any technical term, say what it \
         means in the same sentence or the one before.
         \(orientationRules)
@@ -1476,8 +1495,7 @@ public struct OllamaGenerator: CardGenerator {
         - terms: at most two terms the reader needs, each defined in one sentence and worded the \
         way the notes word it. Leave example and nonExample empty unless the notes give one.
         - example: null. There is nothing to work through yet.
-        - check: one simple question the notes answer, such as what share of the grade a part is \
-        worth, with the fact as the answer in one sentence.
+        - check: null. An orientation asks no questions.
         - claim: last of all, one sentence of at most twelve words stating the point of what you \
         just wrote. A full sentence, never a topic name.
 
@@ -1486,7 +1504,7 @@ public struct OllamaGenerator: CardGenerator {
 
         Respond with ONLY one JSON object shaped {"paragraphs": ["..."], "terms": [{"term": \
         "...", "definition": "...", "example": "", "nonExample": ""}], "example": null, "check": \
-        {"question": "...", "answer": "..."}, "claim": "..."}. No other text.
+        null, "claim": "..."}. No other text.
         """
     }
 
@@ -1559,13 +1577,13 @@ public struct OllamaGenerator: CardGenerator {
         It teaches: \(covers)
 
         How to write it:
-        - Two or three paragraphs, each two to four sentences.
+        \(showRules)
         - Open with the idea in everyday words, then a specific example from the notes if they \
         have one. Show what happens to it, then name the general idea. Say what this section \
         adds -- the lesson's other sections cover their own claims, so don't repeat them.
         \(beginnerRules)
         \(concreteRules)
-        - Explain why the claim has to be true, and point at what the reader should see.
+        - Say why the claim is true in one sentence, and point at what the reader should see.
         - Vary how paragraphs begin. Never open two paragraphs the same way, and don't lean on \
         stock openers like Notice that, Look at, Consider, Imagine or What if.
         - Talk to the reader as you and we.
@@ -1579,8 +1597,8 @@ public struct OllamaGenerator: CardGenerator {
         disqualifies it -- the boundary is how a definition is learned. Leave either empty if the \
         notes give nothing to base it on. An empty list is fine.
         - example: if this part of the notes works through something step by step -- a \
-        calculation, a derivation, an algorithm, a procedure, a process -- give those steps here \
-        instead of narrating them in a paragraph. When this section's terms are themselves \
+        calculation, a derivation, an algorithm, a procedure, a process, a pipeline or a code \
+        listing -- give those steps here instead of narrating them in a paragraph. When this section's terms are themselves \
         several distinct operations or stages -- three kinds of row operation, three phases of a \
         process -- the example is what makes each one concrete: give every one of them its own \
         step with real numbers, not just the first, leaving the rest as a one-line mention under \
