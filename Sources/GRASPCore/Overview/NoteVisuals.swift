@@ -180,7 +180,7 @@ public enum NoteVisuals {
     }
 
     /// Enough of a stem that "compile" and "compiler", "file" and "files" agree.
-    private static func stem(_ word: String) -> String {
+    static func stem(_ word: String) -> String {
         var w = word
         if w.hasSuffix("s"), w.count > 3 { w.removeLast() }
         if w.hasSuffix("er"), w.count > 4 { w.removeLast(2) }

@@ -1343,6 +1343,11 @@ public struct OllamaGenerator: CardGenerator {
         let partLine = partLabel.map {
             "You are being shown one piece of a longer note: \($0). Plan only what this piece teaches.\n\n"
         } ?? ""
+        // The slide titles are the instructor's order and words, not more
+        // content: they shape the plan and add nothing to teach.
+        let outlineLine = noteContext.contains(SlideDeck.outlineMarker)
+            ? "The notes end with the lecture's slide titles. Use them for the order of the sections and the words the lesson uses, but teach only what the notes above them cover.\n\n"
+            : ""
         let formulaShape = includeFormulas
             ? ", \"formulas\": [{\"name\": \"...\", \"latex\": \"...\", \"plain\": \"...\", \"meaning\": \"...\"}]"
             : ""
@@ -1367,7 +1372,7 @@ public struct OllamaGenerator: CardGenerator {
         The title follows the same rule: a claim, never a phrase like Understanding X or \
         Introduction to Y.
 
-        \(partLine)Produce:
+        \(outlineLine)\(partLine)Produce:
         - title: a short claim capturing the lecture's central insight.
         - hook: the start of the lesson, two plain sentences. First one real question this lecture \
         answers, \(hookRule). Then a sentence on why it matters to the reader. A single question, \

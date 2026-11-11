@@ -33,7 +33,8 @@ public enum OverviewComposer {
         using generator: any CardGenerator,
         noteTitle: String,
         courseName: String,
-        note original: NoteText
+        note original: NoteText,
+        slideOutline: String? = nil
     ) async -> Outcome {
         let note = freshlyReflowed(original)
         let plan = OverviewChunker.plan(
@@ -68,10 +69,13 @@ public enum OverviewComposer {
             progress?.setPart(chunks.count > 1 ? "Part \(index + 1) of \(chunks.count)" : nil)
             progress?.begin("Planning the lesson")
             let stepsBefore = progress?.snapshot.completed ?? 0
+            // The deck's slide titles go after the note, as the instructor's
+            // own outline. Not for a syllabus: its deck is course logistics.
+            let outline = OverviewOrientation.isOrientation(noteTitle: noteTitle, noteContext: chunk.text) ? nil : slideOutline
             let generated = await generator.generateOverview(
                 noteTitle: noteTitle,
                 courseName: courseName,
-                noteContext: chunk.text,
+                noteContext: outline.map { chunk.text + "\n\n" + $0 } ?? chunk.text,
                 // Asked for only when the note is about math. `hasMath` means
                 // the note contains LaTeX, which a business lecture writing
                 // \(88\%\) does too -- and a model asked for formulas in a

@@ -189,6 +189,9 @@ public actor VaultScanner {
         let prefix = root.hasSuffix("/") ? root : root + "/"
         let fm = FileManager.default
         func isPresent(_ stored: String) -> Bool {
+            // A deck imported before decks were left out is retired like a
+            // deleted note: its untouched drafts go, anything approved stays.
+            if SlideDeck.isDeckFile((stored as NSString).lastPathComponent) { return false }
             let path = paths.local(forStored: stored)
             if fm.fileExists(atPath: path) { return true }
             // Through iCloud for Windows, a folder that hasn't synced to
@@ -288,6 +291,9 @@ public actor VaultScanner {
             // folder full of program input files, driver readmes and
             // transcripts shouldn't turn into notes on its own.
             guard let kind = Self.importableKinds[ext], !Self.explicitOnlyExtensions.contains(ext) else { continue }
+            // A lecture's slide deck is not a note: it would turn its titles
+            // and bullets into cards. It is read beside its note instead.
+            if SlideDeck.isDeckFile(fileURL.lastPathComponent) { continue }
 
             summary.filesScanned += 1
             do {
