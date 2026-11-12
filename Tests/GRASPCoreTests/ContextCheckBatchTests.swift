@@ -419,7 +419,7 @@ struct ParallelSectionsTests {
                 try await Task.sleep(nanoseconds: UInt64(7 - n) * 20_000_000)
                 return #"{"paragraphs": ["Body of section \#(n)."]}"#
             }
-            if maxTokens == 900 {
+            if maxTokens == 1_300 {
                 let sections = (1...6).map { #"{"heading": "HEADING-\#($0)", "covers": "covers-\#($0)"}"# }.joined(separator: ",")
                 return #"{"title": "Lesson", "sections": [\#(sections)]}"#
             }

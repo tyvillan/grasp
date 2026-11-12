@@ -229,11 +229,31 @@ public struct OllamaGenerator: CardGenerator {
             if Task.isCancelled { return .empty }
             if attempt > 0 { progress?.expect(1) }
             progress?.begin("Planning the lesson")
-            let response = try? await chat(prompt: planPrompt, maxTokens: 900)
+            let response = try? await chat(prompt: planPrompt, maxTokens: 1_300)
             progress?.advance()
             if let response {
                 let parsed = Self.parseLessonPlan(response)
                 if !parsed.sections.isEmpty { plan = parsed }
+            }
+        }
+        // A plan that leaves out parts of a long note is asked for again,
+        // once, naming what it left out. The second plan is kept only if
+        // it misses less.
+        if let first = plan, !orientation {
+            let headings = OverviewCoverage.noteHeadings(in: noteContext)
+            let left = OverviewCoverage.missing(headings: headings, plannedText: first.sections.map { $0.heading + " " + $0.covers })
+            if headings.count >= 6, left.count >= 2, !Task.isCancelled {
+                progress?.expect(1)
+                progress?.begin("Planning the parts the first plan missed")
+                let again = Self.lessonPlanPrompt(
+                    noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
+                    includeFormulas: includeFormulas, partLabel: partLabel, orientation: false, alsoCover: left)
+                if let response = try? await chat(prompt: again, maxTokens: 1_300) {
+                    let parsed = Self.parseLessonPlan(response)
+                    let remaining = OverviewCoverage.missing(headings: headings, plannedText: parsed.sections.map { $0.heading + " " + $0.covers })
+                    if !parsed.sections.isEmpty, remaining.count < left.count { plan = parsed }
+                }
+                progress?.advance()
             }
         }
         if let plan {
@@ -1313,7 +1333,7 @@ public struct OllamaGenerator: CardGenerator {
         causes, say), or give a wrong answer to the question. Also find any made-up scene: a \
         student, program or situation the notes never describe, used as an example or setup. \
         Remove it, or rewrite it as a plain statement the notes support. \(courseFactsAreContent ? "A number, date or rule that differs from the notes is an error: correct it to what the notes say." : "A term's example that is really a fact about the course (a lab's weight, the software used) rather than the term in use is an error too.") A true statement the notes don't happen to mention is NOT an \
-        error -- leave it alone. Style, wording and missing detail are not errors either. Most sections have no errors, and at most one or two \
+        error -- leave it alone. A file name, line of code or quoted text that differs from how the notes write it (a different name, capital or spelling) is an error: correct it to the notes. Style, wording and missing detail are not errors either. Most sections have no errors, and at most one or two \
         sentences in a section are ever wrong -- an empty list is the normal result.
 
         The section:
@@ -1350,7 +1370,8 @@ public struct OllamaGenerator: CardGenerator {
 
     static func lessonPlanPrompt(
         noteTitle: String, courseName: String, noteContext: String,
-        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false
+        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false,
+        alsoCover: [String] = []
     ) -> String {
         if orientation {
             return orientationPlanPrompt(noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
@@ -1365,6 +1386,16 @@ public struct OllamaGenerator: CardGenerator {
         let outlineLine = noteContext.contains(SlideDeck.outlineMarker)
             ? "The notes end with the lecture's slide titles. Use them for the order of the sections and the words the lesson uses, but teach only what the notes above them cover.\n\n"
             : ""
+        // A long note names its own parts. Listing them makes leaving the
+        // second half out a visible omission instead of a quiet one.
+        let noteHeadings = OverviewCoverage.noteHeadings(in: noteContext)
+        let headingsLine = noteHeadings.count >= 6
+            ? "The notes are organised under these headings, in order: \(noteHeadings.joined(separator: "; ")). Every one of them must be taught by some section, and a section's covers field names the headings it takes in. Do not stop partway through the list.\n\n"
+            : ""
+        let missedLine = alsoCover.isEmpty
+            ? ""
+            : "A first plan left these parts of the notes out: \(alsoCover.joined(separator: "; ")). Plan again so that sections cover them as well.\n\n"
+        let sectionCount = OverviewCoverage.sectionRange(headingCount: noteHeadings.count)
         let formulaShape = includeFormulas
             ? ", \"formulas\": [{\"name\": \"...\", \"latex\": \"...\", \"plain\": \"...\", \"meaning\": \"...\"}]"
             : ""
@@ -1389,7 +1420,7 @@ public struct OllamaGenerator: CardGenerator {
         The title follows the same rule: a claim, never a phrase like Understanding X or \
         Introduction to Y.
 
-        \(outlineLine)\(partLine)Produce:
+        \(outlineLine)\(headingsLine)\(missedLine)\(partLine)Produce:
         - title: a short claim capturing the lecture's central insight.
         - hook: the start of the lesson, two plain sentences. First one real question this lecture \
         answers, \(hookRule). Then a sentence on why it matters to the reader. A single question, \
@@ -1397,7 +1428,7 @@ public struct OllamaGenerator: CardGenerator {
         metaphors.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with a \
         verb.
-        - sections: 4 or 5, each with a claim heading of at most twelve words and a covers field \
+        - sections: \(sectionCount), each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it teaches, including any example equations or \
         numbers it should use, which technical terms it introduces, and whether it is a process \
         to draw, a code listing to walk through line by line, or an idea to say in a sentence. \
@@ -1587,6 +1618,11 @@ public struct OllamaGenerator: CardGenerator {
         - Vary how paragraphs begin. Never open two paragraphs the same way, and don't lean on \
         stock openers like Notice that, Look at, Consider, Imagine or What if.
         - Talk to the reader as you and we.
+        - Never write a sentence that announces the section, like This section explains or Here we \
+        look at. Start with the idea itself.
+        - Copy code, file names and quoted text exactly as the notes write them: same capitals, same \
+        quotation marks, same spelling. Inside a JSON string write a quotation mark in code as a \
+        single quote, and it will be restored.
         - You may use what you know about the subject to explain this claim, but stay on it.
         - Never copy the notes' sentences. If a line could be pasted into the notes without \
         anyone noticing, rewrite it.
@@ -1594,8 +1630,11 @@ public struct OllamaGenerator: CardGenerator {
         and worded the way the notes word it. For each, also give example: one concrete case from \
         the notes that is this -- the term itself in use, never a fact about the course -- and \
         nonExample: a near miss that is not this, and exactly what \
-        disqualifies it -- the boundary is how a definition is learned. Leave either empty if the \
-        notes give nothing to base it on. An empty list is fine.
+        disqualifies it -- the boundary is how a definition is learned. The near miss is the \
+        tempting wrong answer a beginner would plausibly give, never a different thing of the \
+        same kind and never a plain restatement. Give both for every term. If you cannot give \
+        both from the notes, leave that term out: a term with only a definition is not worth a \
+        place. An empty list is fine.
         - example: if this part of the notes works through something step by step -- a \
         calculation, a derivation, an algorithm, a procedure, a process, a pipeline or a code \
         listing -- give those steps here instead of narrating them in a paragraph. When this section's terms are themselves \
@@ -1605,8 +1644,9 @@ public struct OllamaGenerator: CardGenerator {
         terms. A title naming what is worked, a setup stating the starting point, two to six \
         steps each with a label of two to four words, the action taken, the result it produced \
         copied from the notes, and why that step, then the outcome. Use only steps and values the \
-        notes actually show. Never make up a student, program or situation to carry the steps. Use \
-        null if the notes don't work one through here.
+        notes actually show. Never make up a student, program or situation to carry the steps. \
+        If the notes give code, a calculation or a process for this claim, the example is \
+        required, not optional. Use null only if the notes give nothing to step through here.
         - visual: for any step where a picture would make it clearer to someone new to the \
         subject, add one. \(visualShapes) Use null for a step a picture wouldn't help.
         - check: one question that makes the reader think, of whichever kind fits this section \

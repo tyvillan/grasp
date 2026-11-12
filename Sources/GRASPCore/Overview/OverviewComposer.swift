@@ -92,7 +92,9 @@ public enum OverviewComposer {
                 progress.advance()
             }
             var document = generated.document
-            document.sections = document.sections.map { groundedExample(in: tidied($0), noteText: chunk.text) }
+            document.sections = document.sections.map {
+                groundedExample(in: OverviewCoverage.restoringCode(in: tidied($0), noteText: chunk.text), noteText: chunk.text)
+            }
 
             // The second pass: each section checked against the note, and
             // anything the note contradicts corrected or removed. A 9B model
@@ -209,6 +211,7 @@ public enum OverviewComposer {
         }
 
         var merged = merge(parts)
+        merged.sections = OverviewCoverage.withoutFiller(merged.sections)
         guard !merged.isEmpty, !Task.isCancelled else { return .empty }
 
         // Done with any one part now -- what's left runs once over the
