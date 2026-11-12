@@ -242,7 +242,7 @@ public struct OllamaGenerator: CardGenerator {
         if let first = plan, !orientation {
             let headings = OverviewCoverage.noteHeadings(in: noteContext)
             let left = OverviewCoverage.missing(headings: headings, plannedText: first.sections.map { $0.heading + " " + $0.covers })
-            if headings.count >= 6, left.count >= 2, !Task.isCancelled {
+            if headings.count >= 6, left.count >= 3, !Task.isCancelled {
                 progress?.expect(1)
                 progress?.begin("Planning the parts the first plan missed")
                 let again = Self.lessonPlanPrompt(
@@ -1390,7 +1390,7 @@ public struct OllamaGenerator: CardGenerator {
         // second half out a visible omission instead of a quiet one.
         let noteHeadings = OverviewCoverage.noteHeadings(in: noteContext)
         let headingsLine = noteHeadings.count >= 6
-            ? "The notes are organised under these headings, in order: \(noteHeadings.joined(separator: "; ")). Every one of them must be taught by some section, and a section's covers field names the headings it takes in. Do not stop partway through the list.\n\n"
+            ? "The notes are organised under these headings, in order: \(noteHeadings.joined(separator: "; ")). Every one of them must be taught by some section, and a section's covers field names the headings it takes in. Do not stop partway through the list.\(OverviewCoverage.groupingAdvice(headingCount: noteHeadings.count))\n\n"
             : ""
         let missedLine = alsoCover.isEmpty
             ? ""

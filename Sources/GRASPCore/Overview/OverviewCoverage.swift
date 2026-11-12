@@ -46,6 +46,25 @@ public enum OverviewCoverage {
         }
     }
 
+    /// The most sections `sectionRange` allows for a note of this size.
+    public static func maxSections(headingCount: Int) -> Int {
+        switch headingCount {
+        case ..<10: return 5
+        case 10..<16: return 7
+        default: return 8
+        }
+    }
+
+    /// How many neighbouring headings each section has to take in, when
+    /// there are more headings than sections. Without it a model writes the
+    /// most sections it is allowed for the first headings and stops.
+    public static func groupingAdvice(headingCount: Int) -> String {
+        let limit = maxSections(headingCount: headingCount)
+        guard headingCount > limit else { return "" }
+        let per = Int((Double(headingCount) / Double(limit)).rounded(.up))
+        return " There are \(headingCount) headings and at most \(limit) sections, so each section takes in about \(per) neighbouring headings: put all of them in its covers field, and spread the sections evenly from the first heading to the last."
+    }
+
     private static let stopWords: Set<String> = [
         "the", "and", "for", "with", "that", "this", "from", "are", "its", "into", "how", "what", "why",
         "when", "your", "you", "use", "using", "used", "about", "than", "then", "can", "not", "all",

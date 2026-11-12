@@ -96,3 +96,18 @@ struct OverviewCoverageTests {
         #expect(result[2].check != nil)
     }
 }
+
+@Suite("Overview coverage: more headings than sections")
+struct OverviewGroupingTests {
+    @Test("a note with more headings than sections is told to group neighbours")
+    func grouping() {
+        #expect(OverviewCoverage.groupingAdvice(headingCount: 28).contains("about 4 neighbouring headings"))
+        #expect(OverviewCoverage.groupingAdvice(headingCount: 28).contains("at most 8 sections"))
+        #expect(OverviewCoverage.groupingAdvice(headingCount: 5) == "")
+        let headings = (1...12).map { "## Part\($0)" }.joined(separator: "\n")
+        let prompt = OllamaGenerator.lessonPlanPrompt(noteTitle: "T", courseName: "C", noteContext: headings + "\nbody",
+                                                      includeFormulas: false)
+        #expect(prompt.contains("sections: 5 to 7"))
+        #expect(prompt.contains("There are 12 headings and at most 7 sections"))
+    }
+}
