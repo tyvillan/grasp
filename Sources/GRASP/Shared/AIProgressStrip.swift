@@ -64,6 +64,15 @@ struct AIProgressStrip: View {
                     .foregroundStyle(GRASPColor.textSecondary)
                     .lineLimit(2)
             }
+            if !activity.snapshot.finished.isEmpty {
+                Label(activity.snapshot.finished.suffix(3).joined(separator: "  ·  "),
+                      systemImage: "checkmark.circle")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.success)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help("Written so far: " + activity.snapshot.finished.joined(separator: ", "))
+            }
             // Re-evaluated on a clock as well as on each step, so the time
             // left keeps counting down during a long call rather than
             // freezing between steps.
@@ -71,7 +80,9 @@ struct AIProgressStrip: View {
                 Text(activity.detail(at: context.date))
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
-                    .lineLimit(1)
+                    // Wraps rather than cutting a note's title mid-word.
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.numericText())
             }
         }

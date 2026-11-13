@@ -36,6 +36,9 @@ public final class AIProgress: @unchecked Sendable {
         /// Which model is answering, when that's worth saying: "Gemini's
         /// free limit is used up; finishing on qwen3.5:9b".
         public var note: String? = nil
+        /// Titles of pieces already written (overview sections), in the
+        /// order they finished, so the strip can show work as it lands.
+        public var finished: [String] = []
 
         public static let empty = Snapshot(step: nil, part: nil, completed: 0, expected: 0, sequence: 0)
 
@@ -81,6 +84,13 @@ public final class AIProgress: @unchecked Sendable {
     /// Says which model is answering and why, or clears that.
     public func setNote(_ note: String?) {
         update { $0.note = note }
+    }
+
+    /// Records a finished piece by its title.
+    public func addFinished(_ title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        update { $0.finished.append(trimmed) }
     }
 
     /// Marks steps done -- including ones skipped without a call, so the bar

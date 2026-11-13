@@ -38,6 +38,18 @@ public enum LearnEngine {
         /// Why the answer is right, for an AI-written question that came
         /// with one (the code and problem kinds carry theirs inside).
         public var explanation: String?
+        /// The saved question (`TestQuestion`) this came from, for its own
+        /// history, and who made it ("yours", "photo", "ai"). nil for a
+        /// question made from a card or written for one test.
+        public var bankQuestionId: String?
+        public var bankSource: String?
+        /// A written question's other right wordings.
+        public var acceptedAnswers: [String] = []
+        /// An understood card brought back to check it is still known.
+        public var isComeback = false
+        /// For a comeback: the card was understood (a check), as opposed
+        /// to one still being learned that you answered before.
+        public var comebackWasUnderstood = false
         /// The explanation to show under "Why", whichever kind this is.
         public var whyText: String? { explanation ?? code?.explanation ?? problem?.explanation }
 
@@ -72,10 +84,68 @@ public enum LearnEngine {
         public var front: String
         public var back: String
         public var level: Level
+        /// When the card was last answered, and its signed run (rights in a
+        /// row, or a remembered miss). Together they say when an understood
+        /// card is due to be checked again.
+        public var lastSeenAt: Date?
+        public var consecutiveCorrect: Int
 
-        public init(cardId: String, front: String, back: String, level: Level) {
+        public init(cardId: String, front: String, back: String, level: Level,
+                    lastSeenAt: Date? = nil, consecutiveCorrect: Int = 0) {
             self.cardId = cardId; self.front = front; self.back = back; self.level = level
+            self.lastSeenAt = lastSeenAt; self.consecutiveCorrect = consecutiveCorrect
         }
+    }
+
+    // MARK: - Comebacks
+
+    /// How many of a round's questions are reserved for cards that are due
+    /// to come back: understood cards due for a check, and cards still being
+    /// learned that you answered before and have rested long enough.
+    public static let comebackSlots = 3
+
+    /// How long an understood card may rest before it is checked: a day,
+    /// then 3, 7 and 14 as it keeps passing. A remembered miss counts as
+    /// the shortest rest.
+    public static func checkInterval(run: Int) -> TimeInterval {
+        let days: Double
+        switch max(run, 0) {
+        case 0, 1: days = 1
+        case 2: days = 3
+        case 3: days = 7
+        default: days = 14
+        }
+        return days * 86_400
+    }
+
+    /// The shorter rest for a card still being learned: 20 minutes after a
+    /// first right answer (so it comes back later in the same sitting), a day
+    /// after two in a row, 3 days after three. A remembered miss is back in
+    /// 10 minutes.
+    public static func learningRest(run: Int) -> TimeInterval {
+        switch run {
+        case ..<0: return 10 * 60
+        case 0, 1: return 20 * 60
+        case 2: return 86_400
+        default: return 3 * 86_400
+        }
+    }
+
+    /// When a card is due to come back, nil if it has no answer on record
+    /// (nothing to measure from).
+    public static func dueDate(of candidate: Candidate) -> Date? {
+        guard let seen = candidate.lastSeenAt else { return nil }
+        let rest = candidate.level == .mastered
+            ? checkInterval(run: candidate.consecutiveCorrect)
+            : learningRest(run: candidate.consecutiveCorrect)
+        return seen.addingTimeInterval(rest)
+    }
+
+    /// A card is due once its rest is over. A card with no recorded answer
+    /// is never due.
+    public static func isDueForCheck(_ candidate: Candidate, now: Date) -> Bool {
+        guard let due = dueDate(of: candidate) else { return false }
+        return now >= due
     }
 
     public static let roundSize = 7
@@ -96,20 +166,42 @@ public enum LearnEngine {
     /// Question type still escalates with each card's own level. A missed
     /// question is the caller's job to requeue within the live session --
     /// this only builds the initial set.
+    ///
+    /// Comebacks: up to `comebackSlots` of the round's questions are
+    /// cards you answered before that are due again (see `isDueForCheck`),
+    /// most overdue first, mixed in at random places. A right answer on one
+    /// pushes its next check further out; a miss follows the two-misses
+    /// rule. This is how an individual card keeps advancing and is
+    /// re-verified without waiting for the whole deck.
     public static func buildRound<R: RandomNumberGenerator>(
-        from candidates: [Candidate], using rng: inout R
+        from candidates: [Candidate], using rng: inout R,
+        now: Date = Date(), comebackSlots: Int = LearnEngine.comebackSlots
     ) -> [RoundQuestion] {
+        let due = comebackSlots <= 0 ? [] : candidates
+            .filter { isDueForCheck($0, now: now) }
+            .sorted { (dueDate(of: $0) ?? .distantFuture) < (dueDate(of: $1) ?? .distantFuture) }
+        let comebacks = Array(due.prefix(comebackSlots))
+        let comebackIds = Set(comebacks.map(\.cardId))
+
         let unmastered = candidates.filter { $0.level != .mastered }
-        let pool: [Candidate]
+        var pool: [Candidate]
         if !candidates.isEmpty && Double(unmastered.count) / Double(candidates.count) <= randomReinforcementThreshold {
             pool = candidates.shuffled(using: &rng)
         } else {
             pool = unmastered
         }
-        let selected = Array(pool.prefix(roundSize))
-        return selected.enumerated().map { index, candidate in
+        pool.removeAll { comebackIds.contains($0.cardId) }
+        let selected = Array(pool.prefix(max(roundSize - comebacks.count, 0)))
+        var questions = selected.enumerated().map { index, candidate in
             question(for: candidate, allCandidates: candidates, ordinal: index, using: &rng)
         }
+        for candidate in comebacks {
+            var q = question(for: candidate, allCandidates: candidates, ordinal: 0, using: &rng)
+            q.isComeback = true
+            q.comebackWasUnderstood = candidate.level == .mastered
+            questions.insert(q, at: Int.random(in: 0...questions.count, using: &rng))
+        }
+        return questions
     }
 
     private static func question<R: RandomNumberGenerator>(
@@ -209,21 +301,27 @@ public enum LearnEngine {
     // MARK: - Progress
 
     /// Applies one answer's outcome to a level/streak pair: promotion on
-    /// correct (capped at mastered), demotion by one level on a miss
-    /// (never below new).
+    /// correct (capped at mastered). A miss does not drop the card by
+    /// itself: the first miss only remembers it (the streak goes to -1), and
+    /// a second miss in a row drops it one level (never below new) and
+    /// starts the streak over. A right answer in between clears the miss.
+    ///
+    /// `consecutiveCorrect` is a signed run: positive is right answers in a
+    /// row, negative is misses in a row. An older client reads a negative
+    /// run as a streak and still works.
     public static func advance(level: Level, consecutiveCorrect: Int, wasCorrect: Bool) -> (level: Level, consecutiveCorrect: Int) {
-        // Familiar sits outside the 0...3 ladder (its raw value is 4), so
-        // the arithmetic below would misread it: a right answer proves it,
-        // a miss sends it to the gentlest rung.
-        if level == .familiar {
-            return wasCorrect ? (.mastered, consecutiveCorrect + 1) : (.recognition, 0)
-        }
         if wasCorrect {
+            let run = max(consecutiveCorrect, 0) + 1
+            // Familiar sits outside the 0...3 ladder (its raw value is 4),
+            // so a right answer proves it outright.
+            if level == .familiar { return (.mastered, run) }
             let next = Level(rawValue: min(level.rawValue + 1, Level.mastered.rawValue)) ?? .mastered
-            return (next, consecutiveCorrect + 1)
-        } else {
-            let previous = Level(rawValue: max(level.rawValue - 1, Level.new.rawValue)) ?? .new
-            return (previous, 0)
+            return (next, run)
         }
+        // A miss. The first one is remembered; the second in a row drops.
+        guard consecutiveCorrect < 0 else { return (level, -1) }
+        if level == .familiar { return (.recognition, 0) }
+        let previous = Level(rawValue: max(level.rawValue - 1, Level.new.rawValue)) ?? .new
+        return (previous, 0)
     }
 }

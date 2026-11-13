@@ -29,6 +29,15 @@ struct SettingsScreen: View {
             .graspSection()
 
             Section {
+                Button("Replay tutorial") { store.tutorial.start() }
+            } header: {
+                Text("Tutorial")
+            } footer: {
+                Text("A two minute tour of the main screens. It only points at things and never changes your library.")
+            }
+            .graspSection()
+
+            Section {
                 if let account = sync.account {
                     LabeledContent("Signed in as", value: account.email ?? "Your account")
                     LabeledContent("Status") { statusText(sync) }
@@ -88,6 +97,14 @@ struct SettingsScreen: View {
         }
         .graspList()
         .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { FeedbackService.shared.isPresenting = true } label: {
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                }
+                .accessibilityLabel("Send feedback")
+            }
+        }
         .sheet(isPresented: $confirmingSignOut) {
             ConfirmationSheet(
                 icon: "rectangle.portrait.and.arrow.right", title: "Sign out of sync?",

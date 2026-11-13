@@ -60,8 +60,12 @@ func overviewInline(_ source: String) -> AttributedString {
 /// introduces them rather than being collected into lists at the end --
 /// meeting a term right where it's used is most of what makes it stick.
 struct OverviewSectionsView: View {
+    @Environment(AppStore.self) private var store
     let overview: RenderedOverview
     var onOpenCards: (([String]) -> Void)?
+    /// The lecture's slides beside each section, when its deck is saved beside the note.
+    @State private var slides: [String: [SlideRef]] = [:]
+    @State private var openedSlide: PDFPageTarget?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -74,9 +78,22 @@ struct OverviewSectionsView: View {
             }
 
             ForEach(overview.sections) { section in
-                LessonSectionView(section: section, onOpenCards: onOpenCards)
+                LessonSectionView(section: section, slides: slides[section.id] ?? [], onOpenSlide: { ref in
+                    openedSlide = PDFPageTarget(url: URL(fileURLWithPath: ref.deckPath), page: ref.slide.page, title: ref.slide.title)
+                }, onOpenCards: onOpenCards)
                     .id(section.id)
                     .padding(.bottom, 36)
+            }
+
+            // Pictures the note has that no section discusses.
+            if !overview.noteVisuals.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Pictures from your note")
+                        .graspType(.proseH2)
+                        .foregroundStyle(GRASPColor.textPrimary)
+                    ForEach(overview.noteVisuals) { NoteVisualView(visual: $0) }
+                }
+                .padding(.bottom, 36)
             }
 
             if !overview.formulas.isEmpty {
@@ -97,6 +114,8 @@ struct OverviewSectionsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+        .task(id: overview.materialId) { slides = store.slidePlacements(for: overview) }
+        .sheet(item: $openedSlide) { GuidePageSheet(target: $0) }
     }
 
     // MARK: - Header
@@ -217,6 +236,8 @@ struct OverviewSectionsView: View {
 
 private struct LessonSectionView: View {
     let section: RenderedSection
+    var slides: [SlideRef] = []
+    var onOpenSlide: (SlideRef) -> Void = { _ in }
     var onOpenCards: (([String]) -> Void)?
 
     var body: some View {
@@ -245,6 +266,16 @@ private struct LessonSectionView: View {
                 CodeSnippetView(snippet: code,
                                 sectionText: ([section.heading] + section.paragraphs).joined(separator: " "))
                     .padding(.top, 2)
+            }
+
+            ForEach(section.visuals) { visual in
+                NoteVisualView(visual: visual)
+                    .padding(.top, 2)
+            }
+
+            if !slides.isEmpty {
+                SlideStrip(slides: slides, onOpen: onOpenSlide)
+                    .padding(.top, 4)
             }
 
             if !section.terms.isEmpty {

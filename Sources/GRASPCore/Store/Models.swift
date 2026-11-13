@@ -422,12 +422,17 @@ public struct TestItem: Codable, FetchableRecord, PersistableRecord, Identifiabl
     /// A `CodeQuestion` as JSON, for a code question (`questionType`
     /// "code"); nil for the rest.
     public var payloadJSON: String?
+    /// The saved question (`TestQuestion`) this item asked, so each question
+    /// has its own history. A history link only: it never reaches the card's
+    /// flashcard schedule, which `cardId` alone controls.
+    public var questionId: String?
 
     public init(id: String = UUID().uuidString, attemptId: String, cardId: String?, ordinal: Int,
                 questionType: String, promptText: String, choicesJSON: String? = nil,
                 correctAnswer: String? = nil, givenAnswer: String? = nil, isCorrect: Bool? = nil,
-                isAIGenerated: Bool = false, payloadJSON: String? = nil) {
+                isAIGenerated: Bool = false, payloadJSON: String? = nil, questionId: String? = nil) {
         self.payloadJSON = payloadJSON
+        self.questionId = questionId
         self.id = id; self.attemptId = attemptId; self.cardId = cardId; self.ordinal = ordinal
         self.questionType = questionType; self.promptText = promptText; self.choicesJSON = choicesJSON
         self.correctAnswer = correctAnswer; self.givenAnswer = givenAnswer; self.isCorrect = isCorrect

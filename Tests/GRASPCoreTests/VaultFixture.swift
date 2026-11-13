@@ -17,8 +17,11 @@ enum VaultFixture {
     static let root = URL(fileURLWithPath:
         "/Users/tyvillan/Library/Mobile Documents/iCloud~md~obsidian/Documents/Master Vault")
 
+    /// The suites that read the real vault run only when asked for with
+    /// `GRASP_REAL_VAULT=1`, so a plain `swift test` never opens real notes.
     static var vaultExists: Bool {
-        FileManager.default.fileExists(atPath: root.path)
+        ProcessInfo.processInfo.environment["GRASP_REAL_VAULT"] == "1"
+            && FileManager.default.fileExists(atPath: root.path)
     }
 
     /// A private database preloaded with the real vault's contents. Each

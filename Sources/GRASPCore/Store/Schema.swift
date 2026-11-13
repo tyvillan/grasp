@@ -492,6 +492,64 @@ enum Schema {
             }
         }
 
+        migrator.registerMigration("v18_learn_streak") { db in
+            try db.create(table: "learnStreak") { t in
+                t.column("id", .text).primaryKey()
+                t.column("count", .integer).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try SyncSchema.installTriggers(db)
+        }
+
+        // Questions as their own feature. Additive only: every column is
+        // nullable or defaulted, so all existing rows keep working (source
+        // "ai", status "active"). `cardId` is a soft link with no foreign key,
+        // so a pulled question can never fail on a card this device lacks.
+        // `imageId` is for photo import (Stage 3) and has no table yet.
+        migrator.registerMigration("v19_questions") { db in
+            try db.alter(table: "testQuestion") { t in
+                t.add(column: "source", .text).notNull().defaults(to: "ai")
+                t.add(column: "status", .text).notNull().defaults(to: "active")
+                t.add(column: "cardId", .text)
+                t.add(column: "imageId", .text)
+            }
+            try db.alter(table: "testItem") { t in
+                t.add(column: "questionId", .text)
+            }
+            try db.create(index: "ix_testitem_question", on: "testItem", columns: ["questionId"])
+            try SyncSchema.installTriggers(db)
+        }
+
+        // Photo import (Stage 3): the picture a question was read from, as a
+        // compressed JPEG kept in the row so it syncs like any other row. It
+        // stays on the device while its question is a draft (`status` draft),
+        // exactly like the question, and syncs once the question is approved.
+        // The question's `imageId` points at it; the link has no foreign key,
+        // so a question that arrives before its picture never fails.
+        migrator.registerMigration("v20_question_images") { db in
+            try db.create(table: "questionImage") { t in
+                t.column("id", .text).primaryKey()
+                t.column("courseId", .text).references("course", onDelete: .cascade)
+                t.column("jpegBase64", .text).notNull()
+                t.column("width", .integer).notNull()
+                t.column("height", .integer).notNull()
+                t.column("status", .text).notNull().defaults(to: "draft")
+                t.column("createdAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            // Where on the picture the question is ("x,y,width,height", fractions of
+            // the page from its top left corner), so a thumbnail can show just that part.
+            try db.alter(table: "testQuestion") { t in
+                t.add(column: "imageCrop", .text)
+            }
+            // Pictures are pulled apart from the other rows, in small pages, with their own
+            // cursor, so a picture that fails to arrive never holds back cards or reviews.
+            try db.alter(table: "syncState") { t in
+                t.add(column: "pictureCursor", .text)
+            }
+            try SyncSchema.installTriggers(db)
+        }
+
         return migrator
     }
 

@@ -17,8 +17,38 @@ the study modes that actually work, scheduled around your exams.
 
 > **Status: in development.** It's built and tested against one real
 > Obsidian vault, and hasn't been used by anyone but its author yet. The
-> shared core has over 470 automated tests, many of them run against real
-> imported content.
+> shared core and the app logic have close to 1,000 automated tests, many of
+> them run against real imported content.
+
+## See it
+
+<p align="center">
+  <img src="docs/screenshots/mac-questions-to-review.png" alt="The Questions tab on the Mac: AI-written draft questions waiting for review, each with its source note and an Approve button" width="800">
+</p>
+
+**Questions you review before they count.** AI-written (or photographed) questions
+arrive as drafts. Each one says where it came from, and nothing reaches a test
+until you approve it.
+
+<p align="center">
+  <img src="docs/screenshots/mac-photo-import.png" alt="Questions read from a photo of a worksheet, each with a cropped thumbnail of its own question" width="800">
+  &nbsp;
+  <img src="docs/screenshots/iphone-photo-import.png" alt="The same photo import on iPhone" width="260">
+</p>
+
+**Snap a worksheet, get questions.** Text is read on the device, split into
+questions, and cropped so each draft shows its own piece of the page. An answer the
+page prints is kept as printed; one it doesn't is marked "Check the answer".
+
+<p align="center">
+  <img src="docs/screenshots/mac-tutorial-tabs.png" alt="The first-run tutorial on the Mac, lighting up the Cards and Questions switch" width="420">
+  <img src="docs/screenshots/mac-tutorial-study-modes.png" alt="The tutorial lighting up Study, Learn and Test" width="420">
+  <img src="docs/screenshots/iphone-tutorial-tabs.png" alt="The tutorial on iPhone" width="200">
+</p>
+
+**A two-minute tour of the real app.** The first-run tutorial dims the screen and
+points at the actual controls. It only navigates and highlights, never imports or
+changes anything, and you can replay it from Settings or the Help menu.
 
 ## What it does
 
@@ -30,6 +60,8 @@ the study modes that actually work, scheduled around your exams.
 - **Takes one-off files too:** add a course by hand and drop in files or
   folders that never lived in the vault, like a homework PDF or a scanned
   handout.
+- **Any folder works:** point GRASP at an Obsidian vault, or at any ordinary
+  folder where each folder inside becomes a course. It reads, never writes.
 - **Timelines in your words** ("Fall 2026", "2026-2027", whatever you call
   your terms) instead of a fixed dropdown.
 - **Deleted courses stay deleted:** the course's folder is excluded from
@@ -48,6 +80,20 @@ the study modes that actually work, scheduled around your exams.
   on the same material, at import time and in a clean-up sheet.
 - **Each card links back to its source note** and the files each deck came
   from.
+- **An understanding meter** on every card (recognition, recall,
+  understood), fed by Learn and by tests.
+
+### Questions
+- **Practice like the exam:** a Questions tab beside Cards, for multiple
+  choice, written and true / false questions you write, generate or photograph.
+- **From a photo:** read questions off a picture of a worksheet or exam, even
+  rotated, tilted or handwritten, with a crop of each one's source.
+- **Draft, review, approve:** AI-written and photographed questions wait under
+  "To review". Approve all skips anything flagged "Check the answer" or
+  "Check the wording".
+- **Move and copy** questions between decks of a course, keeping history.
+- **Tests can use them:** a test can mix flashcards and saved questions, or
+  use questions alone.
 
 ### Studying
 - **Flashcards** on real spaced repetition: a from-scratch FSRS-5

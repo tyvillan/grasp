@@ -92,6 +92,42 @@ public enum CardActions {
         }
     }
 
+    /// Suspends a whole deck the way the student means it: every active
+    /// card goes back to a draft, so it stops coming up in Study, Learn
+    /// and Tests. Nothing else changes: Learn progress, review history and
+    /// due dates stay, and approving the drafts again brings the cards
+    /// back exactly as they were. Cards already drafts, suspended or
+    /// deleted are left alone. Returns how many cards moved.
+    @discardableResult
+    public static func suspendDeck(_ deckIds: [String], now: Date = Date(), db: Database) throws -> Int {
+        guard !deckIds.isEmpty else { return 0 }
+        let ids = try String.fetchAll(db, sql: """
+            SELECT DISTINCT card.id FROM card
+            JOIN deckCard ON deckCard.cardId = card.id
+            WHERE deckCard.deckId IN (\(databaseQuestionMarks(count: deckIds.count)))
+            AND card.deletedAt IS NULL AND card.status = 'active'
+            """, arguments: StatementArguments(deckIds))
+        try setStatus(ids, to: .draft, now: now, db: db)
+        return ids.count
+    }
+
+    /// The way back: every draft and every suspended card in these decks
+    /// becomes active again. For a suspended deck the two are the same
+    /// thing, so both come back. Deleted cards stay deleted. Returns how
+    /// many cards moved.
+    @discardableResult
+    public static func reactivateDeck(_ deckIds: [String], now: Date = Date(), db: Database) throws -> Int {
+        guard !deckIds.isEmpty else { return 0 }
+        let ids = try String.fetchAll(db, sql: """
+            SELECT DISTINCT card.id FROM card
+            JOIN deckCard ON deckCard.cardId = card.id
+            WHERE deckCard.deckId IN (\(databaseQuestionMarks(count: deckIds.count)))
+            AND card.deletedAt IS NULL AND card.status IN ('draft', 'suspended')
+            """, arguments: StatementArguments(deckIds))
+        try setStatus(ids, to: .active, now: now, db: db)
+        return ids.count
+    }
+
     /// Undoes one AI context-refinement: restores `back` from
     /// `originalBack`. A no-op for a card that was never refined.
     public static func revertContextRefinement(_ cardId: String, now: Date = Date(), db: Database) throws {

@@ -36,6 +36,8 @@ struct LearnRoundView: View {
     @State private var roundCorrect = 0
     @State private var roundIncorrect = 0
     @State private var deckMastery: (mastered: Int, total: Int) = (0, 0)
+    /// The deck's cards by stage, for the coloured progress bar.
+    @State private var deckDistribution = DeckUnderstanding.Distribution()
     @State private var selectedChoice: String?
     @State private var writtenAnswer = ""
     @State private var verdict: AnswerGrading.Verdict?
@@ -46,6 +48,9 @@ struct LearnRoundView: View {
     @State private var isAnswered = false
     @State private var isAtCheckpoint = false
     @State private var isEmpty = false
+    /// Right answers in a row, up to the question on screen. Saved and
+    /// synced, so it carries over between visits and devices and only ends on a miss.
+    @State private var streak = LearnStreak()
     /// Fixed when the round starts: every card was already marked
     /// understood, so Learn is reinforcing at random rather than teaching.
     @State private var isPracticeRound = false
@@ -70,7 +75,10 @@ struct LearnRoundView: View {
         .background(GRASPColor.canvas)
         .adaptiveStudySheet()
         .dimsWindowBehind()
-        .task { startRound() }
+        .task {
+            streak = store.learnStreak()
+            startRound()
+        }
     }
 
     /// One progress bar: how much of the deck is understood (the long
@@ -111,6 +119,10 @@ struct LearnRoundView: View {
 
                 Spacer(minLength: 12)
 
+                if streak.isOn && !isEmpty {
+                    StreakChip(streak: streak)
+                        .transition(.opacity)
+                }
                 if !isEmpty && !isAtCheckpoint {
                     Text(isReviewingMisses
                          ? "Reviewing missed \(min(reviewAnswered + 1, reviewTotal)) of \(reviewTotal)"
@@ -135,10 +147,7 @@ struct LearnRoundView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 8) {
-                        ProgressBar(
-                            value: deckMastery.mastered, total: deckMastery.total,
-                            tint: GRASPColor.success, height: 5
-                        )
+                        UnderstandingBar(distribution: deckDistribution, height: 5)
                         Text("\(deckMastery.mastered)/\(deckMastery.total) understood")
                             .graspType(.meta)
                             .foregroundStyle(GRASPColor.textTertiary)
@@ -176,10 +185,7 @@ struct LearnRoundView: View {
             .padding(.top, 26)
 
             VStack(spacing: 7) {
-                ProgressBar(
-                    value: deckMastery.mastered, total: deckMastery.total,
-                    tint: GRASPColor.success
-                )
+                UnderstandingBar(distribution: deckDistribution, height: 8)
                 Text("\(deckMastery.mastered) of \(deckMastery.total) cards in this deck understood")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
@@ -237,6 +243,7 @@ struct LearnRoundView: View {
 
     private func refreshMastery() {
         deckMastery = (try? store.deckMastery(deckIds: deckIds)) ?? (0, 0)
+        deckDistribution = DeckUnderstanding.distribution(of: (try? store.understanding(forDecks: deckIds)) ?? [])
     }
 
     /// One centred column that starts at the top: the question, the answer
@@ -247,6 +254,14 @@ struct LearnRoundView: View {
     private func questionView(_ question: LearnEngine.RoundQuestion) -> some View {
         ScrollView {
             VStack(spacing: 0) {
+                if question.isComeback {
+                    // A card you understood, brought back to check it holds.
+                    Text(question.comebackWasUnderstood ? "Checking a card you understood"
+                                                        : "Coming back to a card you answered before")
+                        .font(.graspUI(size: 12))
+                        .foregroundStyle(GRASPColor.textTertiary)
+                        .padding(.bottom, 10)
+                }
                 Text(question.prompt)
                     .graspType(.studyPrompt)
                     .foregroundStyle(GRASPColor.textPrimary)
@@ -268,6 +283,24 @@ struct LearnRoundView: View {
                         judgedBanner(judged)
                     } else if let verdict {
                         verdictBanner(verdict)
+                    }
+                    if isAnswered, let before = feedbackState {
+                        // Shown only after the answer, so it can't bias it:
+                        // where the card stands after this answer, by the
+                        // ladder's own rules; before and after only when
+                        // the level changed.
+                        PipChange(before: before, after: before.afterAnswer(correct: lastAnswerCorrect))
+                            .id("\(question.id)-\(lastAnswerCorrect)")
+                    }
+                    if isAnswered {
+                        let now = streak.after(correct: lastAnswerCorrect)
+                        if now.isOn {
+                            StreakBanner(streak: now).id("streak-\(now.count)")
+                        } else if let ended = streak.endedCaption(afterMiss: !lastAnswerCorrect) {
+                            Text(ended)
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
                     }
                     if isAnswered, let judged, judged.outcome == .notQuite, question.type == .written,
                        let cardId = question.cardId {
@@ -300,9 +333,14 @@ struct LearnRoundView: View {
         #if os(iOS)
         .scrollDismissesKeyboard(.interactively)
         #endif
+        .onChange(of: isAnswered) { _, answered in
+            feedbackState = answered ? question.cardId.map { store.understandingState(forCard: $0) } : nil
+        }
     }
 
     @State private var lastAnswerCorrect = false
+    /// The answered card's meter state, read when the answer is submitted.
+    @State private var feedbackState: UnderstandingState?
 
     @ViewBuilder
     private func actionButton(_ question: LearnEngine.RoundQuestion) -> some View {
@@ -560,6 +598,8 @@ struct LearnRoundView: View {
         // `RoundQuestion` here has a real backing card.
         guard let cardId = question.cardId else { return }
         try? store.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect)
+        streak = streak.after(correct: wasCorrect)
+        store.saveLearnStreak(streak)
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         refreshMastery()
 

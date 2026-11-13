@@ -7,13 +7,16 @@ import GRASPCore
 /// and "in 3d" / "in 2w" / "in 3mo" for what's coming. Shared so the Mac
 /// list and the iPhone's say the same thing.
 enum CardRowStatus {
-    static func text(for card: Card, now: Date = Date(), calendar: Calendar = .current) -> String {
+    /// `hasProgress`: the card has Learn progress (any pip filled or dotted),
+    /// so a never-reviewed card says nothing instead of "New".
+    static func text(for card: Card, hasProgress: Bool = false, now: Date = Date(),
+                     calendar: Calendar = .current) -> String {
         switch card.status {
         case .draft: return "Draft"
         case .suspended: return "Suspended"
         case .active: break
         }
-        if card.reps == 0 && card.lastReview == nil { return "New" }
+        if card.reps == 0 && card.lastReview == nil { return hasProgress ? "" : "New" }
         let today = calendar.startOfDay(for: now)
         let dueDay = calendar.startOfDay(for: card.due)
         let days = calendar.dateComponents([.day], from: today, to: dueDay).day ?? 0

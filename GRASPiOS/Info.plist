@@ -22,6 +22,8 @@
     </array>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>GRASP reads your calendar to find exam and quiz dates and match them to your courses. It never adds, changes, or deletes anything in your calendar.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>GRASP uses the camera when you photograph a page of questions. The photo is read on your iPhone.</string>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>

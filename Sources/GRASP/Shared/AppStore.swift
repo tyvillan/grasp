@@ -18,6 +18,9 @@ final class AppStore {
     private(set) var semesters: [Semester] = []
     private(set) var coursesBySemester: [String?: [Course]] = [:]
     private(set) var deckCounts: [String: (cardCount: Int, dueCount: Int)] = [:]
+    /// Each deck's cards by understanding stage, for the coloured bar on
+    /// its row. Recomputed with `deckCounts`.
+    private(set) var deckUnderstanding: [String: DeckUnderstanding.Distribution] = [:]
     /// Which courses have at least one live deck -- computed for free from
     /// the same `decks` fetch `reload()` already does for `deckCounts`, so
     /// the layout can tell "no deck selected yet" apart from "this course
@@ -54,12 +57,47 @@ final class AppStore {
         didSet { UserDefaults.standard.set(vaultPath, forKey: Self.vaultPathKey(for: profile)) }
     }
 
+    /// How the notes folder is read: a vault laid out under `College`, any ordinary folder
+    /// (each folder inside is a course), or whichever of the two the folder looks like.
+    enum NotesLayout: String, CaseIterable, Identifiable {
+        case automatic, vault, folders, none
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .automatic: return "Automatic"
+            case .vault: return "Obsidian vault"
+            case .folders: return "Any folder"
+            case .none: return "None"
+            }
+        }
+    }
+
+    var notesLayout: NotesLayout {
+        didSet { UserDefaults.standard.set(notesLayout.rawValue, forKey: "notesLayout.\(profile.id)") }
+    }
+
+    /// The term a plain folder's new courses are filed under ("Fall 2026"); empty for none.
+    var notesTimeframe: String {
+        didSet { UserDefaults.standard.set(notesTimeframe, forKey: "notesTimeframe.\(profile.id)") }
+    }
+
     /// Global, per-profile: when on, `startTest` mixes a few ephemeral,
     /// AI-generated written questions in alongside a test's real cards.
     /// Defaults off -- a new AI-mixing behavior shouldn't silently turn on
     /// for existing users.
     var isAITestQuestionsEnabled: Bool {
         didSet { UserDefaults.standard.set(isAITestQuestionsEnabled, forKey: Self.aiTestQuestionsKey(for: profile)) }
+    }
+
+    /// Test setup's two sources, per profile and kept on this device.
+    /// "Quiz me on flashcards" (default on) and "Include questions": the
+    /// questions saved on each deck's Questions tab. A profile that had
+    /// "Include AI-written questions" on gets both on (see `init`).
+    var isFlashcardQuizEnabled: Bool {
+        didSet { UserDefaults.standard.set(isFlashcardQuizEnabled, forKey: Self.flashcardQuizKey(for: profile)) }
+    }
+    var isSavedQuestionsEnabled: Bool {
+        didSet { UserDefaults.standard.set(isSavedQuestionsEnabled, forKey: Self.savedQuestionsKey(for: profile)) }
     }
 
     private(set) var lastImportSummary: ImportSummary?
@@ -152,6 +190,10 @@ final class AppStore {
     /// order were everyone's.
     let preferences: UserDefaults
 
+    /// The first-run tutorial. It only navigates and highlights; the one thing
+    /// it saves is its own "seen" flag, in `preferences`.
+    let tutorial: TutorialFlow
+
     private static let perProfilePreferenceKeys = [
         "dailyCardGoal", "focusWorkMinutes", "focusBreakMinutes", "focusCardTarget",
         "deckSortOption", "cardSortOption", "deckListCollapsed",
@@ -180,6 +222,11 @@ final class AppStore {
     /// Per-profile UserDefaults key so switching profiles doesn't leak
     /// one person's vault path into another's settings.
     private static func vaultPathKey(for profile: Profile) -> String { "\(vaultPathKey).\(profile.id)" }
+
+    private static let flashcardQuizKey = "testFlashcardsEnabled"
+    private static func flashcardQuizKey(for profile: Profile) -> String { "\(flashcardQuizKey).\(profile.id)" }
+    private static let savedQuestionsKey = "testQuestionsEnabled"
+    private static func savedQuestionsKey(for profile: Profile) -> String { "\(savedQuestionsKey).\(profile.id)" }
 
     private static let aiTestQuestionsKey = "aiTestQuestionsEnabled"
     private static func aiTestQuestionsKey(for profile: Profile) -> String { "\(aiTestQuestionsKey).\(profile.id)" }
@@ -210,12 +257,26 @@ final class AppStore {
         self.database = db
         self.databaseOpenError = openError
         self.preferences = Self.preferences(for: profile)
+        #if os(macOS)
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .mac)
+        #else
+        self.tutorial = TutorialFlow(seen: TutorialSeenStore(defaults: self.preferences), platform: .phone)
+        #endif
         self.scanner = VaultScanner(database: db)
         // A new profile starts with no vault. Defaulting to this Mac owner's
         // vault meant a second person's first Import pulled the owner's
         // notes into their profile -- the mixing profiles exist to prevent.
         self.vaultPath = UserDefaults.standard.string(forKey: Self.vaultPathKey(for: profile)) ?? ""
-        self.isAITestQuestionsEnabled = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
+        self.notesLayout = NotesLayout(rawValue: UserDefaults.standard.string(forKey: "notesLayout.\(profile.id)") ?? "") ?? .automatic
+        self.notesTimeframe = UserDefaults.standard.string(forKey: "notesTimeframe.\(profile.id)") ?? ""
+        let oldAIToggle = UserDefaults.standard.bool(forKey: Self.aiTestQuestionsKey(for: profile))
+        self.isAITestQuestionsEnabled = oldAIToggle
+        // The two switches are new. Until one has been set, it reads from
+        // what the old toggle did: flashcards were always on; saved
+        // questions were mixed in only when the old toggle was on.
+        let defaults = UserDefaults.standard
+        self.isFlashcardQuizEnabled = defaults.object(forKey: Self.flashcardQuizKey(for: profile)) as? Bool ?? true
+        self.isSavedQuestionsEnabled = defaults.object(forKey: Self.savedQuestionsKey(for: profile)) as? Bool ?? oldAIToggle
         // The same guide imported twice (e.g. from the Desktop and again from
         // the vault) is one guide.
         _ = try? db.queue.write { try StudyGuideActions.mergeDuplicateGuides(db: $0) }
@@ -229,6 +290,10 @@ final class AppStore {
     func refreshGeneratorStatus() async {
         let generator = await CardGenerators.select()
         isGeneratorAvailable = !(generator is NoGenerator)
+        #if DEBUG
+        // Screenshots only: `GRASP_STUB_NO_MODEL=1` shows the no-model wording.
+        if StubHooks.enabled("GRASP_STUB_NO_MODEL") { isGeneratorAvailable = false }
+        #endif
         let keyState = AIKeyStore.state()
         hasCloudKey = keyState == .ready
         cloudKeyProblem = Self.describe(keyState)
@@ -388,6 +453,18 @@ final class AppStore {
         return summary
     }
 
+    /// The same check on the chosen courses only.
+    func sweepCardsForContext(inCourses courseIds: Set<String>) async -> ContextCheckSummary {
+        let summary = await CardAI.sweepCards(inCourses: courseIds, using: await CardGenerators.select(), database: database)
+        reload()
+        return summary
+    }
+
+    /// How many cards each course has, and how many the off-topic check would look at.
+    func courseCardCounts() async -> (all: [String: Int], unchecked: [String: Int]) {
+        (await CardAI.cardCountsByCourse(database: database), await CardAI.cardCountsByCourse(unchecked: true, database: database))
+    }
+
     /// "Refine Deck with AI": the context check on every draft first (which
     /// removes or rewrites what isn't a real definition), then wording
     /// cleanup on what survives -- in that order, so an off-topic card isn't
@@ -443,6 +520,8 @@ final class AppStore {
         case .noSourceNotes:
             return "None of these cards came from a note, so there is nothing to write new cards from."
         case .modelGaveNoAnswer(let reason):
+            // A cloud failure already says what happened and what to do.
+            if CloudFailureText.isOwn(reason) { return reason }
             return "The AI model didn't give a usable answer. \(reason) Try again, or check Settings → AI."
         case .writeFailed(let created, _):
             return (created > 0 ? "Stopped after \(created) card\(created == 1 ? "" : "s"). " : "")
@@ -467,6 +546,32 @@ final class AppStore {
 
     /// Cards and due cards per deck, in one grouped query. Suspended cards
     /// are not counted; drafts are.
+    /// One grouped query: active, non-deleted cards by deck and learn level.
+    nonisolated static func deckDistributions(_ db: Database) throws -> [String: DeckUnderstanding.Distribution] {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT deckCard.deckId AS deckId, COALESCE(learnState.level, 0) AS level, COUNT(DISTINCT card.id) AS n
+            FROM card
+            JOIN deckCard ON deckCard.cardId = card.id
+            LEFT JOIN learnState ON learnState.cardId = card.id
+            WHERE card.deletedAt IS NULL AND card.status = 'active'
+            GROUP BY deckCard.deckId, COALESCE(learnState.level, 0)
+            """)
+        var result: [String: DeckUnderstanding.Distribution] = [:]
+        for row in rows {
+            let id: String = row["deckId"], level: Int = row["level"], n: Int = row["n"]
+            var d = result[id] ?? DeckUnderstanding.Distribution()
+            switch LearnEngine.Level(rawValue: level) ?? .new {
+            case .new: d.notAsked += n
+            case .recognition: d.recognition += n
+            case .recall: d.recall += n
+            case .mastered: d.solid += n
+            case .familiar: d.selfRated += n
+            }
+            result[id] = d
+        }
+        return result
+    }
+
     nonisolated static func deckCounts(for decks: [Deck], _ db: Database) throws -> [String: (cardCount: Int, dueCount: Int)] {
         var counts = Dictionary(uniqueKeysWithValues: decks.map { ($0.id, (0, 0)) })
         let rows = try Row.fetchAll(db, sql: """
@@ -490,11 +595,11 @@ final class AppStore {
     /// each batch lands, so the deck list keeps pace without the full
     /// `reload()` (which also re-reads courses and wakes sync).
     func refreshDeckCounts() {
-        let fresh = try? database.queue.read { db -> [String: (cardCount: Int, dueCount: Int)] in
+        let fresh = try? database.queue.read { db -> ([String: (cardCount: Int, dueCount: Int)], [String: DeckUnderstanding.Distribution]) in
             let decks = try Deck.filter(Column("deletedAt") == nil).fetchAll(db)
-            return try Self.deckCounts(for: decks, db)
+            return (try Self.deckCounts(for: decks, db), try Self.deckDistributions(db))
         }
-        if let fresh { deckCounts = fresh }
+        if let fresh { deckCounts = fresh.0; deckUnderstanding = fresh.1 }
     }
 
     func reload() {
@@ -521,6 +626,7 @@ final class AppStore {
                 // edited, and it used to be two queries per deck -- over a
                 // hundred for this vault -- loading full card rows each time.
                 deckCounts = try Self.deckCounts(for: decks, db)
+                deckUnderstanding = try Self.deckDistributions(db)
             }
         } catch {
             NSLog("GRASP: couldn't read the database: %@", String(describing: error))
@@ -727,7 +833,7 @@ final class AppStore {
     /// re-read, so a review graded while the edit sheet was open survives
     /// (see `CardActions.updateText`).
     func updateCard(_ card: Card) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try CardActions.updateText(cardId: card.id, front: card.front, back: card.back, db: db)
         }
         reload()
@@ -796,6 +902,24 @@ final class AppStore {
         guard !cardIds.isEmpty else { return }
         try database.queue.write { db in try CardActions.move(cardIds, toDeck: targetDeckId, db: db) }
         reload()
+    }
+
+    /// Suspends a deck: every active card goes back to a draft (see
+    /// `CardActions.suspendDeck`). Returns how many moved.
+    @discardableResult
+    func suspendDeck(inDecks deckIds: [String]) throws -> Int {
+        let moved = try database.queue.write { db in try CardActions.suspendDeck(deckIds, db: db) }
+        reload()
+        return moved
+    }
+
+    /// Brings a suspended deck back: every draft and suspended card in it
+    /// becomes active (see `CardActions.reactivateDeck`).
+    @discardableResult
+    func reactivateDeck(inDecks deckIds: [String]) throws -> Int {
+        let moved = try database.queue.write { db in try CardActions.reactivateDeck(deckIds, db: db) }
+        reload()
+        return moved
     }
 
     /// Bulk-promotes every draft card in a deck to active, so a deck the
@@ -871,7 +995,7 @@ final class AppStore {
             var rng = SystemRandomNumberGenerator()
             let all = try Study.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
             let focus = all.filter { focusCardIds.contains($0.cardId) }
-            var round = LearnEngine.buildRound(from: focus, using: &rng)
+            var round = LearnEngine.buildRound(from: focus, using: &rng, comebackSlots: 0)
             for index in round.indices where round[index].type == .multipleChoice && (round[index].choices?.count ?? 0) < 4 {
                 guard let card = focus.first(where: { $0.cardId == round[index].cardId }) else { continue }
                 var choices = LearnEngine.distractors(for: card, in: all, count: 3, using: &rng)
@@ -889,6 +1013,15 @@ final class AppStore {
             try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, now: now, db: db)
         }
         reload()
+    }
+
+    /// The Learn streak, shared between devices.
+    func learnStreak() -> LearnStreak {
+        (try? database.queue.read { try Study.learnStreak(db: $0) }) ?? LearnStreak()
+    }
+
+    func saveLearnStreak(_ streak: LearnStreak) {
+        try? database.queue.write { try Study.saveLearnStreak(streak, db: $0) }
     }
 
     /// How much of a deck has been proven understood -- the same
@@ -913,6 +1046,29 @@ final class AppStore {
 
     /// The plural of the above, for the "All Cards" master category's own
     /// mastery badges across every deck in the course.
+    /// Readable note titles (first heading, else the humanized file name).
+    func noteTitles(forMaterials ids: [String]) -> [String: String] {
+        (try? database.queue.read { db in try Study.noteTitles(forMaterials: ids, db: db) }) ?? [:]
+    }
+
+    /// Suspended cards' meter states, for their rows.
+    func suspendedUnderstanding(forDecks deckIds: [String]) -> [String: UnderstandingState] {
+        (try? database.queue.read { db in try Study.suspendedUnderstanding(forDecks: deckIds, db: db) }) ?? [:]
+    }
+
+    /// One card's meter state, right after it was answered.
+    func understandingState(forCard cardId: String) -> UnderstandingState {
+        let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }
+        guard let row = row ?? nil else { return .of(level: nil) }
+        return .of(level: LearnEngine.Level(rawValue: row.level) ?? .new, asked: true,
+                   consecutiveCorrect: row.consecutiveCorrect)
+    }
+
+    /// Each card's meter state and source note, for the understanding meter.
+    func understanding(forDecks deckIds: [String]) throws -> [DeckUnderstanding.Card] {
+        try database.queue.read { db in try Study.understanding(forDecks: deckIds, db: db) }
+    }
+
     func learnLevels(forDecks deckIds: [String]) throws -> [String: LearnEngine.Level] {
         try database.queue.read { db in try Study.learnLevels(forDecks: deckIds, db: db) }
     }
@@ -966,20 +1122,19 @@ final class AppStore {
         var failure: String?
     }
 
-    /// What the last code-question run did, for the bank sheet to report.
-    var lastCodeQuestionRun: CodeQuestionRunResult?
+    /// What the last "Generate questions with AI" run did, for the Questions
+    /// tab to report (kept here: an extension can't hold it).
+    var lastQuestionDraftRun: QuestionDraftRunResult?
 
     /// The batch writing a guide's skill explanations, and the skills still waiting on it.
     @ObservationIgnored var skillPrefetch: Task<Void, Never>?
     @ObservationIgnored var choiceUpgradeStarted = false
     @ObservationIgnored var skillPrefetchPending: Set<String> = []
-    struct CodeQuestionRunResult: Equatable {
-        var saved: Int
-        var rejected: Int
-        var wasStopped: Bool
+    struct QuestionDraftRunResult: Equatable {
+        var deckIds: [String]
+        var outcome: DraftOutcome
+        /// A plain sentence when nothing could be written, else nil.
         var failure: String?
-        /// The most common reason drafts were dropped.
-        var topReason: String?
     }
 
     func aiJob(_ key: String) -> AIJob? { aiJobs[key] }
@@ -1031,7 +1186,7 @@ final class AppStore {
     /// a course-wide attempt isn't attributable to any single deck, so it
     /// stores `nil` rather than picking one arbitrarily.
     func startTest(
-        deckIds: [String], config: TestBuilder.Config
+        deckIds: [String], config: TestBuilder.Config, includeQuestions: Bool? = nil
     ) async throws -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
         aiTestQuestionsSkipped.set(false)
 
@@ -1041,25 +1196,35 @@ final class AppStore {
         // Its own task, so "Skip" can cancel just the AI questions and still
         // start the test -- cancelling the caller would also cancel the
         // database writes below that create the attempt.
-        // Saved code questions come first: they were checked by running
-        // them, which the one-line questions written on the spot weren't.
-        var codeQuestions: [LearnEngine.RoundQuestion] = []
-        var codeBudgetUsed = 0
-        if isAITestQuestionsEnabled && (config.allowWritten || config.allowMultipleChoice) {
-            let budget = Study.aiQuestionBudget(for: config.questionCount)
-            codeQuestions = (try? await database.queue.read { db in
+        // Saved questions come first: they were checked or written by hand,
+        // which the one-line questions written on the spot weren't. With
+        // flashcards on they are about a third of the test; with questions
+        // alone, the whole test (as many as exist).
+        var savedQuestions: [LearnEngine.RoundQuestion] = []
+        let flashcards = config.includeFlashcards
+        if includeQuestions ?? isSavedQuestionsEnabled {
+            let share = Study.savedQuestionShare(for: config.questionCount, withFlashcards: flashcards)
+            // Every question that fits, so understood ones can come up less.
+            let pool: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
                 var rng = SystemRandomNumberGenerator()
-                return try CodeQuestionBank.pickRound(count: budget, inDecks: deckIds,
+                return try CodeQuestionBank.pickRound(count: .max, inDecks: deckIds,
                                                       allowWritten: config.allowWritten,
                                                       allowMultipleChoice: config.allowMultipleChoice,
+                                                      allowTrueFalse: config.allowTrueFalse,
                                                       using: &rng, db: db)
             }) ?? []
-            codeBudgetUsed = codeQuestions.count
+            let understood = understoodKeys(Set(pool.map(QuestionUnderstanding.key(of:))))
+            var rng = SystemRandomNumberGenerator()
+            savedQuestions = QuestionPicking.favorUnlearned(
+                pool, count: share, isUnderstood: { understood.contains(QuestionUnderstanding.key(of: $0)) }, using: &rng)
         }
+        // One-line AI questions stay with the flashcard side: only when
+        // flashcards are on, Written is on, and the AI setting is on, and only
+        // for the room left in the usual third.
         let aiResult: (questions: [LearnEngine.RoundQuestion], warning: String?)
-        if config.allowWritten && isAITestQuestionsEnabled,
-           Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed > 0 {
-            let budget = Study.aiQuestionBudget(for: config.questionCount) - codeBudgetUsed
+        let aiRoom = Study.aiQuestionBudget(for: config.questionCount) - savedQuestions.count
+        if flashcards && config.allowWritten && isAITestQuestionsEnabled && aiRoom > 0 {
+            let budget = aiRoom
             let database = database
             let flagged = flaggedQuestionKeys
             let skipped = aiTestQuestionsSkipped
@@ -1076,7 +1241,7 @@ final class AppStore {
             aiResult = ([], nil)
         }
 
-        let aiQuestions = aiResult.questions + codeQuestions
+        let aiQuestions = aiResult.questions + savedQuestions
         let started = try await database.queue.write { db in
             var rng = SystemRandomNumberGenerator()
             return try Study.startTest(deckIds: deckIds, config: config, aiQuestions: aiQuestions,
@@ -1097,24 +1262,47 @@ final class AppStore {
     /// "what is the output" becomes predict-the-output), then the checked
     /// practice problems GRASP saved for the lectures the guide covers.
     /// No flashcards: those are what the deck's own test is for.
+    /// Which of these question keys are understood on the meter.
+    private func understoodKeys(_ keys: Set<String>) -> Set<String> {
+        Set(questionStates(forKeys: keys).filter { $0.value.isMastered }.keys)
+    }
+
     func startGuideTest(page: StudyGuideActions.ExamPage, scopeKey: String, config: TestBuilder.Config) async throws
         -> (attemptId: String, questions: [LearnEngine.RoundQuestion], aiWarning: String?) {
         var deckIds = page.deckIds
         if deckIds.isEmpty, let courseId = page.exam.courseId { deckIds = self.deckIds(in: .course(courseId)) }
         let bankDecks = deckIds
         var rng = SystemRandomNumberGenerator()
-        let fromGuide = GuideExamples.round(GuideExamples.items(from: page), count: config.questionCount,
-                                            allowWritten: config.allowWritten,
+        // Understood examples come up less: most sit out this test, and fill
+        // in only when the others run short.
+        let items = GuideExamples.items(from: page)
+        let understoodItems = understoodKeys(Set(items.map(\.understandingKey)))
+        let (first, heldBack) = QuestionPicking.split(items, isUnderstood: { understoodItems.contains($0.understandingKey) },
+                                                      using: &rng)
+        var fromGuide = GuideExamples.round(first, count: config.questionCount, allowWritten: config.allowWritten,
                                             allowMultipleChoice: config.allowMultipleChoice, using: &rng)
+        if fromGuide.count < config.questionCount {
+            fromGuide += GuideExamples.round(heldBack, count: config.questionCount - fromGuide.count,
+                                             allowWritten: config.allowWritten,
+                                             allowMultipleChoice: config.allowMultipleChoice, using: &rng)
+        }
         // Saved problems fill the rest, and always get some room: they're
         // the examples GRASP wrote and checked for these lectures.
         let bankRoom = max(config.questionCount - fromGuide.count, config.questionCount / 3)
         let (written, choice) = (config.allowWritten, config.allowMultipleChoice)
-        let bank: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
+        // A guide example saved as a question is the same question: ask it
+        // once. Picks every one that fits, so leaving those out still fills
+        // the room and understood ones can come up less.
+        let guideKeys = Set(fromGuide.map(QuestionUnderstanding.key(of:)))
+        let picked: [LearnEngine.RoundQuestion] = (try? await database.queue.read { db -> [LearnEngine.RoundQuestion] in
             var rng = SystemRandomNumberGenerator()
-            return try CodeQuestionBank.pickRound(count: bankRoom, inDecks: bankDecks, allowWritten: written,
-                                                  allowMultipleChoice: choice, using: &rng, db: db)
+            return try CodeQuestionBank.pickRound(count: .max, inDecks: bankDecks,
+                                                  allowWritten: written, allowMultipleChoice: choice, using: &rng, db: db)
         }) ?? []
+        let open = picked.filter { !guideKeys.contains(QuestionUnderstanding.key(of: $0)) }
+        let understoodSaved = understoodKeys(Set(open.map(QuestionUnderstanding.key(of:))))
+        let bank = QuestionPicking.favorUnlearned(
+            open, count: bankRoom, isUnderstood: { understoodSaved.contains(QuestionUnderstanding.key(of: $0)) }, using: &rng)
         var questions = Array(fromGuide.prefix(config.questionCount - min(bank.count, bankRoom))) + bank
         questions.shuffle(using: &rng)
         guard !questions.isEmpty else { return ("", [], nil) }
@@ -1198,7 +1386,9 @@ final class AppStore {
     /// few seconds. The AI sees the question, the card's answer and this
     /// answer, in whichever mode (Local, Cloud, Automatic) is set.
     func judgeTypedAnswer(question: LearnEngine.RoundQuestion, given: String) async -> JudgedAnswer {
-        let accepted = question.cardId.map { acceptedAnswers(forCard: $0) } ?? []
+        // A card's remembered wordings, or the ones written with a saved question.
+        let accepted = question.cardId.map { acceptedAnswers(forCard: $0) }
+            ?? question.acceptedAnswers.map(AnswerGrading.normalize)
         // A canned judge for screenshots and demos when no model is
         // reachable: GRASP_STUB_JUDGE=1 with -GRASPAllowStubs 1, debug builds only.
         let stub = StubHooks.enabled("GRASP_STUB_JUDGE")
@@ -1327,6 +1517,7 @@ final class AppStore {
     /// punished, so it doesn't also tighten the flashcard schedule.
     func finishTest(attemptId: String) throws -> (correct: Int, total: Int) {
         let result = try database.queue.write { db in try Study.finishTest(attemptId: attemptId, db: db) }
+        FeedbackAsks.shared.noteTestFinished()
         reload()
         return result
     }
@@ -1594,7 +1785,7 @@ final class AppStore {
     }
 
     func addManualCourse(name: String, code: String?, semesterId: String? = nil) throws {
-        try database.queue.write { db in
+        _ = try database.queue.write { db in
             try LibraryActions.addManualCourse(name: name, code: code, semesterId: semesterId, db: db)
         }
         reload()
@@ -1676,13 +1867,19 @@ final class AppStore {
         isImporting = true
         importError = nil
         defer { isImporting = false }
+        guard notesLayout != .none else {
+            importError = "Folder reading is off. Add files to a course by hand instead."
+            return
+        }
         guard !vaultPath.isEmpty else {
             importError = "Choose your notes folder in Settings first."
             return
         }
         let root = URL(fileURLWithPath: vaultPath)
         do {
-            let summary = try await scanner.scan(vaultRoot: root)
+            let asVault = notesLayout == .vault || (notesLayout == .automatic && VaultScanner.hasVaultLayout(root))
+            let summary = asVault ? try await scanner.scan(vaultRoot: root)
+                                  : try await scanner.scanFolders(root: root, timeframe: notesTimeframe)
             lastImportSummary = summary
             if !summary.errors.isEmpty {
                 importError = summary.errors.first

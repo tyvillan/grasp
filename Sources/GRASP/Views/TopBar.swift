@@ -33,9 +33,13 @@ struct TopBar<Trailing: View>: View {
 
             // The acronym slides out here, into the bar's empty space, and
             // never over the sidebar or a control.
-            AcronymReveal(isShown: wordmarkActive)
-                .padding(.leading, 28)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // An overlay on an empty spacer, so the words' own width never
+            // pushes the buttons past the window's right edge at 800 pt.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .leading) {
+                    AcronymReveal(isShown: wordmarkActive).padding(.leading, 28)
+                }
                 .clipped()
 
             HStack(spacing: 6) { trailing() }

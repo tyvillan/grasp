@@ -85,4 +85,71 @@ struct WrittenAnswerBankTests {
         #expect(problem?.writtenAnswer == nil)
         #expect(problem?.answerText == "a")
     }
+
+    private func bank(with problem: ProblemQuestion) async throws -> (GRASPDatabase, String) {
+        let db = try GRASPDatabase.inMemory()
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "Software Design")
+            try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "Week 1")
+            try deck.insert(conn)
+            try TestQuestion(courseId: course.id, deckId: deck.id, problem: problem, bodyJSON: problem.encoded()!,
+                             verifiedBy: "written by hand").insert(conn)
+            return deck.id
+        }
+        return (db, deckId)
+    }
+
+    private func pick(_ db: GRASPDatabase, _ deckId: String, written: Bool, choice: Bool, trueFalse: Bool) async throws
+        -> [LearnEngine.RoundQuestion] {
+        try await db.queue.read { conn in
+            var rng = SystemRandomNumberGenerator()
+            return try CodeQuestionBank.pickRound(count: 5, inDecks: [deckId], allowWritten: written,
+                                                  allowMultipleChoice: choice, allowTrueFalse: trueFalse,
+                                                  using: &rng, db: conn)
+        }
+    }
+
+    @Test("a multiple-choice question with a written answer is left out when neither Written nor Multiple choice is on")
+    func neitherOn() async throws {
+        let (db, deckId) = try await makeBank(writtenAnswer: "The data layer.")
+        #expect(try await pick(db, deckId, written: false, choice: false).isEmpty)
+    }
+
+    @Test("a written question is typed-only: asked under Written, left out otherwise")
+    func macWrittenKind() async throws {
+        let problem = ProblemQuestion(kind: .written, subject: .concepts, prompt: "Name the layer that stores data.",
+                                      answer: "Data layer", accepted: ["the data layer"])
+        let (db, deckId) = try await bank(with: problem)
+        for (written, choice, expected) in [(true, false, true), (true, true, true), (false, true, false)] {
+            let questions = try await pick(db, deckId, written: written, choice: choice, trueFalse: false)
+            #expect(questions.count == (expected ? 1 : 0))
+            if expected {
+                #expect(questions[0].type == .written)
+                #expect(questions[0].acceptedAnswers == ["the data layer"])
+            }
+        }
+    }
+
+    @Test("a true/false question is asked only when true/false is on")
+    func trueFalseKind() async throws {
+        let problem = ProblemQuestion(kind: .trueFalse, subject: .concepts, prompt: "The data layer stores data.",
+                                      isTrue: true)
+        let (db, deckId) = try await bank(with: problem)
+        #expect(try await pick(db, deckId, written: true, choice: true, trueFalse: false).isEmpty)
+        let questions = try await pick(db, deckId, written: false, choice: false, trueFalse: true)
+        #expect(questions.count == 1)
+        #expect(questions[0].type == .trueFalse)
+    }
+
+    @Test("the written answer and the new fields all survive a round trip")
+    func roundTrip() {
+        let problem = ProblemQuestion(kind: .multipleChoice, subject: .concepts, prompt: "p", choices: ["a", "b"],
+                                      correct: 0, writtenAnswer: "a", answer: "x", accepted: ["y"], isTrue: false)
+        let back = ProblemQuestion.decode(problem.encoded())
+        #expect(back?.writtenAnswer == "a")
+        #expect(back?.answer == "x")
+        #expect(back?.accepted == ["y"])
+        #expect(back?.isTrue == false)
+    }
 }

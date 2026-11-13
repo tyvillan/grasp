@@ -182,6 +182,7 @@ private struct LinkText: View {
 }
 
 private struct GeneralSettingsTab: View {
+    @Environment(AppStore.self) private var store
     // Shared with HomeView's goal bar and the study session's focus timer
     // through `@AppStorage`'s own store, rather than threaded through
     // AppStore -- these are view preferences, not app data.
@@ -211,8 +212,15 @@ private struct GeneralSettingsTab: View {
                     Footnote("Used by the focus timer in a flashcard session. It never pauses or interrupts you. When an interval is up the bar changes colour and waits.")
                 }
             }
+
+            SettingsGroup(title: "Tutorial") {
+                SettingsRow(showsDivider: false) {
+                    Button("Replay tutorial") { TutorialLauncher.replay(store.tutorial) }
+                    Footnote("A two minute tour of the main screens. It only points at things and never changes your library.")
+                }
+            }
         }
-        .frame(width: 480, height: 460)
+        .frame(width: 480, height: 560)
     }
 }
 
@@ -247,6 +255,7 @@ private struct AISettingsTab: View {
     @State private var keyDraft = ""
     @State private var pendingMode: AIMode?
     @AppStorage(AIPreferences.cloudModelKey, store: .standard) private var cloudModel = ""
+    @AppStorage(AIPreferences.geminiPlanKey, store: .standard) private var geminiPlan = GeminiPlan.free.rawValue
 
     var body: some View {
         @Bindable var store = store
@@ -331,6 +340,7 @@ private struct AISettingsTab: View {
 
     // MARK: Cloud
 
+
     private var cloudSection: some View {
         SettingsGroup(title: "Cloud: \(CloudProvider.name)") {
             if store.hasCloudKey {
@@ -364,6 +374,15 @@ private struct AISettingsTab: View {
                             Footnote(note)
                         }
                     }
+                }
+                SettingsRow {
+                    HStack {
+                        Text("Gemini plan")
+                        Spacer()
+                        GRASPPicker(selection: $geminiPlan, options: [("free", "Free"), ("paid", "Paid")])
+                            .frame(maxWidth: 260, alignment: .trailing)
+                    }
+                    Footnote(GeminiPlan.explanation(for: geminiPlan))
                 }
                 if let detail = cloudErrorDetail {
                     SettingsRow {

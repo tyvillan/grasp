@@ -15,12 +15,19 @@ struct ExamGuideContent: View {
     /// Opens a guide's file at a page, for the tables and figures its text
     /// can't carry.
     let onOpenPage: (PDFPageTarget) -> Void
+    @State private var questionsNotice: String?
+    /// Each worked example's understanding meter, by `QuestionUnderstanding.key`.
+    /// Shared with the saved question made from it.
+    @State private var exampleStates: [String: UnderstandingState] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             ExamHeader(page: page, fileURL: { store.fileURL(ofGuide: $0) },
                        onOpen: { guide, url in onOpenPage(PDFPageTarget(url: url, page: 1, title: guide.title, wholeFile: true)) },
-                       onRemove: { store.deleteStudyGuide($0.id) })
+                       onRemove: { store.deleteStudyGuide($0.id) },
+                       onAddQuestions: { guide in
+                           questionsNotice = Self.questionsNotice(store.addGuideQuestions(guideId: guide.id))
+                       })
             if page.parts.isEmpty {
                 ContentUnavailableView(
                     "No parts found",
@@ -44,11 +51,35 @@ struct ExamGuideContent: View {
                 }
             }
         }
+        .alert("Guide questions", isPresented: Binding(get: { questionsNotice != nil }, set: { if !$0 { questionsNotice = nil } })) {
+            Button("OK") { questionsNotice = nil }
+        } message: { Text(questionsNotice ?? "") }
         // Write the skills' explanations in the background, so "What is this?" is instant.
         .task(id: page.exam.id) {
             store.prefetchSkillExplanations(skills: page.parts.flatMap(\.skills),
                                             terms: page.parts.flatMap(\.terms), subject: page.exam.title)
         }
+        .task(id: "\(page.exam.id)-\(store.revision)") {
+            let keys = page.parts.flatMap(\.examples).map(\.example)
+                .filter { $0.answer?.isEmpty == false }.map(QuestionUnderstanding.key(of:))
+            exampleStates = store.questionStates(forKeys: Set(keys))
+        }
+    }
+
+    /// What the "Save Questions" menu item reports.
+    static func questionsNotice(_ result: GuideQuestions.Result?) -> String {
+        guard let result else { return "Couldn't save the questions. Try again." }
+        if result.added == 0 {
+            return result.alreadyThere > 0
+                ? "Every question in this guide is already saved, so nothing was added."
+                : "This guide has no questions with answers to save."
+        }
+        var text = "Saved \(result.added) \(result.added == 1 ? "question" : "questions") in \"\(result.deckName)\". "
+            + "Find them under Questions in that deck and in All Cards. A test includes them when "
+            + "\"Include questions\" is on."
+        if result.alreadyThere > 0 { text += " \(result.alreadyThere) were already saved." }
+        if result.skipped > 0 { text += " \(result.skipped) were left out because they have no answer or need a table or figure." }
+        return text
     }
 
     private func partView(_ part: StudyGuideActions.PagePart, showsSkills: Bool) -> some View {
@@ -57,6 +88,7 @@ struct ExamGuideContent: View {
             total: page.questionCount,
             decks: decks,
             showsSkills: showsSkills,
+            exampleStates: exampleStates,
             allTerms: page.parts.flatMap(\.terms),
             subject: page.exam.title,
             onSetDecks: { deckIds in
@@ -149,6 +181,7 @@ private struct ExamHeader: View {
     let fileURL: (StudyGuide) -> URL?
     let onOpen: (StudyGuide, URL) -> Void
     let onRemove: (StudyGuide) -> Void
+    let onAddQuestions: (StudyGuide) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -204,6 +237,9 @@ private struct ExamHeader: View {
                                 .graspType(.meta)
                         }
                         Menu {
+                            Button { onAddQuestions(guide) } label: {
+                                Label("Save Questions", systemImage: "list.bullet.rectangle")
+                            }
                             Button(page.isPracticeSet ? "Delete This Practice Set" : "Remove from This Exam",
                                    role: .destructive) { onRemove(guide) }
                         } label: {
@@ -226,6 +262,7 @@ private struct PartSection: View {
     let total: Int?
     let decks: [Deck]
     let showsSkills: Bool
+    let exampleStates: [String: UnderstandingState]
     let allTerms: [StudyGuideDocument.Term]
     let subject: String
     let onSetDecks: ([String]) -> Void
@@ -331,7 +368,7 @@ private struct PartSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("Practice")
                     ForEach(practice) { item in
-                        PracticeProblem(item: item, onOpenPage: onOpenPage)
+                        PracticeProblem(item: item, state: state(of: item), onOpenPage: onOpenPage)
                     }
                 }
             }
@@ -339,11 +376,17 @@ private struct PartSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionLabel("Examples")
                     ForEach(illustrations) { item in
-                        PracticeProblem(item: item, onOpenPage: onOpenPage)
+                        PracticeProblem(item: item, state: state(of: item), onOpenPage: onOpenPage)
                     }
                 }
             }
         }
+    }
+
+    /// An example a test can ask (it has an answer) has a meter.
+    private func state(of item: StudyGuideActions.PageExample) -> UnderstandingState? {
+        guard item.example.answer?.isEmpty == false else { return nil }
+        return exampleStates[QuestionUnderstanding.key(of: item.example)]
     }
 
     private var header: some View {
@@ -387,7 +430,7 @@ private struct PartSection: View {
                 .font(.graspUI(size: 11))
                 .foregroundStyle(GRASPColor.textTertiary)
             if covered.isEmpty {
-                Text("No lecture deck yet — this guide is the only source for this part.")
+                Text("No lecture deck yet. This guide is the only source for this part.")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             } else {
@@ -696,6 +739,9 @@ private extension SkillConfidence {
 /// can be tried cold -- the way both guides say to use their examples.
 private struct PracticeProblem: View {
     let item: StudyGuideActions.PageExample
+    /// Where this question stands, from every test that asked it here or
+    /// as a saved question. nil for an example a test can't ask.
+    var state: UnderstandingState? = nil
     let onOpenPage: (String, Int) -> Void
     @State private var revealed = false
 
@@ -708,6 +754,9 @@ private struct PracticeProblem: View {
                     .graspType(.rowTitle)
                     .foregroundStyle(GRASPColor.textSecondary)
                 Spacer()
+                if let state {
+                    PipMeter(state: state, size: .card, showsWord: true)
+                }
             }
             if example.usesFigure == true, let page = example.page {
                 Button { onOpenPage(item.guideId, page) } label: {
@@ -718,6 +767,9 @@ private struct PracticeProblem: View {
                 .buttonStyle(.borderless)
             }
             GuideText(text: example.question, style: .prose, color: GRASPColor.textPrimary)
+            if let figure = QuestionFigure.detect(in: example.question) {
+                QuestionFigureView(figure: figure)
+            }
             if example.isPractice {
                 if revealed {
                     VStack(alignment: .leading, spacing: 8) {

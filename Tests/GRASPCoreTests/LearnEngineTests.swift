@@ -51,12 +51,47 @@ struct LearnEngineTests {
         #expect(LearnEngine.advance(level: .mastered, consecutiveCorrect: 5, wasCorrect: true).level == .mastered)
     }
 
-    @Test("a miss demotes one level, never below new, and resets the streak")
-    func missDemotesAndResetsStreak() {
+    @Test("one miss does not drop the card; it is remembered")
+    func firstMissIsRemembered() {
         let result = LearnEngine.advance(level: .recall, consecutiveCorrect: 3, wasCorrect: false)
-        #expect(result.level == .recognition)
-        #expect(result.consecutiveCorrect == 0)
+        #expect(result.level == .recall)
+        #expect(result.consecutiveCorrect == -1)
         #expect(LearnEngine.advance(level: .new, consecutiveCorrect: 0, wasCorrect: false).level == .new)
+    }
+
+    @Test("two misses in a row drop one level, never below new, and start the run over")
+    func secondMissDrops() {
+        let first = LearnEngine.advance(level: .recall, consecutiveCorrect: 3, wasCorrect: false)
+        let second = LearnEngine.advance(level: .recall, consecutiveCorrect: first.consecutiveCorrect, wasCorrect: false)
+        #expect(second.level == .recognition)
+        #expect(second.consecutiveCorrect == 0)
+        // A third miss is a fresh first miss.
+        let third = LearnEngine.advance(level: .recognition, consecutiveCorrect: second.consecutiveCorrect, wasCorrect: false)
+        #expect(third.level == .recognition)
+        #expect(third.consecutiveCorrect == -1)
+        // Never below new.
+        let floor = LearnEngine.advance(level: .new, consecutiveCorrect: -1, wasCorrect: false)
+        #expect(floor.level == .new)
+    }
+
+    @Test("a right answer between two misses clears the first")
+    func rightClearsMiss() {
+        let miss = LearnEngine.advance(level: .recall, consecutiveCorrect: 2, wasCorrect: false)
+        let right = LearnEngine.advance(level: .recall, consecutiveCorrect: miss.consecutiveCorrect, wasCorrect: true)
+        #expect(right.level == .mastered)
+        #expect(right.consecutiveCorrect == 1)
+        let missAgain = LearnEngine.advance(level: .mastered, consecutiveCorrect: right.consecutiveCorrect, wasCorrect: false)
+        #expect(missAgain.level == .mastered)
+        #expect(missAgain.consecutiveCorrect == -1)
+    }
+
+    @Test("an older client's streak of 0 or more reads as no earlier miss")
+    func oldRowsAreFresh() {
+        for run in [0, 1, 7] {
+            let result = LearnEngine.advance(level: .mastered, consecutiveCorrect: run, wasCorrect: false)
+            #expect(result.level == .mastered)
+            #expect(result.consecutiveCorrect == -1)
+        }
     }
 
     @Test("with most of the deck still unmastered, a round only draws from the unmastered cards")
@@ -126,5 +161,38 @@ struct LearnEngineTests {
             }
         }
         #expect(sawTrueFalse)
+    }
+}
+
+@Suite("Two misses in a row, stored")
+struct TwoMissStoredTests {
+    @Test("Learn answers drop a card only on the second miss in a row, and it persists between answers")
+    func persists() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let cardId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "C"); try course.insert(conn)
+            let card = Card(materialId: nil, front: "f", back: "b", origin: .manual, status: .active)
+            try card.insert(conn)
+            try LearnState(cardId: card.id, level: LearnEngine.Level.recall.rawValue, consecutiveCorrect: 2).save(conn)
+            return card.id
+        }
+        func state() async throws -> LearnState {
+            try await db.queue.read { try #require(try LearnState.fetchOne($0, key: cardId)) }
+        }
+        try await db.queue.write { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: false, db: $0) }
+        var s = try await state()
+        #expect(s.level == LearnEngine.Level.recall.rawValue)
+        #expect(s.consecutiveCorrect == -1)
+        try await db.queue.write { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: false, db: $0) }
+        s = try await state()
+        #expect(s.level == LearnEngine.Level.recognition.rawValue)
+        #expect(s.consecutiveCorrect == 0)
+        // A miss, a right answer, a miss: nothing drops.
+        try await db.queue.write { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: false, db: $0) }
+        try await db.queue.write { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: true, db: $0) }
+        try await db.queue.write { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: false, db: $0) }
+        s = try await state()
+        #expect(s.level == LearnEngine.Level.recall.rawValue)
+        #expect(s.consecutiveCorrect == -1)
     }
 }

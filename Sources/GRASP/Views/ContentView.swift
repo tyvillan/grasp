@@ -86,6 +86,7 @@ struct ContentView: View {
                 if showsSidebar {
                     SidebarView(selectedCourseId: $selectedCourseId)
                         .frame(width: Self.sidebarWidth)
+                        .tutorialTarget(.sidebar)
                         .transition(Motion.slide(from: .leading, distance: 24))
                     Rectangle().fill(GRASPColor.hairline).frame(width: 1)
                 }
@@ -114,6 +115,17 @@ struct ContentView: View {
         .ignoresSafeArea(.container, edges: .top)
         .toolbar(.hidden, for: .windowToolbar)
         .tint(GRASPColor.accent)
+        // The first-run tutorial: it lights up the real controls above and
+        // only navigates. `tutorialTarget` marks the controls it points at.
+        .environment(store.tutorial)
+        .overlay { TutorialOverlay().environment(store.tutorial) }
+        .onChange(of: store.tutorial.token) { _, _ in prepareTutorialScreen() }
+        .task { store.startTutorialIfFirstTime() }
+        // Feedback: the Send feedback sheet, and the two soft asks.
+        .feedbackSheet()
+        .feedbackAskHost()
+        .task { store.startFeedback() }
+        .onChange(of: selectedCourseId) { _, _ in noteFeedbackScreen() }
         .sheet(isPresented: $showingAddCourse) {
             AddCourseSheet()
         }
@@ -326,7 +338,52 @@ struct ContentView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .tutorialTarget(.addCourseMenu)
         .help("Add a course or upload a document")
+    }
+
+    // MARK: - Feedback
+
+    /// Which screen the person is on, in plain words, for the feedback sheet.
+    /// A fixed list: it never carries a course or deck name.
+    private func noteFeedbackScreen() {
+        switch selectedCourseId {
+        case Self.homeRoute, nil: FeedbackScreen.current = .home
+        case Self.calendarRoute: FeedbackScreen.current = .calendar
+        case Self.studyGuideRoute: FeedbackScreen.current = .studyGuides
+        case Self.libraryRoute: FeedbackScreen.current = .library
+        // A course with a deck page reports its own tab, Study, Learn or Test.
+        default: if !(selectedCourseId.map { store.hasDecks(inCourse: $0) } ?? false) { FeedbackScreen.current = .course }
+        }
+    }
+
+    // MARK: - Tutorial
+
+    /// What the tutorial was showing over before it opened a course, so
+    /// closing it puts the window back.
+    private struct PreTutorialScreen { let courseId: String?; let deckId: String? }
+    @State private var preTutorialScreen: PreTutorialScreen?
+
+    /// The tutorial's steps about a deck page need one open behind them. This
+    /// only picks a course, which is navigation: nothing is created or changed.
+    /// With no course that has a deck, the steps show as plain coach cards.
+    private func prepareTutorialScreen() {
+        let tutorial = store.tutorial
+        guard tutorial.isActive else {
+            if let before = preTutorialScreen {
+                preTutorialScreen = nil
+                selectedCourseId = before.courseId
+                selectedDeckId = before.deckId
+            }
+            return
+        }
+        guard tutorial.current.needsDeckPage, !tutorial.ignoresDeckPage else { return }
+        if let id = activeCourseId, store.hasDecks(inCourse: id) { return }
+        guard let course = store.firstCourseWithDeck() else { return }
+        if preTutorialScreen == nil {
+            preTutorialScreen = PreTutorialScreen(courseId: selectedCourseId, deckId: selectedDeckId)
+        }
+        selectedCourseId = course.id
     }
 
     /// `GRASP_OPEN_COURSE` (a course's name) and `GRASP_OPEN_DECK` (a

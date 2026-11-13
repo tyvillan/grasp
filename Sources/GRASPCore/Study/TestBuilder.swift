@@ -25,12 +25,16 @@ public enum TestBuilder {
         /// Draw only from cards the student keeps missing (see
         /// `Study.weakCardIds`).
         public var weakSpotsOnly: Bool
+        /// Whether the test asks about the decks' flashcards. Off, the test
+        /// is made of saved questions alone.
+        public var includeFlashcards: Bool
 
         public init(
             questionCount: Int = 20, allowMultipleChoice: Bool = true, allowWritten: Bool = true,
             allowTrueFalse: Bool = true, shuffle: Bool = true, timeLimitSeconds: Int? = nil,
-            excludeMastered: Bool = false, weakSpotsOnly: Bool = false
+            excludeMastered: Bool = false, weakSpotsOnly: Bool = false, includeFlashcards: Bool = true
         ) {
+            self.includeFlashcards = includeFlashcards
             self.weakSpotsOnly = weakSpotsOnly
             self.questionCount = questionCount
             self.allowMultipleChoice = allowMultipleChoice

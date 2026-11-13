@@ -62,6 +62,15 @@ public enum AnswerLadder {
         question: String, expected: String, given: String, accepted: [String] = [],
         judge: Judge?, timeout: Duration = judgeTimeout
     ) async -> JudgedAnswer {
+        await self.judge(question: question, expected: expected, given: given, accepted: accepted,
+                         judge: judge, timeout: timeout, clock: ContinuousClock())
+    }
+
+    /// The same on a clock the caller supplies (a test moves its own).
+    static func judge<C: Clock>(
+        question: String, expected: String, given: String, accepted: [String] = [],
+        judge: Judge?, timeout: Duration = judgeTimeout, clock: C
+    ) async -> JudgedAnswer where C.Duration == Duration {
         let normalizedGiven = AnswerGrading.normalize(given)
         guard !normalizedGiven.isEmpty else { return JudgedAnswer(outcome: .notQuite, source: .empty) }
         if accepted.contains(where: { AnswerGrading.normalize($0) == normalizedGiven }) {
@@ -73,7 +82,7 @@ public enum AnswerLadder {
             return JudgedAnswer(outcome: decided, source: decided == .correct && local.isExact ? .exact : .local)
         }
         // Borderline. Ask the judge, but never wait on it.
-        if let judge, let verdict = await withTimeout(timeout, {
+        if let judge, let verdict = await withSendTimeout(timeout, ceiling: .seconds(20), clock: clock, tick: .milliseconds(20), {
             await judge(question, expected, given)
         }) {
             return JudgedAnswer(outcome: verdict.outcome, reason: verdict.reason, source: .ai)
@@ -81,13 +90,57 @@ public enum AnswerLadder {
         return JudgedAnswer(outcome: local.fallback, source: .localFallback)
     }
 
+    /// Like `withTimeout`, for a request that may first wait its turn: the
+    /// clock holds while the request is queued and runs from the moment it
+    /// is sent. The work goes in the interactive lane. A ceiling stops a
+    /// request that never gets its turn from holding the student up.
+    static func withSendTimeout<T: Sendable>(
+        _ limit: Duration, ceiling: Duration = .seconds(20), _ work: @escaping @Sendable () async -> T?
+    ) async -> T? {
+        await withSendTimeout(limit, ceiling: ceiling, clock: ContinuousClock(), tick: .milliseconds(20), work)
+    }
+
+    /// The same on a clock the caller supplies (a test moves its own).
+    static func withSendTimeout<T: Sendable, C: Clock>(
+        _ limit: Duration, ceiling: Duration, clock: C, tick: Duration, _ work: @escaping @Sendable () async -> T?
+    ) async -> T? where C.Duration == Duration {
+        let gate = SendGate()
+        return await withTaskGroup(of: T?.self) { group in
+            group.addTask {
+                await AIRequestContext.$gate.withValue(gate) {
+                    await AIRequestContext.$priority.withValue(.interactive) { await work() }
+                }
+            }
+            group.addTask {
+                let begun = clock.now
+                var sent = begun
+                while !Task.isCancelled {
+                    try? await clock.sleep(for: tick)
+                    let now = clock.now
+                    if gate.isQueued { sent = now }
+                    if sent.duration(to: now) >= limit || begun.duration(to: now) >= ceiling { return nil }
+                }
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
     /// Runs `work` against a clock; nil when the clock wins (the work is
     /// cancelled) or the work has no answer.
     static func withTimeout<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async -> T?) async -> T? {
+        await withTimeout(limit, clock: ContinuousClock(), work)
+    }
+
+    static func withTimeout<T: Sendable, C: Clock>(
+        _ limit: Duration, clock: C, _ work: @escaping @Sendable () async -> T?
+    ) async -> T? where C.Duration == Duration {
         await withTaskGroup(of: T?.self) { group in
             group.addTask { await work() }
             group.addTask {
-                try? await Task.sleep(for: limit)
+                try? await clock.sleep(for: limit)
                 return nil
             }
             let first = await group.next() ?? nil

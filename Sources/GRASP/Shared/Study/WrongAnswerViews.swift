@@ -222,6 +222,11 @@ struct TypedAnswerFeedback: View {
     let judged: JudgedAnswer
     let given: String
     let expected: String
+    /// False for a question with no flashcard behind it (a study guide's),
+    /// where "the card says" would name something that isn't there.
+    var hasCard = true
+
+    static func expectedLabel(hasCard: Bool) -> String { hasCard ? "Card says" : "Answer" }
 
     var body: some View {
         switch judged.outcome {
@@ -229,7 +234,7 @@ struct TypedAnswerFeedback: View {
             EmptyView()
         case .closeEnough:
             VStack(alignment: .leading, spacing: 3) {
-                Text("Your answer works. The card says: \(expected)")
+                Text("Your answer works. \(hasCard ? "The card says" : "The answer is"): \(expected)")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -250,7 +255,7 @@ struct TypedAnswerFeedback: View {
         case .notQuite:
             VStack(alignment: .leading, spacing: 4) {
                 line("Your answer", given, tint: GRASPColor.textSecondary)
-                line("Card says", expected, tint: GRASPColor.textPrimary)
+                line(Self.expectedLabel(hasCard: hasCard), expected, tint: GRASPColor.textPrimary)
                 if let reason = judged.reason, !reason.isEmpty {
                     Text(reason)
                         .graspType(.meta)

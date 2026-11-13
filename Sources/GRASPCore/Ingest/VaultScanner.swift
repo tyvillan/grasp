@@ -123,6 +123,56 @@ public actor VaultScanner {
         return summary
     }
 
+    /// Whether this folder is laid out as a vault (it has a `College` folder).
+    public nonisolated static func hasVaultLayout(_ root: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: root.appendingPathComponent("College").path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    /// Imports any ordinary folder: each folder directly inside it becomes a course, named after
+    /// the folder, holding everything importable below it. A folder with no folders inside is one
+    /// course. `timeframe` ("Fall 2026") files the new courses under that term; a note's own
+    /// frontmatter term still wins. Re-running skips unchanged files, like a vault scan.
+    public func scanFolders(root: URL, timeframe: String? = nil) throws -> ImportSummary {
+        var summary = ImportSummary()
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) else {
+            summary.errors.append("Could not read the folder \(root.path)")
+            return summary
+        }
+        let excludedFolders = try database.queue.read { db in
+            Set(try ExcludedFolder.fetchAll(db).map(\.folderPath))
+        }
+        let name = timeframe?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let semesterId: String? = name.isEmpty ? nil : try database.queue.write { db in
+            try LibraryActions.findOrCreateSemester(name: name, db: db)
+        }
+        var courseDirs = entries.filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                && !Self.ignoredDirectoryNames.contains($0.lastPathComponent)
+        }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        if courseDirs.isEmpty { courseDirs = [root] }
+        for dir in courseDirs {
+            try scanCourseFolder(dir, semesterId: nil, courseNameOverride: nil, excludedFolders: excludedFolders, summary: &summary)
+            if let semesterId {
+                let folderKey = key(dir)
+                try database.queue.write { db in
+                    try db.execute(sql: "UPDATE course SET semesterId = ? WHERE folderPath = ? AND semesterId IS NULL",
+                                   arguments: [semesterId, folderKey])
+                }
+            }
+        }
+        try database.queue.write { db in
+            try Self.sweepMissingFiles(under: key(root), db: db, paths: paths)
+            summary.semesterCount = try Semester.fetchCount(db)
+            summary.courseCount = try Course.fetchCount(db)
+        }
+        return summary
+    }
+
     /// Notes that were in the vault and aren't any more.
     ///
     /// Identity is the file's path, and nothing used to notice a path
@@ -139,6 +189,9 @@ public actor VaultScanner {
         let prefix = root.hasSuffix("/") ? root : root + "/"
         let fm = FileManager.default
         func isPresent(_ stored: String) -> Bool {
+            // A deck imported before decks were left out is retired like a
+            // deleted note: its untouched drafts go, anything approved stays.
+            if SlideDeck.isDeckFile((stored as NSString).lastPathComponent) { return false }
             let path = paths.local(forStored: stored)
             if fm.fileExists(atPath: path) { return true }
             // Through iCloud for Windows, a folder that hasn't synced to
@@ -238,6 +291,9 @@ public actor VaultScanner {
             // folder full of program input files, driver readmes and
             // transcripts shouldn't turn into notes on its own.
             guard let kind = Self.importableKinds[ext], !Self.explicitOnlyExtensions.contains(ext) else { continue }
+            // A lecture's slide deck is not a note: it would turn its titles
+            // and bullets into cards. It is read beside its note instead.
+            if SlideDeck.isDeckFile(fileURL.lastPathComponent) { continue }
 
             summary.filesScanned += 1
             do {

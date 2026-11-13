@@ -150,9 +150,9 @@ struct TestSetupSheet: View {
     let onStart: (String, [LearnEngine.RoundQuestion], String?) -> Void
     @State private var unfinished: Study.UnfinishedTest?
 
-    @State private var questionCount = 20
+    @State private var questionCount = 10
     @State private var allowMultipleChoice = true
-    @State private var allowWritten = true
+    @State private var allowWritten = false
     @State private var allowTrueFalse = true
     // Fixed defaults: tests shuffle, and ask about every card.
     private let shuffle = true
@@ -172,16 +172,30 @@ struct TestSetupSheet: View {
     /// Set when Start found nothing to ask, so the sheet says why instead
     /// of just not starting.
     @State private var noQuestions = false
+    /// The deck's approved cards, so a deck with none starts a test from its
+    /// saved questions alone. -1 until counted.
+    @State private var cardCount = -1
+    /// How many questions these settings can really ask. -1 until counted.
+    @State private var matching = -1
+    /// "Include questions" for a deck with no cards, which is on until turned off here.
+    @State private var questionsWithoutCards = true
+
+    private var hasCards: Bool { cardCount != 0 }
+    /// What the test will really use, whatever the saved switches say.
+    private var useFlashcards: Bool { guide != nil || (hasCards && store.isFlashcardQuizEnabled) }
+    private var useQuestions: Bool { guide != nil || (hasCards ? store.isSavedQuestionsEnabled : questionsWithoutCards) }
+
+    /// What a guide's test is made of, in the words of the questions it asks.
+    static let guideSetupMessage = "Built from what the exam will ask: this guide's worked examples, asked in the "
+        + "form the exam uses, plus the checked practice problems saved for the lectures it covers."
 
     var body: some View {
         GRASPSheet(
             eyebrow: "Test", title: deckName,
             message: guide != nil
-                ? "Built from what the exam will ask: this guide's worked examples (code answers become "
-                  + "fill-in-the-blank, output questions become predict-the-output) and the checked practice "
-                  + "problems saved for the lectures it covers."
-                : "A graded quiz on this deck's cards: multiple choice, written, and true / false. "
-                  + "Worked problems with code or calculations live under Problems instead.",
+                ? Self.guideSetupMessage
+                : "A graded quiz on this deck's flashcards, its saved questions, or both: multiple choice, "
+                  + "written, and true / false.",
             icon: "checklist", width: 460
         ) {
             VStack(alignment: .leading, spacing: 14) {
@@ -218,6 +232,13 @@ struct TestSetupSheet: View {
                         Stepper("", value: $questionCount.animation(Motion.snappy), in: 5...100, step: 5)
                             .labelsHidden()
                     }
+                    if guide == nil, matching >= 0, matching < questionCount {
+                        Text(matching == 0 ? "No questions match these types."
+                             : "\(matching) question\(matching == 1 ? "" : "s") match these types. The test will have \(matching).")
+                            .graspType(.meta)
+                            .foregroundStyle(matching == 0 ? GRASPColor.rejected : GRASPColor.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Rectangle().fill(GRASPColor.hairline).frame(height: 1)
                     FieldLabel("Question types")
                     Toggle("Multiple choice", isOn: $allowMultipleChoice)
@@ -233,39 +254,46 @@ struct TestSetupSheet: View {
                 historyBlock
 
                 if guide == nil {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle(isOn: Binding(
-                            get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
-                        )) {
-                            HStack(spacing: 6) {
-                                Image(systemName: AIGlyph.symbol)
-                                    .font(.graspUI(size: 11, weight: .semibold))
-                                    .foregroundStyle(GRASPColor.accent)
-                                Text("Include AI-written questions")
-                            }
+                    // Two independent sources. Flashcards are what Test has
+                    // always asked about; questions are the ones saved on the
+                    // deck's Questions tab.
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Quiz me on flashcards", isOn: Binding(
+                                get: { useFlashcards }, set: { store.isFlashcardQuizEnabled = $0 }
+                            ))
+                            .toggleStyle(GRASPSwitchStyle())
+                            .disabled(!hasCards)
+                            Text(hasCards ? "Questions made from this deck's cards." : "This deck has no cards.")
+                                .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                            aiOption
+                                .padding(.leading, 20)
+                                .padding(.top, 8)
                         }
-                        .toggleStyle(GRASPSwitchStyle())
-                        Text("Fresh questions written by AI for this test only. They aren't saved as cards.")
-                            .graspType(.meta)
-                            .foregroundStyle(GRASPColor.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if store.isAITestQuestionsEnabled {
-                            let saved = store.codeQuestionCount(inDecks: deckIds)
-                            Text(saved > 0
-                                 ? "Also mixes in some of this deck's \(saved) saved practice problem\(saved == 1 ? "" : "s"), up to a third of the test."
-                                 : "Short questions are written from your notes as the test starts. Full practice problems (code, matrices, calculations) can be saved ahead of time with a deck's Problems button on the Mac.")
-                                .graspType(.meta)
-                                .foregroundStyle(GRASPColor.textTertiary)
+                        Rectangle().fill(GRASPColor.hairline).frame(height: 1)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Include questions", isOn: Binding(
+                                get: { useQuestions },
+                                set: { if hasCards { store.isSavedQuestionsEnabled = $0 } else { questionsWithoutCards = $0 } }
+                            ))
+                            .toggleStyle(GRASPSwitchStyle())
+                            Text(savedQuestionsCaption)
+                                .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .popupGroup()
+
                 }
 
-                if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
+                if let problem = Study.testSourcesProblem(includeFlashcards: useFlashcards, includeQuestions: useQuestions) {
+                    Text(problem).graspType(.meta).foregroundStyle(GRASPColor.rejected)
+                } else if !allowMultipleChoice && !allowWritten && !allowTrueFalse {
                     Text("Turn on at least one question type.").graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 } else if noQuestions {
-                    Text("No cards match these settings, so there's nothing to test.")
+                    Text(useFlashcards
+                         ? "No cards or saved questions match these settings, so there's nothing to test."
+                         : "No saved questions match these settings, so there's nothing to test.")
                         .graspType(.meta).foregroundStyle(GRASPColor.rejected)
                 }
 
@@ -284,7 +312,7 @@ struct TestSetupSheet: View {
         } footer: {
             if isStarting, aiActivity == nil {
                 ProgressView().controlSize(.small)
-                Text(store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
+                Text(useFlashcards && store.isAITestQuestionsEnabled ? "Writing AI questions…" : "Starting test…")
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
             }
@@ -294,26 +322,85 @@ struct TestSetupSheet: View {
             Button("Start test") { start() }
                 .buttonStyle(GRASPProminentButton())
                 .keyboardShortcut(.defaultAction)
-                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse))
+                .disabled(isStarting || (!allowMultipleChoice && !allowWritten && !allowTrueFalse) || (guide == nil && matching == 0)
+                          || (guide == nil && Study.testSourcesProblem(includeFlashcards: useFlashcards,
+                                                                       includeQuestions: useQuestions) != nil))
         }
         .task {
-            store.addMissingChoicesInBackground()
+            cardCount = guide == nil ? store.activeCardCount(inDecks: deckIds) : -1
             unfinished = store.unfinishedTest(forDecks: deckIds, scopeKey: guide?.scopeKey)
             history = store.testHistory(forDecks: deckIds)
             mostMissed = store.mostMissedCards(forDecks: deckIds)
         }
+        .task(id: matchKey) { recount() }
+    }
+
+    /// What changes the count of questions that can be asked.
+    private var matchKey: String {
+        "\(questionCount)\(allowMultipleChoice)\(allowWritten)\(allowTrueFalse)\(useFlashcards)\(useQuestions)\(cardCount)\(store.revision)"
+    }
+
+    private func recount() {
+        guard guide == nil, cardCount >= 0 else { return }
+        let config = TestBuilder.Config(
+            questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
+            allowWritten: allowWritten, allowTrueFalse: allowTrueFalse, shuffle: shuffle,
+            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly, includeFlashcards: useFlashcards)
+        matching = store.matchingTestQuestionCount(deckIds: deckIds, config: config, includeQuestions: useQuestions)
+    }
+
+    /// "Add fresh AI questions": part of the flashcard side, so it sits under
+    /// "Quiz me on flashcards", indented. Dimmed, with the reason, when it
+    /// cannot do anything: flashcards off, or Written off (AI questions are
+    /// typed answers).
+    private var aiOption: some View {
+        let flashcards = useFlashcards
+        let available = flashcards && allowWritten
+        return VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: Binding(
+                get: { store.isAITestQuestionsEnabled }, set: { store.isAITestQuestionsEnabled = $0 }
+            )) {
+                HStack(spacing: 6) {
+                    Image(systemName: AIGlyph.symbol)
+                        .font(.graspUI(size: 11, weight: .semibold))
+                        .foregroundStyle(GRASPColor.accent)
+                    Text("Add fresh AI questions")
+                }
+            }
+            .toggleStyle(GRASPSwitchStyle())
+            .disabled(!available)
+            Text(!flashcards ? "Turn on Quiz me on flashcards to use this."
+                 : !allowWritten ? "Turn on Written to use this."
+                 : "Written by AI for this test only. Not saved.")
+                .graspType(.meta)
+                .foregroundStyle(GRASPColor.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .opacity(available ? 1 : 0.45)
+        .animation(Motion.fade, value: available)
+    }
+
+    /// What "Include questions" will do, in a line.
+    private var savedQuestionsCaption: String {
+        let saved = store.activeQuestionCount(inDecks: deckIds)
+        guard saved > 0 else { return "No saved questions yet. Add some on the deck's Questions tab." }
+        let noun = "\(saved) saved question\(saved == 1 ? "" : "s")"
+        return useFlashcards
+            ? "\(noun) from this deck's Questions tab. About a third of the test."
+            : "\(noun) from this deck's Questions tab. The whole test comes from them."
     }
 
     private func start() {
         let config = TestBuilder.Config(
             questionCount: questionCount, allowMultipleChoice: allowMultipleChoice,
             allowWritten: allowWritten, allowTrueFalse: allowTrueFalse && guide == nil, shuffle: shuffle,
-            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly
+            excludeMastered: excludeMastered, weakSpotsOnly: weakSpotsOnly,
+            includeFlashcards: useFlashcards
         )
         isStarting = true
         noQuestions = false
         let run = guide != nil ? nil
-            : (store.isAITestQuestionsEnabled && allowWritten)
+            : (useFlashcards && store.isAITestQuestionsEnabled && allowWritten)
             ? AIActivity(headline: "Writing AI questions from your notes")
             : nil
         aiActivity = run
@@ -324,11 +411,12 @@ struct TestSetupSheet: View {
                 isStarting = false
             }
             let guide = self.guide
+            let useQuestionsForStart = useQuestions
             let start = {
                 if let guide {
                     return try await store.startGuideTest(page: guide.page, scopeKey: guide.scopeKey, config: config)
                 }
-                return try await store.startTest(deckIds: deckIds, config: config)
+                return try await store.startTest(deckIds: deckIds, config: config, includeQuestions: useQuestionsForStart)
             }
             let result = if let run {
                 try? await AIProgress.$current.withValue(run.reporter(forUnit: 0)) { try await start() }
@@ -539,7 +627,7 @@ struct TestRunView: View {
                         ExplainThisBlock(question: question, given: graded.last?.givenAnswer ?? "")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if isAnswered, question.cardId == nil {
+                    if isAnswered, question.cardId == nil, question.bankSource != QuestionSource.yours.rawValue {
                         FlagQuestionButton { flagCurrent(question) }
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -556,7 +644,11 @@ struct TestRunView: View {
 
     @ViewBuilder
     private func questionLabel(_ question: LearnEngine.RoundQuestion) -> some View {
-        if let code = question.code {
+        if question.bankSource == QuestionSource.yours.rawValue {
+            Label("Your question", systemImage: "pencil")
+                .font(.graspUI(size: 11, weight: .medium))
+                .foregroundStyle(GRASPColor.textTertiary)
+        } else if let code = question.code {
             Label("\(code.kind.label) · \(code.language.label)", systemImage: "chevron.left.forwardslash.chevron.right")
                 .font(.graspUI(size: 11, weight: .medium))
                 .foregroundStyle(GRASPColor.accent)
@@ -576,6 +668,18 @@ struct TestRunView: View {
 
     @ViewBuilder
     private func questionPrompt(_ question: LearnEngine.RoundQuestion) -> some View {
+        VStack(spacing: 14) {
+            promptText(question)
+            // A practice question that refers to a figure shows it, drawn from its own numbers.
+            if let figure = QuestionFigure.detect(in: question.prompt) {
+                QuestionFigureView(figure: figure)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func promptText(_ question: LearnEngine.RoundQuestion) -> some View {
         if question.problem != nil || (question.cardId == nil && question.prompt.contains("\n")) {
             // Long or code-bearing prompts read left to right; a matrix only
             // lines up that way.
@@ -612,12 +716,16 @@ struct TestRunView: View {
             choiceList(question)
         case .trueFalse:
             VStack(spacing: 18) {
-                Text(question.statement ?? "")
-                    .graspType(.studyAnswer)
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: 640)
+                // A saved true/false question's prompt is its statement;
+                // showing it again underneath read as a mistake.
+                if let statement = question.statement, statement != question.prompt {
+                    Text(statement)
+                        .graspType(.studyAnswer)
+                        .foregroundStyle(GRASPColor.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 640)
+                }
                 HStack(spacing: 10) {
                     trueFalseButton("True", question)
                     trueFalseButton("False", question)
@@ -671,7 +779,8 @@ struct TestRunView: View {
                     .frame(maxWidth: 520, alignment: .leading)
             }
             if isAnswered, let judged, judged.outcome != .correct {
-                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer)
+                TypedAnswerFeedback(judged: judged, given: writtenAnswer, expected: question.correctAnswer,
+                                    hasCard: question.cardId != nil)
                     .frame(maxWidth: 520, alignment: .leading)
             }
         }
@@ -856,6 +965,12 @@ struct TestRunView: View {
 }
 
 struct TestResultsView: View {
+    /// The line under the score. The flashcard sentence only when cards were asked.
+    static func footnote(hasCards: Bool) -> String {
+        (hasCards ? "Cards you got right just earned a longer flashcard interval. " : "")
+            + "A miss here doesn't change anything. It just tells you where to focus."
+    }
+
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     let deckName: String
@@ -864,11 +979,20 @@ struct TestResultsView: View {
     let onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)?
     let deckIds: [String]
     @State private var graded: [GradedQuestion]
+    /// Each card's stage after this test, read as its row appears.
+    @State private var cardStates: [String: UnderstandingState] = [:]
+    /// Each saved or guide question's stage, by `QuestionUnderstanding.key`.
+    @State private var questionStates: [String: UnderstandingState] = [:]
+    /// A study guide's test: its questions that are not cards are the
+    /// guide's own examples, which have a meter. Elsewhere only saved
+    /// questions do; a one-off AI question has none.
+    let isGuideTest: Bool
 
     init(deckName: String, attemptId: String, graded: [GradedQuestion], deckIds: [String] = [],
-         onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
+         isGuideTest: Bool = false, onRetry: ((String, [LearnEngine.RoundQuestion]) -> Void)? = nil) {
         self.deckName = deckName
         self.deckIds = deckIds
+        self.isGuideTest = isGuideTest
         self.onRetry = onRetry
         self.attemptId = attemptId
         self._graded = State(initialValue: graded)
@@ -912,8 +1036,7 @@ struct TestResultsView: View {
                 .padding(.top, 14)
                 .animation(Motion.base, value: correct)
 
-                Text("Cards you got right just earned a longer flashcard interval. A miss here doesn't "
-                     + "change anything. It just tells you where to focus.")
+                Text(Self.footnote(hasCards: graded.contains { $0.question.cardId != nil }))
                     .graspType(.meta)
                     .foregroundStyle(GRASPColor.textTertiary)
                     .multilineTextAlignment(.center)
@@ -974,7 +1097,8 @@ struct TestResultsView: View {
                                 .textCase(.uppercase)
                                 .foregroundStyle(GRASPColor.textTertiary)
                             TypedAnswerFeedback(judged: item.judged!, given: item.givenAnswer,
-                                                expected: item.question.correctAnswer)
+                                                expected: item.question.correctAnswer,
+                                                hasCard: item.question.cardId != nil)
                         }
                         .padding(.top, 2)
                     } else if item.isCorrect {
@@ -1002,6 +1126,16 @@ struct TestResultsView: View {
 
                     WhyBlock(text: item.question.whyText)
                         .padding(.top, 2)
+                    // Where this card stands now, in its stage colour.
+                    if let state = item.question.cardId.flatMap({ cardStates[$0] }) ?? questionState(of: item.question) {
+                        HStack(spacing: 8) {
+                            PipMeter(state: state, size: .card, showsWord: true)
+                            Text("Now")
+                                .font(.graspUI(size: 12))
+                                .foregroundStyle(GRASPColor.textTertiary)
+                        }
+                        .padding(.top, 2)
+                    }
                     if !item.isCorrect {
                         ExplainThisBlock(question: item.question, given: item.givenAnswer)
                             .padding(.top, 4)
@@ -1027,9 +1161,15 @@ struct TestResultsView: View {
                     }
                 }
                 .padding(.vertical, 5)
+                .onAppear {
+                    if let id = item.question.cardId, cardStates[id] == nil {
+                        cardStates[id] = store.understandingState(forCard: id)
+                    }
+                }
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
+            .task(id: attemptId) { loadQuestionStates() }
 
             HStack {
                 Spacer()
@@ -1071,6 +1211,23 @@ struct TestResultsView: View {
             store.rememberAcceptedAnswer(item.givenAnswer, forCard: cardId)
         }
         try? store.overrideTestItemCorrect(attemptId: attemptId, ordinal: item.ordinal, cardId: item.question.cardId)
+        loadQuestionStates()
+    }
+
+    /// A question that is not a card has a meter when it is saved or comes
+    /// from the guide.
+    private func hasQuestionMeter(_ question: LearnEngine.RoundQuestion) -> Bool {
+        question.cardId == nil && (question.bankQuestionId != nil || isGuideTest)
+    }
+
+    private func questionState(of question: LearnEngine.RoundQuestion) -> UnderstandingState? {
+        hasQuestionMeter(question) ? questionStates[QuestionUnderstanding.key(of: question)] : nil
+    }
+
+    /// One read for the whole list.
+    private func loadQuestionStates() {
+        let keys = graded.map(\.question).filter(hasQuestionMeter).map(QuestionUnderstanding.key(of:))
+        questionStates = store.questionStates(forKeys: Set(keys))
     }
 }
 

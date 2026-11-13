@@ -7,9 +7,20 @@ struct DeckScreen: View {
     @Environment(AppStore.self) private var store
     let route: DeckRoute
 
-    private enum Tab: String, CaseIterable { case cards = "Cards", overview = "Overview" }
+    private enum Tab: String, CaseIterable { case overview = "Overview", cards = "Cards", questions = "Questions" }
 
-    @State private var tab: Tab = .cards
+    /// The last tab used, across decks and launches; Cards the first time.
+    @State private var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "deckContentTab") ?? "") ?? .cards
+    /// Opens the editor for a new question on the Questions tab.
+    @State private var writingQuestion = false
+    /// Opens "Generate questions with AI" on the Questions tab.
+    @State private var generatingQuestions = false
+    @State private var importingPhoto = false
+    /// Saved questions a test could ask, and drafts waiting for review.
+    @State private var activeQuestionCount = 0
+    @State private var draftQuestionCount = 0
+    /// DEBUG screenshots only: the Add menu's items in a popover (see `DebugLaunch.showAddMenu`).
+    @State private var showingAddItemsPreview = false
     @State private var cards: [Card] = []
     @State private var dueCount = 0
     @State private var studying = false
@@ -24,6 +35,17 @@ struct DeckScreen: View {
     @State private var aiMessage: String?
     private var reduceMotion: Bool { Motion.isReduced }
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
+    /// The meter's view of each card, and the note a "Weakest notes" row
+    /// filters to (nil: not filtering; `.some(nil)` is the "Other" group).
+    @State private var understanding: [DeckUnderstanding.Card] = []
+    @State private var noteFilter: String??
+    /// Suspended cards' states, so their rows can show the meter in red.
+    @State private var suspendedStates: [String: UnderstandingState] = [:]
+    @State private var noteTitles: [String: String] = [:]
+    private var understandingById: [String: UnderstandingState] {
+        Dictionary(understanding.map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+            .merging(suspendedStates) { first, _ in first }
+    }
     @State private var filter: CardFilter = .all
     @State private var editMode: EditMode = .inactive
     @State private var selection: Set<String> = []
@@ -39,8 +61,9 @@ struct DeckScreen: View {
     @State private var notice: String?
     @State private var generationFinished = 0
     @State private var confirmingApproveAll = false
+    @State private var confirmingSuspendDeck = false
+    @State private var confirmingReactivateDeck = false
     /// Shown when Test is tapped on a deck with no approved cards yet.
-    @State private var approveFirstNotice = false
     /// Why the last "Generate Cards" run failed, shown with Retry
     /// instead of the "no new cards" message.
     @State private var additionFailure: String?
@@ -51,6 +74,11 @@ struct DeckScreen: View {
     }
 
     private var courseId: String? { store.courseId(of: route.scope) }
+
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = studying ? .study : learning ? .learn : testPhase != nil ? .test
+            : tab == .questions ? .deckQuestions : tab == .overview ? .deckOverview : .deckCards
+    }
 
     /// The AI job running on this course, if any -- owned by the store, so
     /// it keeps going (with its Stop button) when this screen closes.
@@ -91,6 +119,7 @@ struct DeckScreen: View {
     private var shownCards: [Card] {
         let q = query.trimmingCharacters(in: .whitespaces)
         var base = cards.filter { matches($0, filter) }
+        if let note = noteFilter { base = base.filter { $0.materialId == note } }
         if !q.isEmpty {
             base = base.filter { $0.front.localizedCaseInsensitiveContains(q) || $0.back.localizedCaseInsensitiveContains(q) }
         }
@@ -101,7 +130,7 @@ struct DeckScreen: View {
         return recentAIIds.compactMap { byId[$0] } + base.filter { !recent.contains($0.id) }
     }
 
-    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards }
+    private var showsEmptyDeck: Bool { hasLoaded && cards.isEmpty && !isGeneratingCards && tab == .cards }
     private var isGeneratingCards: Bool { runningJob?.activity.purpose == "add" }
     private var selectedDrafts: [String] {
         shownCards.filter { selection.contains($0.id) && $0.status == .draft }.map(\.id)
@@ -133,8 +162,13 @@ struct DeckScreen: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 2, bottom: 4, trailing: 0))
                 }
                 GRASPSegmented(
-                    selection: $tab, options: Tab.allCases.map { ($0, $0.rawValue) }, fillsWidth: true
+                    selection: $tab,
+                    options: Tab.allCases.map { ($0, $0 == .questions && draftQuestionCount > 0
+                                                    ? "\($0.rawValue) \(draftQuestionCount)" : $0.rawValue) },
+                    fillsWidth: true,
+                    onTap: { store.tutorial.didTap(.deckTab($0.rawValue)) }
                 )
+                .tutorialTarget(.deckTabs)
                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
             .listRowBackground(Color.clear)
@@ -142,6 +176,15 @@ struct DeckScreen: View {
             switch tab {
             case .cards: cardSections
             case .overview: OverviewSection(deckIds: deckIds)
+            case .questions:
+                Section {
+                    QuestionsTab(deckIds: deckIds, courseId: courseId, query: query, isWriting: $writingQuestion,
+                                 isGenerating: $generatingQuestions, isImportingPhoto: $importingPhoto,
+                                 decks: deckChoices, scopeName: route.name)
+                        .listRowInsets(EdgeInsets())
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             }
         }
@@ -152,9 +195,20 @@ struct DeckScreen: View {
         .sensoryFeedback(.success, trigger: generationFinished)
         .task(id: isGeneratingCards) { await watchGeneration() }
         .graspList()
+        // The Add and ⋯ buttons sit in the navigation bar, which gives no
+        // frame; the tutorial points at that corner instead.
+        .tutorialTrailingBarTarget(.addMenu, width: 150)
         .navigationTitle(route.name)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search cards")
+        .searchable(text: $query, prompt: tab == .questions ? "Search questions" : "Search cards")
+        .onChange(of: tab) { _, new in UserDefaults.standard.set(new.rawValue, forKey: "deckContentTab") }
+        // Which screen this is, in plain words, for the feedback sheet.
+        .onAppear { noteFeedbackScreen() }
+        .onDisappear { FeedbackScreen.current = FeedbackScreen.base }
+        .onChange(of: tab) { _, _ in noteFeedbackScreen() }
+        .onChange(of: studying) { _, _ in noteFeedbackScreen() }
+        .onChange(of: learning) { _, _ in noteFeedbackScreen() }
+        .onChange(of: testPhase != nil) { _, _ in noteFeedbackScreen() }
         .task(id: store.revision) { load() }
         .onAppear {
             if let name = DebugLaunch.filter, let match = CardFilter.allCases.first(where: { $0.rawValue.lowercased() == name }) {
@@ -173,6 +227,11 @@ struct DeckScreen: View {
             case "learn": learning = true
             case "test": testPhase = .setup
             case "overview": tab = .overview
+            case "questions": tab = .questions
+            case "writequestion": tab = .questions; writingQuestion = true
+            case "generatequestions": tab = .questions; generatingQuestions = true
+            case "photoimport": tab = .questions; importingPhoto = true
+            case "addmenu": tab = .questions; showingAddItemsPreview = DebugLaunch.showAddMenu
             default: break
             }
         }
@@ -216,13 +275,10 @@ struct DeckScreen: View {
                     .tint(GRASPColor.textPrimary)
                 }
             }
+            if tab == .questions {
+                ToolbarItem(placement: .topBarTrailing) { questionsAddMenu.tint(GRASPColor.textPrimary) }
+            }
             ToolbarItem(placement: .topBarTrailing) { actionsMenu.tint(GRASPColor.textPrimary) }
-        }
-        .sheet(isPresented: $approveFirstNotice) {
-            ResultSheet(
-                icon: "checklist", title: "Approve some cards first",
-                leadText: "A test asks about approved cards, and every card in this deck is still a draft. Approve the ones that look right, then come back."
-            )
         }
         .sheet(isPresented: $confirmingApproveAll) {
             let aiDrafts = cards.filter { $0.status == .draft && $0.origin == .aiGenerated }.count
@@ -237,6 +293,26 @@ struct DeckScreen: View {
                 load()
             }
         }
+        .sheet(isPresented: $confirmingSuspendDeck) {
+            ConfirmationSheet(
+                icon: "pause.circle", title: "Suspend \(route.name)?",
+                message: "\(counts.active) card\(counts.active == 1 ? "" : "s") go back to drafts, so they won't come up in Study, Learn or Tests. Your progress is kept. Approve them again to bring them back.",
+                confirmTitle: "Suspend deck", isDestructive: false, isCompact: true
+            ) {
+                try? store.suspendDeck(inDecks: deckIds)
+                load()
+            }
+        }
+        .sheet(isPresented: $confirmingReactivateDeck) {
+            ConfirmationSheet(
+                icon: "play.circle", title: "Reactivate \(route.name)?",
+                message: "\(counts.drafts + counts.suspended) card\((counts.drafts + counts.suspended) == 1 ? "" : "s") become active again, so they come up in Study, Learn and Tests.",
+                confirmTitle: "Reactivate deck", isDestructive: false, isCompact: true
+            ) {
+                try? store.reactivateDeck(inDecks: deckIds)
+                load()
+            }
+        }
         .sheet(isPresented: Binding(get: { aiMessage != nil }, set: { if !$0 { aiMessage = nil } })) {
             ResultSheet(icon: AIGlyph.symbol, title: "AI", leadText: aiMessage)
         }
@@ -247,9 +323,44 @@ struct DeckScreen: View {
         deckIds.compactMap { (try? store.deck($0)) ?? nil }
     }
 
+    /// Questions tab: write a question now; the other two ways in are coming.
+    private var questionsAddMenu: some View {
+        Menu {
+            questionsAddItems
+        } label: {
+            Label("Add", systemImage: "plus")
+        }
+        .accessibilityLabel("Add a question")
+        #if DEBUG
+        .popover(isPresented: $showingAddItemsPreview) {
+            VStack(alignment: .leading, spacing: 4) { questionsAddItems }
+                .buttonStyle(.plain)
+                .padding(16)
+                .presentationCompactAdaptation(.popover)
+        }
+        #endif
+    }
+
+    /// The three ways to add a question, as the menu lists them.
+    @ViewBuilder
+    private var questionsAddItems: some View {
+        Button { writingQuestion = true } label: { Label("Write a question", systemImage: "square.and.pencil") }
+        Button { generatingQuestions = true } label: { Label("Generate questions with AI", systemImage: AIGlyph.symbol) }
+            .disabled(!store.isGeneratorAvailable || store.aiJob(store.questionDraftJobKey(courseId: courseId)) != nil)
+        Button { importingPhoto = true } label: { Label("From a photo", systemImage: "camera") }
+            .disabled(store.aiJob(store.photoImportJobKey(courseId: courseId)) != nil)
+    }
+
     private var actionsMenu: some View {
         Menu {
             Button { creatingCard = true } label: { Label("New Card", systemImage: "plus") }
+            // Suspend: every approved card goes back to a draft, so the
+            // deck stops coming up in Study, Learn and Tests.
+            if counts.active > 0 {
+                Button { confirmingSuspendDeck = true } label: { Label("Suspend Deck", systemImage: "pause.circle") }
+            } else if counts.drafts + counts.suspended > 0 {
+                Button { confirmingReactivateDeck = true } label: { Label("Reactivate Deck", systemImage: "play.circle") }
+            }
             Section("AI") {
                 Button { refineDeck() } label: { Label("Refine Drafts with AI", systemImage: "checkmark.seal") }
                     .disabled(draftCount == 0)
@@ -305,7 +416,7 @@ struct DeckScreen: View {
             aiMessage = "Every note here already has an overview."
             return
         }
-        let run = AIActivity(headline: "Writing overviews", units: targets.count)
+        let run = AIActivity(headline: "Writing overviews", units: targets.count, unitName: "Note")
         store.runAIJob(store.overviewJobKey(courseId: courseId), activity: run) { [store] run in
             var written = 0
             for (index, target) in targets.enumerated() {
@@ -326,8 +437,13 @@ struct DeckScreen: View {
     }
 
     /// One short line for why Study or Learn is dimmed, when it is.
+    private var testAvailability: Study.TestAvailability {
+        Study.testAvailability(activeCards: counts.active, activeQuestions: activeQuestionCount, draftCards: counts.drafts)
+    }
+
     private var studyUnavailableNote: String? {
         let c = counts
+        if case .unavailable(let why) = testAvailability, hasLoaded, tab != .cards || c.all == 0 { return why }
         if c.all == 0 { return nil }
         if c.active == 0 {
             return c.drafts > 0
@@ -345,19 +461,21 @@ struct DeckScreen: View {
         HStack(spacing: 8) {
             StudyPill(title: "Study", icon: "rectangle.stack.fill", style: .primary,
                       detail: dueCount > 0 ? "\(dueCount)" : nil) { studying = true }
+                .tutorialTarget(.studyButton)
                 .disabled(dueCount == 0)
             StudyPill(title: "Learn", icon: "graduationcap.fill", style: .quiet, detail: nil) { learning = true }
+                .tutorialTarget(.learnButton)
                 .disabled(activeCount == 0)
             StudyPill(title: unfinishedTest == nil ? "Test" : "Continue test", icon: "checklist", style: .quiet,
                       detail: unfinishedTest.map { "\($0.answered)/\($0.total)" }) {
-                if activeCount == 0 {
-                    approveFirstNotice = true
-                } else if let unfinishedTest {
+                if let unfinishedTest {
                     testPhase = TestPhase.resuming(unfinishedTest.attemptId, store: store)
                 } else {
                     testPhase = .setup
                 }
             }
+            .tutorialTarget(.testButton)
+            .disabled(!testAvailability.isAvailable && unfinishedTest == nil)
         }
     }
 
@@ -381,6 +499,29 @@ struct DeckScreen: View {
             .graspSection()
         }
         if !cards.isEmpty {
+            Section {
+                UnderstandingSummary(
+                    cards: understanding, noteTitles: noteTitles, collapsesNotes: true,
+                    onOpenNote: { note in withAnimation(Motion.snappy) { noteFilter = .some(note); filter = .all } },
+                    onPractice: { ids in learnFocus = Set(ids); learning = true }
+                )
+                if let note = noteFilter {
+                    HStack(spacing: 8) {
+                        Text("Cards from \(note.flatMap { noteTitles[$0] } ?? "Other")")
+                            .font(.graspSubheadline)
+                            .foregroundStyle(GRASPColor.textSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Button("Show all") { withAnimation(Motion.snappy) { noteFilter = nil } }
+                            .buttonStyle(.plain)
+                            .font(.graspUI(size: 13, weight: .semibold))
+                            .foregroundStyle(GRASPColor.textPrimary)
+                    }
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             Section {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -446,7 +587,7 @@ struct DeckScreen: View {
         Section("\(shownCards.count) cards") {
             ForEach(shownCards) { card in
                 Button { editing = card } label: {
-                    CardRowView(card: card, mastery: learnLevels[card.id] ?? .new,
+                    CardRowView(card: card, understanding: understandingById[card.id] ?? .of(level: nil),
                                 sourceTitle: card.materialId.flatMap { sourceTitles[$0] },
                                 reviewNote: reviewNotes[card.id])
                 }
@@ -502,8 +643,13 @@ struct DeckScreen: View {
         cards = (try? store.cards(inDecks: ids)) ?? []
         reviewNotes = CardQuality.reviewNotes(for: cards)
         learnLevels = (try? store.learnLevels(forDecks: ids)) ?? [:]
+        understanding = (try? store.understanding(forDecks: ids)) ?? []
+        noteTitles = store.noteTitles(forMaterials: Array(Set(understanding.compactMap(\.materialId))))
+        suspendedStates = store.suspendedUnderstanding(forDecks: ids)
         dueCount = (try? store.dueCards(inDecks: ids).count) ?? 0
         unfinishedTest = store.unfinishedTest(forDecks: ids)
+        activeQuestionCount = store.activeQuestionCount(inDecks: ids)
+        draftQuestionCount = store.questionDraftCount(inDecks: ids)
         hasLoaded = true
         loadSourceTitles()
         if filter == .drafts, !cards.contains(where: { $0.status == .draft }) { filter = .all }
@@ -535,7 +681,7 @@ struct DeckScreen: View {
     #endif
 
     private func loadSourceTitles() {
-        for id in Set(cards.compactMap { $0.origin == .aiGenerated ? $0.materialId : nil }) where sourceTitles[id] == nil {
+        for id in Set(cards.compactMap(\.materialId)) where sourceTitles[id] == nil {
             if let material = (try? store.material(id)) ?? nil { sourceTitles[id] = material.title }
         }
     }
@@ -574,6 +720,7 @@ struct DeckScreen: View {
     // MARK: - Generating and empty states
 
     private var generatingStrip: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
             Image(systemName: AIGlyph.symbol)
                 .font(.graspUI(size: 13, weight: .semibold))
@@ -591,6 +738,13 @@ struct DeckScreen: View {
             if let job = runningJob {
                 Button("Stop") { store.stopAIJob(job.key) }
                     .font(.graspUI(size: 13, weight: .semibold))
+            }
+        }
+            if let note = runningJob?.activity.snapshot.note {
+                Label(note, systemImage: "hourglass")
+                    .graspType(.meta)
+                    .foregroundStyle(GRASPColor.textSecondary)
+                    .lineLimit(3)
             }
         }
     }
@@ -726,32 +880,30 @@ private struct StudyPill: View {
 
 private struct CardRowView: View {
     let card: Card
-    let mastery: LearnEngine.Level
+    let understanding: UnderstandingState
     let sourceTitle: String?
     let reviewNote: String?
 
-    /// Mastery as cream at three strengths; nothing known is the hairline.
+    /// Draft and suspended cards keep the 2 pt rail; it no longer says
+    /// anything about mastery, the pips do.
     private var railTint: Color {
-        switch card.status {
-        case .draft: return GRASPColor.hairlineStrong
-        case .suspended: return GRASPColor.rejected
-        case .active:
-            switch mastery {
-            case .new: return GRASPColor.hairlineStrong
-            case .recognition: return GRASPColor.textPrimary.opacity(0.3)
-            case .recall: return GRASPColor.textPrimary.opacity(0.6)
-            case .familiar: return GRASPColor.textPrimary.opacity(0.8)
-            case .mastered: return GRASPColor.textPrimary
-            }
-        }
+        card.status == .suspended ? GRASPColor.rejected : GRASPColor.hairlineStrong
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1, style: .continuous)
-                .fill(railTint)
-                .frame(width: 2)
-                .frame(maxHeight: .infinity)
+            Group {
+                if card.status == .active || card.status == .suspended {
+                    PipMeter(state: understanding, size: .row, isSuspended: card.status == .suspended)
+                        .padding(.top, 5)
+                } else {
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(railTint)
+                        .frame(width: 2)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 27, alignment: .leading)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if card.origin == .aiGenerated && card.status == .draft {
@@ -764,7 +916,7 @@ private struct CardRowView: View {
                         .foregroundStyle(GRASPColor.textPrimary)
                         .lineLimit(2)
                     Spacer(minLength: 6)
-                    Text(CardRowStatus.text(for: card))
+                    Text(CardRowStatus.text(for: card, hasProgress: card.status == .active && understanding.hasProgress))
                         .font(.graspUI(size: 12))
                         .foregroundStyle(GRASPColor.textTertiary)
                         .lineLimit(1)

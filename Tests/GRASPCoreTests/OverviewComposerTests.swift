@@ -120,14 +120,12 @@ struct OverviewComposerTests {
             )
         }
         let snapshot = progress.snapshot
-        // This stub reports nothing itself: per piece, one lesson step, one
-        // check per section and a figures step; then the repetition check
-        // (the merged lesson has more than two sections; there's no
-        // diagram step to account for any more -- see "Drop concept maps").
+        // This stub reports nothing itself: per piece, one lesson step and
+        // a figures step. A generator that is not the cloud one gets no
+        // section checks and no repetition check (see `reviewsWholeOverview`).
         let pieces = generator.overviewCalls.count
-        #expect(snapshot.completed == pieces * 4 + 1)
+        #expect(snapshot.completed == pieces * 2)
         #expect(snapshot.completed == snapshot.expected)
-        #expect(snapshot.step == "Removing repetition")
         #expect(snapshot.part == nil)
     }
 
@@ -157,11 +155,9 @@ struct OverviewComposerTests {
                 using: ReportingGenerator(), noteTitle: "L", courseName: "Biology", note: note(words: 800)
             )
         }
-        // Plan + 3 sections + a check for each of the 2 sections that came
-        // back + figures. Two sections is too few to repeat, and there's no
-        // diagram step any more.
-        #expect(progress.snapshot.completed == 7)
-        #expect(progress.snapshot.expected == 7)
+        // Plan + 3 sections + figures. No section checks off the cloud.
+        #expect(progress.snapshot.completed == 5)
+        #expect(progress.snapshot.expected == 5)
     }
 
     @Test("a single-chunk note is not told it is part of anything")

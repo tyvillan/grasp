@@ -40,6 +40,8 @@ public enum ProblemBuilder {
             .joined(separator: " ").split(whereSeparator: { !$0.isLetter }).count
         guard words >= 4 else { throw rejected("the problem didn't say what to find") }
         switch draft.kind {
+        case .written, .trueFalse:
+            throw rejected("that kind of question isn't written by the model")
         case .multipleChoice:
             guard draft.choices.count == 4, let correct = draft.correct else { throw rejected("the options weren't four choices with one answer") }
             guard let second = await generator.solveMultipleChoice(prompt: prompt, choices: draft.choices) else {

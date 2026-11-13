@@ -136,4 +136,34 @@ struct CardAITests {
         #expect(groups.first?.suggestedKeepId == studied.id)
         #expect(groups.first?.hasCompetingHistory == false)
     }
+
+    @Test("the off-topic check can be limited to chosen courses, and skips cards it already rewrote")
+    func sweepChosenCourses() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let (chosen, other, vague, rewritten) = try await db.queue.write { conn -> (String, String, String, String) in
+            func course(_ name: String, cards: [(String, String, Bool)]) throws -> (String, [String]) {
+                let c = Course(semesterId: nil, name: name); try c.insert(conn)
+                let m = Material(courseId: c.id, relativePath: "/v/\(name).md", kind: .markdown, contentHash: name, title: name)
+                try m.insert(conn)
+                try NoteText(materialId: m.id, raw: "Chlorophyll absorbs light.", reflowed: "Chlorophyll absorbs light.", wordCount: 3, hasMath: false).insert(conn)
+                var ids: [String] = []
+                for (front, back, done) in cards {
+                    let card = Card(materialId: m.id, front: front, back: back, origin: .parser, status: .active, isContextRefined: done)
+                    try card.insert(conn); ids.append(card.id)
+                }
+                return (c.id, ids)
+            }
+            let a = try course("Biology", cards: [("Chlorophyll", "something vague", false), ("Stroma", "something vague", true)])
+            let b = try course("Chemistry", cards: [("Atom", "something vague", false)])
+            return (a.0, b.0, a.1[0], a.1[1])
+        }
+        let counts = await CardAI.cardCountsByCourse(unchecked: true, database: db)
+        #expect(counts[chosen] == 1 && counts[other] == 1)
+        #expect(await CardAI.cardCountsByCourse(database: db)[chosen] == 2)
+        let summary = await CardAI.sweepCards(inCourses: [chosen], using: ScriptedGenerator(), database: db)
+        #expect(summary.refined.map(\.cardId) == [vague])
+        let untouched = try #require(try await db.queue.read { try Card.fetchOne($0, key: rewritten) })
+        #expect(untouched.back == "something vague")
+        #expect(try await db.queue.read { try Card.filter(Column("isContextRefined") == true).fetchCount($0) } == 2)
+    }
 }

@@ -29,6 +29,16 @@ public enum OverviewWriter {
         case cancelled
     }
 
+    /// The lecture's slide titles, when its deck is saved beside the note.
+    static func slideOutline(forNoteAt path: String) -> String? {
+        #if canImport(PDFKit)
+        let slides = SlideDeck.existingDecks(forNote: path).flatMap { SlideDeck.slides(from: SlideDeck.pages(ofDeckAt: $0)) }
+        return SlideDeck.outline(of: slides)
+        #else
+        return nil
+        #endif
+    }
+
     public static func write(
         materialId: String, force: Bool = false,
         using generator: any CardGenerator, database: GRASPDatabase
@@ -59,7 +69,8 @@ public enum OverviewWriter {
             using: generator,
             noteTitle: context.material.title,
             courseName: context.courseName,
-            note: context.note
+            note: context.note,
+            slideOutline: slideOutline(forNoteAt: context.material.relativePath)
         )
 
         // A stop cancels the requests in flight, so whatever `compose`

@@ -48,6 +48,7 @@ struct CoursesView: View {
             }
         }
         .graspList()
+        .tutorialTrailingBarTarget(.importNotes, width: 44)
         .navigationTitle("Courses")
         .navigationDestination(item: $openedCourse) { CourseView(course: $0) }
         .onAppear {
@@ -194,7 +195,8 @@ struct CourseView: View {
                         DeckScreen(route: DeckRoute(scope: .deck(deck.id), name: deck.name))
                     } label: {
                         DeckRow(name: deck.name, icon: "rectangle.stack", kicker: kickers[deck.id],
-                                counts: store.deckCounts[deck.id].map { ($0.cardCount, $0.dueCount) } ?? (0, 0))
+                                counts: store.deckCounts[deck.id].map { ($0.cardCount, $0.dueCount) } ?? (0, 0),
+                                understanding: store.deckUnderstanding[deck.id])
                     }
                     .swipeActions(edge: .trailing) {
                         Button {
@@ -266,6 +268,7 @@ private struct DeckRow: View {
     let icon: String
     var kicker: String? = nil
     let counts: (cards: Int, due: Int)
+    var understanding: DeckUnderstanding.Distribution? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -276,6 +279,10 @@ private struct DeckRow: View {
                 }
                 Text(name).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
                 Text("\(counts.cards) cards").graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                if let understanding, understanding.total > 0 {
+                    UnderstandingBar(distribution: understanding, height: 4)
+                        .padding(.top, 2)
+                }
             }
             Spacer()
             if counts.due > 0 { DueBadge(count: counts.due) }

@@ -18,6 +18,11 @@ public struct OllamaGenerator: CardGenerator {
     private let model: String
     private let transport: any ChatTransport
     private let wordBudget: Int
+    private let callConcurrency: @Sendable () -> Int
+
+    /// How many independent calls this pipeline may run at once. 1 for a
+    /// local model; a cloud pipeline follows the plan setting.
+    public var maxConcurrentCalls: Int { max(1, callConcurrency()) }
 
     /// Exposed so a stored overview can record which model wrote it.
     public var modelName: String { model }
@@ -40,10 +45,13 @@ public struct OllamaGenerator: CardGenerator {
         self.model = model
         self.transport = OllamaTransport(baseURL: baseURL, model: model)
         self.wordBudget = 1_800
+        self.callConcurrency = { 1 }
     }
 
     /// The prompt pipeline on another backend (see `CloudGenerator`).
-    init(transport: any ChatTransport, model: String, wordBudget: Int) {
+    init(transport: any ChatTransport, model: String, wordBudget: Int,
+         concurrency: @escaping @Sendable () -> Int = { 1 }) {
+        self.callConcurrency = concurrency
         self.baseURL = URL(string: "http://127.0.0.1:11434")!
         self.model = model
         self.transport = transport
@@ -207,9 +215,10 @@ public struct OllamaGenerator: CardGenerator {
         let progress = AIProgress.current
         let assumed = OverviewComposer.assumedSectionsPerPart
 
+        let orientation = OverviewOrientation.isOrientation(noteTitle: noteTitle, noteContext: noteContext)
         let planPrompt = Self.lessonPlanPrompt(
             noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
-            includeFormulas: includeFormulas, partLabel: partLabel
+            includeFormulas: includeFormulas && !orientation, partLabel: partLabel, orientation: orientation
         )
         // One retry before giving up on the plan. The same prompt on the
         // same note parses cleanly most of the time and occasionally
@@ -220,37 +229,64 @@ public struct OllamaGenerator: CardGenerator {
             if Task.isCancelled { return .empty }
             if attempt > 0 { progress?.expect(1) }
             progress?.begin("Planning the lesson")
-            let response = try? await chat(prompt: planPrompt, maxTokens: 900)
+            let response = try? await chat(prompt: planPrompt, maxTokens: 1_300)
             progress?.advance()
             if let response {
                 let parsed = Self.parseLessonPlan(response)
                 if !parsed.sections.isEmpty { plan = parsed }
             }
         }
+        // A plan that leaves out parts of a long note is asked for again,
+        // once, naming what it left out. The second plan is kept only if
+        // it misses less.
+        if let first = plan, !orientation {
+            let headings = OverviewCoverage.noteHeadings(in: noteContext)
+            let left = OverviewCoverage.missing(headings: headings, plannedText: first.sections.map { $0.heading + " " + $0.covers })
+            if headings.count >= 6, left.count >= 3, !Task.isCancelled {
+                progress?.expect(1)
+                progress?.begin("Planning the parts the first plan missed")
+                let again = Self.lessonPlanPrompt(
+                    noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
+                    includeFormulas: includeFormulas, partLabel: partLabel, orientation: false, alsoCover: left)
+                if let response = try? await chat(prompt: again, maxTokens: 1_300) {
+                    let parsed = Self.parseLessonPlan(response)
+                    let remaining = OverviewCoverage.missing(headings: headings, plannedText: parsed.sections.map { $0.heading + " " + $0.covers })
+                    if !parsed.sections.isEmpty, remaining.count < left.count { plan = parsed }
+                }
+                progress?.advance()
+            }
+        }
         if let plan {
             progress?.expect(plan.sections.count - assumed)
-            var sections: [OverviewSection] = []
-            for (index, planned) in plan.sections.enumerated() {
-                // Cancellation throws out of the request in flight, but
-                // `try?` below would then just move on to the next
-                // section -- so the loop checks for itself.
-                if Task.isCancelled { return .empty }
+            // Sections are independent once the plan exists, so a cloud
+            // plan that allows it writes several at once. Results are kept
+            // in the plan's order, whichever finishes first.
+            let headings = plan.sections.map(\.heading)
+            let total = plan.sections.count
+            let width = maxConcurrentCalls
+            if Task.isCancelled { return .empty }
+            progress?.begin(width > 1 ? "Writing \(total) sections" : "Writing section 1 of \(total)")
+            let written = await AIConcurrency.map(Array(plan.sections.enumerated()), limit: width) { item -> OverviewSection? in
+                let (index, planned) = item
+                if Task.isCancelled { return nil }
                 let prompt = Self.sectionPrompt(
                     courseName: courseName, noteContext: noteContext,
                     heading: planned.heading, covers: planned.covers,
-                    lessonHeadings: plan.sections.map(\.heading)
+                    lessonHeadings: headings, orientation: orientation
                 )
-                progress?.begin("Writing section \(index + 1) of \(plan.sections.count)")
+                if width == 1 { progress?.begin("Writing section \(index + 1) of \(total)") }
                 // Room for a worked example, its pictures and is/isn't pairs
                 // on top of the paragraphs -- 1,000 cut the example off
                 // mid-JSON.
-                let response = try? await chat(prompt: prompt, maxTokens: 1_800)
+                let response = try? await self.chat(prompt: prompt, maxTokens: 1_800)
                 progress?.advance()
                 guard let response,
-                      let section = Self.parseSectionResponse(response, heading: planned.heading)
-                else { continue }
-                sections.append(section)
+                      let section = Self.parseSectionResponse(response, heading: planned.heading) else { return nil }
+                progress?.addFinished(section.heading)
+                return section
             }
+            if Task.isCancelled { return .empty }
+            let sections = written.compactMap { $0 ?? nil }
             if !sections.isEmpty {
                 var document = plan.document
                 document.sections = sections
@@ -269,7 +305,7 @@ public struct OllamaGenerator: CardGenerator {
         // over 3,000 tokens and ran into the five-minute timeout.
         let prompt = Self.overviewPrompt(
             noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
-            includeFormulas: includeFormulas, partLabel: partLabel
+            includeFormulas: includeFormulas && !orientation, partLabel: partLabel, orientation: orientation
         )
         guard let content = try? await chat(prompt: prompt, maxTokens: 2_000) else { return .empty }
         return GeneratedOverview(document: Self.parseOverviewResponse(content))
@@ -617,7 +653,7 @@ public struct OllamaGenerator: CardGenerator {
         let check: OverviewDTO.CheckDTO?
     }
 
-    private static func clean(_ text: String?) -> String? {
+    static func clean(_ text: String?) -> String? {
         guard let text else { return nil }
         let collapsed = text
             .replacingOccurrences(of: "\n", with: " ")
@@ -1096,8 +1132,9 @@ public struct OllamaGenerator: CardGenerator {
     /// it doesn't raise.
     static func overviewPrompt(
         noteTitle: String, courseName: String, noteContext: String,
-        includeFormulas: Bool, partLabel: String? = nil
+        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false
     ) -> String {
+        let orientationLine = orientation ? orientationRules + "\n" : ""
         let partLine = partLabel.map { label in
             """
             This note is long, so you are being shown one piece of it: \(label). Cover only what \
@@ -1124,8 +1161,9 @@ public struct OllamaGenerator: CardGenerator {
         a summary, and not their notes handed back in different words.
 
         How to write it:
-        - Start from a concrete question or puzzle the lecture answers, something that makes the \
-        reader want to know.
+        \(orientationLine)- Start from a concrete question the lecture answers, in everyday words a beginner \
+        understands, something that makes the reader want to know.
+        \(beginnerRules)
         - Show a concrete case with real numbers before the general rule. Let the reader see the \
         pattern, then give it its name.
         - Explain why each idea has to be true, not just that it is. Say what someone would \
@@ -1133,7 +1171,8 @@ public struct OllamaGenerator: CardGenerator {
         - Talk to the reader: use you and we, and phrases like notice that, or what if.
         - Every section heading is a full claim that states the insight, like Swapping two \
         equations cannot change the answer -- never a bare topic like Interchange.
-        - Keep paragraphs to two to four sentences, two or three paragraphs per section.
+        - Keep paragraphs to one or two short sentences, one or two paragraphs per section. The \
+        reader skims; never explain how code works in prose.
         - Write math in plain text, like x + 5y = 7 or R2 -> R2 - 2R1.
         - Use the note's own examples as the concrete case. Never invent a story, character or \
         metaphor -- no treasure, maps, detectives, recipes or games.
@@ -1155,7 +1194,8 @@ public struct OllamaGenerator: CardGenerator {
 
         \(partLine)Produce:
         - title: the lesson's title, a short claim that captures the lecture's central insight.
-        - hook: two or three sentences opening with the question or puzzle this lecture answers.
+        - hook: two or three plain sentences opening with the question this lecture answers, in \
+        everyday words with no technical term the notes have not explained yet.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with \
         a verb.
         - sections: 3 to 5 sections in the order a learner should meet them. Each has a claim \
@@ -1197,6 +1237,55 @@ public struct OllamaGenerator: CardGenerator {
     /// own instructions no two prompts shared more than their first few
     /// tokens -- so every call re-read the whole note. Measured on a real
     /// 950-word lecture: 7.8s to read it cold, 3.0s once the opening matched.
+    /// How a lesson starts for someone new to the subject. Shared by the
+    /// plan, the section and the single-shot prompts so they can't drift.
+    /// An overview of an early note read as being thrown in: jargon in the
+    /// first line, terms used a paragraph before they were explained, and
+    /// course admin (a lab's weight, the software used) written up as if it
+    /// were the subject.
+    static let beginnerRules = """
+        - Write for someone meeting this subject for the first time. Before you use any technical \
+        term, say what it means in everyday words, in the same sentence or the one before. Never \
+        use a term in a section before the section that introduces it.
+        - If the notes give nothing concrete for an idea, explain it in everyday words and say \
+        less. Never fill the gap with course logistics (grades, lab weights, platforms, software \
+        versions) or with a scene you made up, like a student who writes some code.
+        - If you are not sure a statement is true, leave it out. A short correct paragraph beats a \
+        longer one with a doubtful claim.
+        """
+
+    /// A lesson is skimmed, so pictures and steps carry it and prose stays
+    /// short. The first lessons read as paragraphs explaining how code
+    /// works, which is the reverse of what helps: a process is drawn, a
+    /// listing is walked through line by line in the example's steps.
+    static let showRules = """
+        - Show, don't explain. The reader skims, so a picture or a short list of steps beats a \
+        paragraph. Write one or two short paragraphs of at most two sentences each, and cut any \
+        sentence that only repeats what the steps show.
+        - When the notes describe a process, a pipeline or an order of stages (compile, link, run), \
+        give it as the example below: one step per stage, each with a flow visual, not as prose.
+        - When the notes show a code listing, never explain it in paragraphs. Give its important \
+        lines, up to six, as the example's steps: the action is the line exactly as the notes write \
+        it, the result is what it does in a few plain words.
+        """
+
+    /// What an orientation says, for a syllabus or first-day note (see
+    /// `OverviewOrientation`). The note teaches no concepts yet, so the
+    /// lesson is the course itself in plain words, and its facts are the
+    /// content: quoted as the note gives them, never interpreted.
+    static let orientationRules = """
+        - This note is a syllabus or first-day overview. It does not teach the subject yet, so \
+        this is an orientation to the course, not a lesson on the subject.
+        - Say what the notes say about the course, in everyday words, and never work out, soften \
+        or add a rule. Leave out grading, weights, deadlines, late work and exam dates: an \
+        orientation is for seeing what the course is, not for being quizzed on how it runs.
+        - Name each subject the course covers in one plain sentence saying what it is, and say \
+        later lectures teach it. Do not explain how it works, and do not argue why it matters \
+        beyond what the notes say.
+        - Never make up a scene, a student, a program or an example. If the notes give no example, \
+        give none.
+        """
+
     static func noteOpening(courseName: String, noteContext: String) -> String {
         """
         These are a student's lecture notes from the course "\(courseName)".
@@ -1215,14 +1304,23 @@ public struct OllamaGenerator: CardGenerator {
     /// random -- and told plainly that finding nothing is the usual result,
     /// or it will invent problems to report.
     static func reviewPrompt(noteContext: String, section: OverviewSection) -> String {
+        // An orientation's course facts are its content, so the rule that
+        // calls a course fact in a term's example an error does not apply.
+        let courseFactsAreContent = OverviewOrientation.isOrientation(noteContext: noteContext)
         var lines = ["Heading: \(section.heading)"]
         lines += section.paragraphs.map { "Paragraph: \($0)" }
-        lines += section.terms.map { "Term: \($0.term) -- \($0.text)" }
+        for term in section.terms {
+            lines.append("Term: \(term.term) -- \(term.text)")
+            if let example = term.example { lines.append("Term example: \(example)") }
+            if let nonExample = term.nonExample { lines.append("Term near miss: \(nonExample)") }
+        }
         if let check = section.check {
             lines.append("Question: \(check.question)")
             lines.append("Answer: \(check.answer)")
         }
         if let example = section.example {
+            if let title = example.title { lines.append("Example title: \(title)") }
+            if let setup = example.setup { lines.append("Example setup: \(setup)") }
             for step in example.steps {
                 lines.append("Example step: \(step.action)" + (step.result.map { " -> \($0)" } ?? ""))
             }
@@ -1231,9 +1329,11 @@ public struct OllamaGenerator: CardGenerator {
         return noteOpening(courseName: "this course", noteContext: noteContext) + """
         You are checking a lesson section a student will study from, written about the notes \
         above. Find only statements that are false: they contradict the notes, get the subject's \
-        facts or math wrong, or give a wrong answer to the question. A true statement the notes \
-        don't happen to mention is NOT an error -- leave it alone. Style, wording and missing \
-        detail are not errors either. Most sections have no errors, and at most one or two \
+        facts or math wrong, reverse what the subject says (claiming a thing prevents what it \
+        causes, say), or give a wrong answer to the question. Also find any made-up scene: a \
+        student, program or situation the notes never describe, used as an example or setup. \
+        Remove it, or rewrite it as a plain statement the notes support. \(courseFactsAreContent ? "A number, date or rule that differs from the notes is an error: correct it to what the notes say." : "A term's example that is really a fact about the course (a lab's weight, the software used) rather than the term in use is an error too.") A true statement the notes don't happen to mention is NOT an \
+        error -- leave it alone. A file name, line of code or quoted text that differs from how the notes write it (a different name, capital or spelling) is an error: correct it to the notes. Style, wording and missing detail are not errors either. Most sections have no errors, and at most one or two \
         sentences in a section are ever wrong -- an empty list is the normal result.
 
         The section:
@@ -1270,18 +1370,38 @@ public struct OllamaGenerator: CardGenerator {
 
     static func lessonPlanPrompt(
         noteTitle: String, courseName: String, noteContext: String,
-        includeFormulas: Bool, partLabel: String? = nil
+        includeFormulas: Bool, partLabel: String? = nil, orientation: Bool = false,
+        alsoCover: [String] = []
     ) -> String {
+        if orientation {
+            return orientationPlanPrompt(noteTitle: noteTitle, courseName: courseName, noteContext: noteContext,
+                                         partLabel: partLabel)
+        }
         let isMath = NoteMath.isMathematical(noteContext)
         let partLine = partLabel.map {
             "You are being shown one piece of a longer note: \($0). Plan only what this piece teaches.\n\n"
         } ?? ""
+        // The slide titles are the instructor's order and words, not more
+        // content: they shape the plan and add nothing to teach.
+        let outlineLine = noteContext.contains(SlideDeck.outlineMarker)
+            ? "The notes end with the lecture's slide titles. Use them for the order of the sections and the words the lesson uses, but teach only what the notes above them cover.\n\n"
+            : ""
+        // A long note names its own parts. Listing them makes leaving the
+        // second half out a visible omission instead of a quiet one.
+        let noteHeadings = OverviewCoverage.noteHeadings(in: noteContext)
+        let headingsLine = noteHeadings.count >= 6
+            ? "The notes are organised under these headings, in order: \(noteHeadings.joined(separator: "; ")). Every one of them must be taught by some section, and a section's covers field names the headings it takes in. Do not stop partway through the list.\(OverviewCoverage.groupingAdvice(headingCount: noteHeadings.count))\n\n"
+            : ""
+        let missedLine = alsoCover.isEmpty
+            ? ""
+            : "A first plan left these parts of the notes out: \(alsoCover.joined(separator: "; ")). Plan again so that sections cover them as well.\n\n"
+        let sectionCount = OverviewCoverage.sectionRange(headingCount: noteHeadings.count)
         let formulaShape = includeFormulas
             ? ", \"formulas\": [{\"name\": \"...\", \"latex\": \"...\", \"plain\": \"...\", \"meaning\": \"...\"}]"
             : ""
         let hookRule = isMath
-            ? "posed through the math itself"
-            : "posed through the notes' own examples"
+            ? "posed through the math itself, in words a beginner understands"
+            : "posed in everyday words a beginner understands, with no technical term the notes have not explained yet"
         return noteOpening(courseName: courseName, noteContext: noteContext) + """
         You are planning a short lesson on the notes above, taught in the style of 3Blue1Brown. \
         List the ideas they teach, in the order a learner should meet them.
@@ -1300,16 +1420,22 @@ public struct OllamaGenerator: CardGenerator {
         The title follows the same rule: a claim, never a phrase like Understanding X or \
         Introduction to Y.
 
-        \(partLine)Produce:
+        \(outlineLine)\(headingsLine)\(missedLine)\(partLine)Produce:
         - title: a short claim capturing the lecture's central insight.
-        - hook: one real question this lecture answers, \(hookRule), then a sentence on why it \
-        matters. A single question, not a list of them. No stories, characters or metaphors.
+        - hook: the start of the lesson, two plain sentences. First one real question this lecture \
+        answers, \(hookRule). Then a sentence on why it matters to the reader. A single question, \
+        not a list of them, and a complete grammatical sentence. No stories, characters or \
+        metaphors.
         - objectives: 2 to 4 things the reader will be able to do afterwards, each starting with a \
         verb.
-        - sections: 4 or 5, each with a claim heading of at most twelve words and a covers field \
+        - sections: \(sectionCount), each with a claim heading of at most twelve words and a covers field \
         naming exactly which part of the notes it teaches, including any example equations or \
-        numbers it should use. Combine closely related parts rather than giving each its own; no \
-        two sections may teach the same idea.
+        numbers it should use, which technical terms it introduces, and whether it is a process \
+        to draw, a code listing to walk through line by line, or an idea to say in a sentence. \
+        Order the sections from \
+        the most familiar idea to the least: a section may only rely on terms an earlier section \
+        introduced. Combine closely related parts rather than giving each its own; no two \
+        sections may teach the same idea.
         - takeaways: 3 to 5 sentences, each one idea worth remembering.
 
         Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
@@ -1323,6 +1449,96 @@ public struct OllamaGenerator: CardGenerator {
         """
     }
 
+    /// Stage one for a syllabus or first-day note: what the course is, what
+    /// the student will be able to do, the tools and how the work runs.
+    /// Only what the notes give; a part with nothing is left out.
+    static func orientationPlanPrompt(noteTitle: String, courseName: String, noteContext: String,
+                                      partLabel: String? = nil) -> String {
+        let partLine = partLabel.map {
+            "You are being shown one piece of a longer note: \($0). Plan only what this piece says.\n\n"
+        } ?? ""
+        return noteOpening(courseName: courseName, noteContext: noteContext) + """
+        You are planning a short orientation for a student's first look at this course, from the \
+        notes above. Write for someone who has not started: plain, calm and welcoming, with no \
+        jargon they have not been given.
+
+        \(orientationRules)
+
+        Cover only what the notes give, in this order, leaving out whatever they do not cover:
+        - what the course is about and what the student will be able to do by the end
+        - the tools and how the work is done week to week
+
+        Each section heading is a full claim that states the point, never a bare topic. Examples \
+        from other courses, to show the pattern -- write your own for these notes:
+        - Bad: Tools. Good: Everything you write runs on the same free tools from week one.
+        - Bad: Overview. Good: The course starts with how a program is built, then how it holds data.
+        The title follows the same rule: a claim, never a phrase like Understanding X or \
+        Introduction to Y.
+
+        \(partLine)Produce:
+        - title: a short claim saying what this course will give the student.
+        - hook: the start, two plain sentences. First what this course is, in everyday words. Then \
+        what the student will be able to do by the end. A complete grammatical sentence each, no \
+        technical term, no question needed.
+        - objectives: 2 to 4 things the reader will know or be able to do after reading this, each \
+        starting with a verb, such as say what the course covers or name the tools it uses. \
+        Never an objective that needs lessons the note does not give, such as writing code.
+        - sections: 2 or 3, each with a claim heading of at most twelve words and a covers field \
+        naming exactly which part of the notes it uses. Combine closely related parts; no two \
+        sections may say the same thing.
+        - takeaways: 2 to 4 short sentences, each one fact worth remembering.
+
+        Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
+        no quotation marks inside the text.
+
+        Note title: \(noteTitle)
+
+        Respond with ONLY one JSON object shaped {"title": "...", "hook": "...", "objectives": \
+        ["..."], "sections": [{"heading": "...", "covers": "..."}], "takeaways": ["..."]}. \
+        No other text.
+        """
+    }
+
+    /// Stage two for an orientation: one section, said plainly. No worked
+    /// example and no picture -- there is nothing to work through yet.
+    static func orientationSectionPrompt(courseName: String, noteContext: String, heading: String,
+                                         covers: String, lessonHeadings: [String]) -> String {
+        let outline = lessonHeadings.map { "- \($0)" }.joined(separator: "\n")
+        return noteOpening(courseName: courseName, noteContext: noteContext) + """
+        You are writing one section of a short orientation to this course, from the notes above.
+
+        The whole orientation, for context:
+        \(outline)
+
+        Write only this section:
+        Claim: \(heading)
+        It uses: \(covers)
+
+        How to write it:
+        - One or two short paragraphs, each at most two sentences, calm and plain. The reader \
+        skims; cut anything that is not the point.
+        - Say the point in everyday words first. Before you use any technical term, say what it \
+        means in the same sentence or the one before.
+        \(orientationRules)
+        - Say what this section adds -- the other sections cover their own claims, so don't \
+        repeat them.
+        - Talk to the reader as you.
+        - terms: at most two terms the reader needs, each defined in one sentence and worded the \
+        way the notes word it. Leave example and nonExample empty unless the notes give one.
+        - example: null. There is nothing to work through yet.
+        - check: null. An orientation asks no questions.
+        - claim: last of all, one sentence of at most twelve words stating the point of what you \
+        just wrote. A full sentence, never a topic name.
+
+        Every string is a single line of plain text: no line breaks, no markdown, no backslashes, \
+        no quotation marks inside the text.
+
+        Respond with ONLY one JSON object shaped {"paragraphs": ["..."], "terms": [{"term": \
+        "...", "definition": "...", "example": "", "nonExample": ""}], "example": null, "check": \
+        null, "claim": "..."}. No other text.
+        """
+    }
+
     /// Stage two: teach one claim well.
     ///
     /// The concrete case is pinned to the note's own examples, and invented
@@ -1333,8 +1549,12 @@ public struct OllamaGenerator: CardGenerator {
     /// around them.
     static func sectionPrompt(
         courseName: String, noteContext: String, heading: String, covers: String,
-        lessonHeadings: [String]
+        lessonHeadings: [String], orientation: Bool = false
     ) -> String {
+        if orientation {
+            return orientationSectionPrompt(courseName: courseName, noteContext: noteContext, heading: heading,
+                                            covers: covers, lessonHeadings: lessonHeadings)
+        }
         let outline = lessonHeadings.map { "- \($0)" }.joined(separator: "\n")
         // Rules about equations and row operations only make sense for a
         // math note. Given to a lecture on AI agents they read as an
@@ -1388,33 +1608,45 @@ public struct OllamaGenerator: CardGenerator {
         It teaches: \(covers)
 
         How to write it:
-        - Two or three paragraphs, each two to four sentences.
-        - Open with a specific example from the notes. Show what happens to it, then name the \
-        general idea. Say what this section adds -- the lesson's other sections cover their own \
-        claims, so don't repeat them.
+        \(showRules)
+        - Open with the idea in everyday words, then a specific example from the notes if they \
+        have one. Show what happens to it, then name the general idea. Say what this section \
+        adds -- the lesson's other sections cover their own claims, so don't repeat them.
+        \(beginnerRules)
         \(concreteRules)
-        - Explain why the claim has to be true, and point at what the reader should see.
+        - Say why the claim is true in one sentence, and point at what the reader should see.
         - Vary how paragraphs begin. Never open two paragraphs the same way, and don't lean on \
         stock openers like Notice that, Look at, Consider, Imagine or What if.
         - Talk to the reader as you and we.
+        - Never write a sentence that announces the section, like This section explains or Here we \
+        look at. Start with the idea itself.
+        - Copy code, file names and quoted text exactly as the notes write them: same capitals, same \
+        quotation marks, same spelling. Inside a JSON string write a quotation mark in code as a \
+        single quote, and it will be restored.
         - You may use what you know about the subject to explain this claim, but stay on it.
         - Never copy the notes' sentences. If a line could be pasted into the notes without \
         anyone noticing, rewrite it.
-        - terms: at most three key terms this section introduces, each defined in one sentence \
+        - terms: at most two key terms this section introduces, each defined in one sentence \
         and worded the way the notes word it. For each, also give example: one concrete case from \
-        the notes that is this, and nonExample: a near miss that is not this, and exactly what \
-        disqualifies it -- the boundary is how a definition is learned. Leave either empty if the \
-        notes give nothing to base it on. An empty list is fine.
+        the notes that is this -- the term itself in use, never a fact about the course -- and \
+        nonExample: a near miss that is not this, and exactly what \
+        disqualifies it -- the boundary is how a definition is learned. The near miss is the \
+        tempting wrong answer a beginner would plausibly give, never a different thing of the \
+        same kind and never a plain restatement. Give both for every term. If you cannot give \
+        both from the notes, leave that term out: a term with only a definition is not worth a \
+        place. An empty list is fine.
         - example: if this part of the notes works through something step by step -- a \
-        calculation, a derivation, an algorithm, a procedure, a process -- give those steps here \
-        instead of narrating them in a paragraph. When this section's terms are themselves \
+        calculation, a derivation, an algorithm, a procedure, a process, a pipeline or a code \
+        listing -- give those steps here instead of narrating them in a paragraph. When this section's terms are themselves \
         several distinct operations or stages -- three kinds of row operation, three phases of a \
         process -- the example is what makes each one concrete: give every one of them its own \
         step with real numbers, not just the first, leaving the rest as a one-line mention under \
         terms. A title naming what is worked, a setup stating the starting point, two to six \
         steps each with a label of two to four words, the action taken, the result it produced \
         copied from the notes, and why that step, then the outcome. Use only steps and values the \
-        notes actually show. Use null if the notes don't work one through here.
+        notes actually show. Never make up a student, program or situation to carry the steps. \
+        If the notes give code, a calculation or a process for this claim, the example is \
+        required, not optional. Use null only if the notes give nothing to step through here.
         - visual: for any step where a picture would make it clearer to someone new to the \
         subject, add one. \(visualShapes) Use null for a step a picture wouldn't help.
         - check: one question that makes the reader think, of whichever kind fits this section \

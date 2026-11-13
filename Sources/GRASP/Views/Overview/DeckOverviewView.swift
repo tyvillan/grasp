@@ -251,7 +251,6 @@ struct DeckOverviewView: View {
             : parts.joined(separator: ", and ") + "."
     }
 
-    @ViewBuilder
     /// What a downloaded overview is called: the deck, the course, or the
     /// exam it was opened from.
     private var scopeTitle: String {
@@ -402,7 +401,7 @@ struct DeckOverviewView: View {
         guard !materialIds.isEmpty else { return }
         failure = nil
         let generation = scopeGeneration
-        let run = AIActivity(headline: "Writing overviews", units: materialIds.count)
+        let run = AIActivity(headline: "Writing overviews", units: materialIds.count, unitName: "Note")
         let titles = Dictionary(uniqueKeysWithValues: materialIds.map { ($0, title(of: $0)) })
 
         store.runAIJob(jobKey, activity: run) { [store] run in

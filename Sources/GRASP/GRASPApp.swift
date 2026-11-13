@@ -18,6 +18,7 @@ struct GRASPApp: App {
 
     init() {
         _ = GRASPFonts.available
+        StubHooks.installCloudStub()
     }
 
     var body: some Scene {
@@ -57,6 +58,18 @@ struct GRASPApp: App {
         // wordmark, the acronym, the global actions) across the window.
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 820)
+
+        .commands {
+            // Help > GRASP tutorial replaces the empty system Help item.
+            CommandGroup(replacing: .help) {
+                Button("GRASP tutorial") {
+                    if let store { TutorialLauncher.replay(store.tutorial) }
+                }
+                .disabled(store == nil)
+                Button("Send feedback") { FeedbackLauncher.open() }
+                    .disabled(store == nil)
+            }
+        }
 
         Settings {
             if let store {

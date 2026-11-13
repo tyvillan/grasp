@@ -221,6 +221,14 @@ extension AppStore {
         }
     }
 
+    /// Saves each worked example in a guide as a question (see `GuideQuestions`).
+    @discardableResult
+    func addGuideQuestions(guideId: String) -> GuideQuestions.Result? {
+        let result = try? database.queue.write { db in try GuideQuestions.addQuestions(guideId: guideId, db: db) }
+        reload()
+        return result
+    }
+
     func setGuideExam(guideId: String, examEventId: String?) {
         try? database.queue.write { db in
             try StudyGuideActions.setExam(guideId: guideId, examEventId: examEventId, db: db)
