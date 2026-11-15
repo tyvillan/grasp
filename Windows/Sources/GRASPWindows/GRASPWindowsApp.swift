@@ -580,8 +580,7 @@ struct DeckColumnRow: View {
                     .foregroundColor(GRASPColor.textPrimary)
                     .lineLimit(1)
                 if let understanding {
-                    UnderstandingBar(distribution: understanding, height: 4.0)
-                        .frame(width: 150.0)
+                    UnderstandingBar(distribution: understanding, width: 150.0, height: 4.0)
                         .padding(.top, 4)
                 }
             }

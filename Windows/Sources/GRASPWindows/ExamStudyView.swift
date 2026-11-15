@@ -644,10 +644,21 @@ struct ExamColumnRow: View {
     let isSelected: Bool
     let action: () -> Void
 
+    // The Mac's exam row: a muted mark, the exam's name in the row's
+    // weight, and when. Selection is the raised surface and yellow bar.
+    // The bar is always there and only changes colour: an if/else over the
+    // two versions crashed the Swift 6.4 release compiler (debug-info
+    // mangling of the EitherView type).
     var body: some View {
-        // The Mac's exam row: a muted mark, the exam's name in the row's
-        // weight, and when. Selection is the raised surface and yellow bar.
-        let row = HStack(spacing: 10) {
+        row.overlay(alignment: .leading) {
+            Rectangle().fill(isSelected ? GRASPColor.brand : Color.clear)
+                .frame(width: 3.0, height: 18.0).cornerRadius(1)
+        }
+        .onTapGesture(perform: action)
+    }
+
+    private var row: some View {
+        HStack(spacing: 10) {
             Text("EXAM").font(GRASPFont.badge).foregroundColor(GRASPColor.textTertiary).fixedSize()
             VStack(alignment: .leading, spacing: 1) {
                 Text(exam.title)
@@ -665,14 +676,6 @@ struct ExamColumnRow: View {
         .padding(.vertical, 7)
         .background(isSelected ? GRASPColor.surfaceRaised : Color.clear)
         .cornerRadius(GRASPRadius.inner)
-        if isSelected {
-            row.overlay(alignment: .leading) {
-                Rectangle().fill(GRASPColor.brand).frame(width: 3.0, height: 18.0).cornerRadius(1)
-            }
-            .onTapGesture(perform: action)
-        } else {
-            row.onTapGesture(perform: action)
-        }
     }
 
     static func date(_ date: Date) -> String {

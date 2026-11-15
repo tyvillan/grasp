@@ -27,7 +27,9 @@ struct CardList: View {
     @State var selection: Set<String>?
     @State var confirmingBulkDelete = false
 
-    static let pageSize = 25
+    /// Fifteen a page: about two screens, and each row costs a few views
+    /// on every redraw of the page (the Mac shows about eight at once).
+    static let pageSize = 15
 
     var body: some View {
         let cards = library.cards(inDecks: scope.deckIds)
@@ -353,10 +355,15 @@ private struct CardRowView: View {
                 }
                 leading.frame(width: 40.0, alignment: .leading).padding(.top, 4)
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        if card.origin == .aiGenerated && card.status == .draft { AIGlyph(size: 12) }
-                        Text(card.front).font(Font.system(size: 14.5, weight: .medium))
-                            .foregroundColor(GRASPColor.textPrimary)
+                    // The sparkle's row only for AI drafts: a container per row
+                    // costs on every redraw.
+                    if card.origin == .aiGenerated && card.status == .draft {
+                        HStack(spacing: 6) {
+                            AIGlyph(size: 12)
+                            front
+                        }
+                    } else {
+                        front
                     }
                     Text(card.back).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary).lineLimit(2)
                     if let reviewNote {
@@ -373,6 +380,10 @@ private struct CardRowView: View {
             HairlineRule()
         }
         .onTapGesture(perform: open)
+    }
+
+    private var front: some View {
+        Text(card.front).font(Font.system(size: 14.5, weight: .medium)).foregroundColor(GRASPColor.textPrimary)
     }
 
     @ViewBuilder
@@ -421,13 +432,43 @@ struct UnderstandingPanel: View {
     let openNote: (String?) -> Void
     let practice: ([String]) -> Void
 
+    /// The last real width the reader saw. SwiftCrossUI also runs a reader
+    /// at width 0 and infinity; those passes reuse it (see CalendarScreen).
+    private static var lastWidth = 900.0
+
     var body: some View {
         let distribution = DeckUnderstanding.distribution(of: cards)
         if distribution.total > 0 {
             let weakest = DeckUnderstanding.weakestNotes(of: cards)
             let practiceIds = DeckUnderstanding.practiceCards(of: cards)
+            // One reader for the whole panel, so every bar spans it: a reader
+            // per bar laid each out three times, and a width taken from the
+            // window fed back into the window's size and grew it. A reader
+            // inside a ScrollView needs a height, so it's worked out from the
+            // rows (bar, count line, the notes heading, 40 pt a note, the
+            // button).
+            let notesHeight: Double = weakest.isEmpty ? 0 : 20 + 50 * Double(weakest.count)
+            let buttonHeight: Double = practiceIds.isEmpty ? 0 : 46
+            let height: Double = 37 + notesHeight + buttonHeight
+            GeometryReader { proxy in
+                let barWidth = Self.width(proxy.size.width)
+                content(distribution: distribution, weakest: weakest, practiceIds: practiceIds, barWidth: barWidth)
+            }
+            .frame(height: height)
+            .padding(16)
+            .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.card)
+        }
+    }
+
+    private static func width(_ proposed: Double) -> Double {
+        if proposed.isFinite && proposed > 0 { lastWidth = Double(proposed) }
+        return lastWidth
+    }
+
+    private func content(distribution: DeckUnderstanding.Distribution, weakest: [DeckUnderstanding.NoteGroup],
+                         practiceIds: [String], barWidth: Double) -> some View {
             VStack(alignment: .leading, spacing: 10) {
-                UnderstandingBar(distribution: distribution, height: 10.0)
+                UnderstandingBar(distribution: distribution, width: barWidth, height: 10.0)
                 Text(distribution.line)
                     .font(Font.system(size: 12.5))
                     .foregroundColor(GRASPColor.textSecondary)
@@ -449,7 +490,7 @@ struct UnderstandingPanel: View {
                                     .foregroundColor(GRASPColor.textTertiary)
                                     .fixedSize()
                             }
-                            UnderstandingBar(distribution: group.distribution, height: 6.0)
+                            UnderstandingBar(distribution: group.distribution, width: barWidth, height: 6.0)
                         }
                         .padding(.vertical, 5)
                         .onTapGesture { openNote(group.materialId) }
@@ -460,25 +501,23 @@ struct UnderstandingPanel: View {
                         .padding(.top, 4)
                 }
             }
-            .padding(16)
-            .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.card)
-        }
     }
 }
 
 /// The deck's cards as one bar, left to right: understood (green), recall
 /// (yellow), recognition (light), self-rated (dim), and the not-asked rest
-/// as the track. One GeometryReader and at most five rectangles.
+/// as the track. Drawn at a given width rather than in a GeometryReader:
+/// a reader lays its content out three times, and the deck page shows a
+/// bar per deck and per weak note.
 struct UnderstandingBar: View {
     let distribution: DeckUnderstanding.Distribution
+    let width: Double
     var height = 10.0
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width.isFinite ? Double(proxy.size.width) : 0
-            let total = Double(max(distribution.total, 1))
-            let part = { (count: Int) -> Double in (width * Double(count) / total).rounded() }
-            HStack(spacing: 0) {
+        let total = Double(max(distribution.total, 1))
+        let part = { (count: Int) -> Double in (width * Double(count) / total).rounded() }
+        HStack(spacing: 0) {
                 if distribution.solid > 0 { Rectangle().fill(GRASPColor.success).frame(width: part(distribution.solid), height: height) }
                 if distribution.recall > 0 { Rectangle().fill(GRASPColor.accent).frame(width: part(distribution.recall), height: height) }
                 if distribution.recognition > 0 {
@@ -488,12 +527,10 @@ struct UnderstandingBar: View {
                     Rectangle().fill(GRASPColor.textTertiary).frame(width: part(distribution.selfRated), height: height)
                 }
                 Spacer()
-            }
-            .frame(width: width, height: height)
-            .background(GRASPColor.inset)
-            .cornerRadius(Int(height / 2))
         }
-        .frame(height: height)
+        .frame(width: width, height: height)
+        .background(GRASPColor.inset)
+        .cornerRadius(Int(height / 2))
     }
 }
 
