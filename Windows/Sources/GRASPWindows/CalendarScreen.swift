@@ -27,12 +27,39 @@ extension CalendarEventKind {
 extension CalendarEvent {
     var displayTitle: String { title.isEmpty ? kind.label : title }
 
+    /// The Mac's event colour: the course's own, so a quiz isn't a yellow
+    /// chip (yellow belongs to the page's one primary button). An event
+    /// with no course keeps its kind's colour.
+    @MainActor var chipColor: Color {
+        courseId.flatMap { CourseColorTable.hex[$0] }.map { Color(hex: $0) } ?? kind.tint
+    }
+
+    @MainActor var chipFill: Color {
+        courseId.flatMap { CourseColorTable.hex[$0] }.map { Color(hex: $0, opacity: 0.16) } ?? kind.softTint
+    }
+
     /// "9:00 AM – 10:30 AM", or nil for an all-day event.
     var timeText: String? {
         guard !isAllDay else { return nil }
         let start = CalendarFormat.time(startsAt)
         guard let endsAt else { return start }
         return "\(start) – \(CalendarFormat.time(endsAt))"
+    }
+}
+
+/// Course colours by id, refreshed by the calendar each time it draws, so
+/// the event chips deep in the grid don't each need the library passed down.
+enum CourseColorTable {
+    static var hex: [String: String] = [:]
+
+    static func update(_ library: Library) {
+        var table: [String: String] = [:]
+        for section in library.courseSections {
+            for course in section.courses {
+                if let color = course.colorHex { table[course.id] = color }
+            }
+        }
+        hex = table
     }
 }
 
@@ -94,10 +121,18 @@ struct CalendarScreen: View {
     var body: some View {
         // Read so edits and syncs redraw the calendar.
         let _ = library.revision
+        let _ = CourseColorTable.update(library)
         let range = visibleRange
         let events = library.calendarEvents(from: range.start, to: range.end)
         let byDay = Dictionary(grouping: events) { calendar.startOfDay(for: $0.startsAt) }
 
+        // SwiftCrossUI runs this reader at widths 0, infinity and then the
+        // real one, but the grid kept the frames from the infinite pass, so
+        // the month was drawn at a fixed fallback width. Each pass now uses
+        // the last real width it saw, so they all agree.
+        GeometryReader { proxy in
+        let size = proxy.size
+        let width = Self.rememberedWidth(size.width)
         VStack(spacing: 0) {
             header(events: events)
             Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
@@ -106,13 +141,18 @@ struct CalendarScreen: View {
                 MonthGrid(
                     days: gridDays, anchor: anchor, calendar: calendar, eventsByDay: byDay,
                     dailyLoad: library.dailyCardLoad(from: range.start, to: range.end, calendar: calendar),
+                    width: width,
+                    height: size.height.isFinite && size.height > 0 ? Double(size.height) - Self.chromeHeight : 600,
                     onOpen: open, onAdd: add
                 )
+                HairlineRule()
+                WorkloadLegend()
             case .week:
                 WeekColumns(days: weekDays, calendar: calendar, eventsByDay: byDay, onOpen: open, onAdd: add)
             case .agenda:
                 AgendaList(library: library, events: events, calendar: calendar, onOpen: open, onStudy: study)
             }
+        }
         }
         .sheet(isPresented: Binding(get: { editor != nil }, set: { if !$0 { editor = nil } })) {
             if let editor {
@@ -120,6 +160,17 @@ struct CalendarScreen: View {
             }
         }
     }
+
+    /// The pane's last real width; the first pass of a launch guesses.
+    private static var lastWidth = 1400.0
+
+    private static func rememberedWidth(_ proposed: Double) -> Double {
+        if proposed.isFinite && proposed > 0 { lastWidth = Double(proposed) }
+        return lastWidth
+    }
+
+    /// The header, its rule and the legend under the month.
+    private static let chromeHeight = 88.0 + 1 + 1 + 38
 
     private func open(_ event: CalendarEvent) {
         editor = EventEditorTarget(event: event, isNew: false)
@@ -137,10 +188,12 @@ struct CalendarScreen: View {
     // MARK: - Header
 
     private func header(events: [CalendarEvent]) -> some View {
+        // The Mac's header: the period in display type, then outlined
+        // pills, the view switch, and the page's one yellow button.
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(periodTitle)
-                    .font(Font.system(size: 20, weight: .semibold))
+                    .font(Font.system(size: 26, weight: .heavy))
                     .foregroundColor(GRASPColor.textPrimary)
                 Text(summaryLine(events))
                     .font(GRASPFont.meta)
@@ -148,19 +201,19 @@ struct CalendarScreen: View {
             }
             Spacer()
             if mode != .agenda {
-                HStack(spacing: 4) {
-                    Button("‹") { step(-1) }.fixedSize()
-                    Button("Today") { anchor = Date() }.fixedSize()
-                    Button("›") { step(1) }.fixedSize()
+                HStack(spacing: 8) {
+                    GRASPButton("\u{2039}") { step(-1) }
+                    GRASPButton("Today") { anchor = Date() }
+                    GRASPButton("\u{203A}") { step(1) }
                 }
             }
             SegmentedChoice(
                 options: AppSettings.CalendarMode.allCases, selection: mode, label: \.rawValue
             ) { library.settings.calendarMode = $0 }
-            Button("+ New Event") { add(on: Date()) }.fixedSize()
+            GRASPButton("+ New Event", kind: .primary) { add(on: Date()) }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 26)
+        .padding(.vertical, 16)
     }
 
     private var periodTitle: String {
@@ -221,43 +274,31 @@ struct CalendarScreen: View {
     }
 }
 
-/// A row of pill buttons standing in for a segmented control.
-struct SegmentedChoice<Option: Equatable>: View {
-    let options: [Option]
-    let selection: Option
-    let label: (Option) -> String
-    let choose: (Option) -> Void
-
-    init(options: [Option], selection: Option, label: @escaping (Option) -> String, choose: @escaping (Option) -> Void) {
-        self.options = options
-        self.selection = selection
-        self.label = label
-        self.choose = choose
-    }
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                Text(label(option))
-                    .font(GRASPFont.rowTitle)
-                    .foregroundColor(option == selection ? GRASPColor.accent : GRASPColor.textSecondary)
-                    // Otherwise the row squeezes labels to "Mon…".
-                    .fixedSize()
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(option == selection ? GRASPColor.accentSoft : Color.clear)
-                    .cornerRadius(6)
-                    .onTapGesture { choose(option) }
-            }
-        }
-        .padding(2)
-        .background(GRASPColor.inset)
-        .cornerRadius(8)
-        .fixedSize()
-    }
-}
+// SegmentedChoice lives in Components.swift.
 
 // MARK: - Month
+
+/// The Mac's footer under the month: what the workload dots mean.
+private struct WorkloadLegend: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("Dot = cards due that day").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
+            item(.light, "1 to 20 cards")
+            item(.moderate, "21 to 50 cards")
+            item(.heavy, "Over 50 cards")
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+    }
+
+    private func item(_ level: WorkloadLevel, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(level.color ?? GRASPColor.textTertiary).frame(width: 6.0, height: 6.0)
+            Text(text).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
+        }
+    }
+}
 
 private struct MonthGrid: View {
     let days: [Date]
@@ -265,6 +306,8 @@ private struct MonthGrid: View {
     let calendar: Calendar
     let eventsByDay: [Date: [CalendarEvent]]
     let dailyLoad: [Date: Int]
+    let width: Double
+    let height: Double
     let onOpen: (CalendarEvent) -> Void
     let onAdd: (Date) -> Void
 
@@ -276,9 +319,7 @@ private struct MonthGrid: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width.isFinite && proxy.size.width > 0 ? proxy.size.width : 840
-            let height = proxy.size.height.isFinite && proxy.size.height > 0 ? proxy.size.height : 600
+        do {
             let cellWidth = ((width - 6) / 7).rounded(.down)
             let rowHeight = max(84, ((height - 30 - 5) / 6).rounded(.down))
             VStack(alignment: .leading, spacing: 0) {
@@ -335,12 +376,12 @@ private struct DayCell: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text("\(dayNumber)")
-                    .font(GRASPFont.meta)
-                    .foregroundColor(isToday ? GRASPColor.canvas : (isInMonth ? GRASPColor.textPrimary : GRASPColor.textTertiary))
-                    .padding(.horizontal, isToday ? 5 : 0)
-                    .padding(.vertical, isToday ? 1 : 0)
-                    .background(isToday ? GRASPColor.accent : Color.clear)
-                    .cornerRadius(8)
+                    .font(Font.system(size: 13.5, weight: .semibold))
+                    .foregroundColor(isToday ? GRASPColor.ink : (isInMonth ? GRASPColor.textPrimary : GRASPColor.textTertiary))
+                    .padding(.horizontal, isToday ? 7 : 0)
+                    .padding(.vertical, isToday ? 2 : 0)
+                    .background(isToday ? GRASPColor.brand : Color.clear)
+                    .cornerRadius(10)
                 // The workload dot gives way to the "+" while you hover.
                 if let color = WorkloadLevel(cardCount: dueCount).color, !isHovering {
                     Circle().fill(color).frame(width: 5.0, height: 5.0)
@@ -369,7 +410,7 @@ private struct DayCell: View {
         // Top-aligned by the frame rather than a trailing Spacer: 42 cells
         // redraw together, and every view in them costs (see CLAUDE.md).
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(5)
+        .padding(7)
         .background(isInMonth ? GRASPColor.canvas : GRASPColor.inset)
         .onHover { isHovering = $0 }
     }
@@ -382,9 +423,9 @@ private struct EventChip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Circle().fill(event.kind.tint).frame(width: 6.0, height: 6.0)
+            Circle().fill(event.chipColor).frame(width: 6.0, height: 6.0)
             Text(event.displayTitle)
-                .font(Font.system(size: 10, weight: .medium))
+                .font(Font.system(size: 11, weight: .semibold))
                 .foregroundColor(GRASPColor.textPrimary)
                 .lineLimit(1)
             Spacer()
@@ -392,7 +433,7 @@ private struct EventChip: View {
         .padding(.horizontal, 5)
         .padding(.vertical, 2)
         .frame(width: max(20, width))
-        .background(event.kind.softTint)
+        .background(event.chipFill)
         .cornerRadius(4)
         .onTapGesture(perform: onOpen)
         .help(event.displayTitle)
@@ -488,7 +529,7 @@ private struct WeekEventCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(event.kind.label.uppercased())
                 .font(GRASPFont.eyebrow)
-                .foregroundColor(event.kind.tint)
+                .foregroundColor(event.chipColor)
             Text(event.displayTitle)
                 .font(GRASPFont.body)
                 .foregroundColor(GRASPColor.textPrimary)
@@ -499,7 +540,7 @@ private struct WeekEventCard: View {
         }
         .padding(7)
         .frame(width: max(40, width), alignment: .leading)
-        .background(event.kind.softTint)
+        .background(event.chipFill)
         .cornerRadius(6)
         .onTapGesture(perform: onOpen)
     }

@@ -47,7 +47,12 @@ struct OverviewPane: View {
             if let overview, !overview.entries.isEmpty {
                 let index = min(lessonIndex, overview.entries.count - 1)
                 if overview.entries.count > 1 {
-                    lessonBar(overview.entries, index: index)
+                    // A fresh drop-down for each deck: WinUIBackend's ComboBox
+                    // crashes (index out of range) when its option list shrinks,
+                    // e.g. from a course's 12 lessons to a module's 4.
+                    ForEach(["\(scope.id)#\(overview.entries.count)"], id: \.self) { _ in
+                        lessonBar(overview.entries, index: index)
+                    }
                 }
                 // Alternating between two identical branches gives each
                 // lesson a fresh scroll view, so it opens at its top rather
@@ -114,11 +119,19 @@ struct OverviewPane: View {
 
     private func lessonColumn(_ overview: DeckOverview, index: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            // The Mac's provenance line: the sparkle means AI wrote this.
+            HStack(spacing: 8) {
+                AIGlyph(size: 12)
+                Text("Written by AI from \(overview.entries.count) note\(overview.entries.count == 1 ? "" : "s")")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+            .padding(.bottom, 10)
             LessonView(overview: overview.entries[index], onOpenCards: onOpenCards)
             if index + 1 < overview.entries.count {
                 HStack(spacing: 8) {
                     Spacer()
-                    Button("Next lesson: \(overview.entries[index + 1].title)") { lessonIndex = index + 1 }
+                    GRASPButton("Next lesson: \(LessonText.clean(overview.entries[index + 1].title))") { lessonIndex = index + 1 }
                         .fixedSize()
                 }
             } else {
@@ -143,12 +156,11 @@ struct OverviewPane: View {
                 set: { lessonIndex = $0?.index ?? 0 }
             ))
             Spacer()
-            Button("Previous") { lessonIndex = index - 1 }.disabled(index == 0).fixedSize()
-            Button("Next") { lessonIndex = index + 1 }.disabled(index + 1 >= entries.count).fixedSize()
+            GRASPButton("\u{2190} Previous") { lessonIndex = index - 1 }.disabled(index == 0)
+            GRASPButton("Next \u{2192}") { lessonIndex = index + 1 }.disabled(index + 1 >= entries.count)
         }
         .padding(.horizontal, 28)
-        .padding(.vertical, 8)
-        .background(GRASPColor.surface)
+        .padding(.vertical, 10)
     }
 
     private func staleNotice(_ stale: [RenderedOverview]) -> some View {
@@ -275,7 +287,7 @@ private struct LessonContents: View {
                     ForEach(Array(entries.enumerated()), id: \.offset) { item in
                         Text("\(item.offset + 1). \(LessonText.clean(item.element.title))")
                             .font(Font.system(size: 12, weight: item.offset == current ? .semibold : .regular))
-                            .foregroundColor(item.offset == current ? GRASPColor.accent : GRASPColor.textSecondary)
+                            .foregroundColor(item.offset == current ? GRASPColor.textPrimary : GRASPColor.textSecondary)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .onTapGesture { if item.offset != current { select(item.offset) } }
@@ -424,10 +436,11 @@ private struct LessonHeader: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 if let kicker = overview.kicker {
-                    Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
+                    // Muted, as the Mac's: yellow on this page belongs to Study.
+                    Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.textTertiary)
                 }
                 if overview.isStale {
-                    Chip(text: "Out of date", tint: GRASPColor.accent, soft: GRASPColor.accentSoft)
+                    Chip(text: "Out of date", tint: GRASPColor.textSecondary, soft: GRASPColor.inset)
                 }
                 Spacer()
                 QuietLink(title: "Copy Lesson") { Clipboard.copy(LessonText.markdown(overview)) }
@@ -834,12 +847,12 @@ struct Chip: View {
 /// `.prose` and friends: bigger than the rest of the app, because this is
 /// the one screen meant for sustained reading.
 enum LessonFont {
-    static let title = Font.system(size: 28, weight: .bold)
-    static let lede = Font.system(size: 17)
-    static let h2 = Font.system(size: 20, weight: .semibold)
-    static let prose = Font.system(size: 15)
-    static let formula = Font.system(size: 14).monospaced()
-    static let code = Font.system(size: 12).monospaced()
+    static let title = Font.system(size: 32, weight: .heavy)
+    static let lede = Font.system(size: 19)
+    static let h2 = Font.system(size: 22, weight: .semibold)
+    static let prose = Font.system(size: 16)
+    static let formula = Font.system(size: 16).monospaced()
+    static let code = Font.system(size: 14).monospaced()
 }
 
 /// Generated text, readied for plain `Text`. The prompt forbids markdown

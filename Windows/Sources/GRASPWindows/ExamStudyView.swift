@@ -645,12 +645,14 @@ struct ExamColumnRow: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text("EXAM").font(GRASPFont.badge).foregroundColor(GRASPColor.accent).fixedSize()
+        // The Mac's exam row: a muted mark, the exam's name in the row's
+        // weight, and when. Selection is the raised surface and yellow bar.
+        let row = HStack(spacing: 10) {
+            Text("EXAM").font(GRASPFont.badge).foregroundColor(GRASPColor.textTertiary).fixedSize()
             VStack(alignment: .leading, spacing: 1) {
                 Text(exam.title)
-                    .font(GRASPFont.rowTitle)
-                    .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
+                    .font(Font.system(size: 14, weight: .semibold))
+                    .foregroundColor(GRASPColor.textPrimary)
                     .lineLimit(1)
                 Text("\(Self.date(exam.startsAt)) · \(exam.countdownText())")
                     .font(GRASPFont.meta)
@@ -659,11 +661,18 @@ struct ExamColumnRow: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(isSelected ? GRASPColor.accentSoft : Color.clear)
-        .cornerRadius(6)
-        .onTapGesture(perform: action)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(isSelected ? GRASPColor.surfaceRaised : Color.clear)
+        .cornerRadius(GRASPRadius.inner)
+        if isSelected {
+            row.overlay(alignment: .leading) {
+                Rectangle().fill(GRASPColor.brand).frame(width: 3.0, height: 18.0).cornerRadius(1)
+            }
+            .onTapGesture(perform: action)
+        } else {
+            row.onTapGesture(perform: action)
+        }
     }
 
     static func date(_ date: Date) -> String {

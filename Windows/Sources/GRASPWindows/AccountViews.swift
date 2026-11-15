@@ -2,31 +2,6 @@ import Foundation
 import GRASPCore
 import SwiftCrossUI
 
-/// The sidebar's account line: how sync is doing, or a way to sign in.
-/// Sync Now and Sign Out live in Settings, as on the Mac.
-struct AccountPanel: View {
-    let account: Account
-    @State var showingSignIn = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let email = account.email {
-                Text(email).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary).lineLimit(1)
-                Text(account.isSyncing ? "Syncing…" : (account.status ?? "Signed in"))
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.textTertiary)
-            } else {
-                if let status = account.status {
-                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
-                }
-                Button("Sign in to sync…") { showingSignIn = true }
-            }
-        }
-        .sheet(isPresented: $showingSignIn) {
-            SignInSheet(account: account) { showingSignIn = false }
-        }    }
-}
-
 /// "Continue with Google" or email and password, for the same account as
 /// the Mac and iPhone apps.
 ///

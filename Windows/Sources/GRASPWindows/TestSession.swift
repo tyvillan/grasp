@@ -203,23 +203,30 @@ private struct TestSetup: View {
     }
 }
 
-/// An on/off pill: GRASP's amber when on, instead of WinUI's toggle, which
-/// draws in Windows' accent colour.
+/// An on/off pill, instead of WinUI's toggle, which draws in Windows'
+/// accent colour. On is the raised surface with a hairline and a yellow
+/// check (selection checks are one of the places yellow is allowed).
 struct Pill: View {
     let title: String
     let isOn: Bool
     let action: () -> Void
 
     var body: some View {
-        Text((isOn ? "✓ " : "") + title)
-            .font(GRASPFont.rowTitle)
-            .foregroundColor(isOn ? GRASPColor.accent : GRASPColor.textSecondary)
-            .fixedSize()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(isOn ? GRASPColor.accentSoft : GRASPColor.inset)
-            .cornerRadius(7)
-            .onTapGesture(perform: action)
+        HStack(spacing: 6) {
+            if isOn {
+                Text("✓").font(GRASPFont.rowTitle).foregroundColor(GRASPColor.accent)
+            }
+            Text(title)
+                .font(GRASPFont.rowTitle)
+                .foregroundColor(isOn ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+        }
+        .fixedSize()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .edged(fill: isOn ? GRASPColor.surfaceRaised : GRASPColor.inset,
+               edge: isOn ? GRASPColor.hairlineStrong : GRASPColor.hairline,
+               radius: GRASPRadius.inner)
+        .onTapGesture(perform: action)
     }
 }
 

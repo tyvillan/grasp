@@ -12,8 +12,11 @@ struct CardList: View {
     let scope: DeckScope
     /// Cards opened from an overview's key term; nil shows the whole deck.
     @Binding var focus: Set<String>?
+    /// "Practice weakest": a Learn round on these cards.
+    var onPractice: ([String]) -> Void = { _ in }
     @State var filter: CardFilter = .all
-    @State var mastery: MasteryFilter = .all
+    /// A weakest note picked on the meter: only its cards are listed.
+    @State var noteFilter: String?
     @State var sort: CardSort = .deckOrder
     @State var text = ""
     /// How many rows are drawn. SwiftCrossUI lays out every row up front,
@@ -30,54 +33,78 @@ struct CardList: View {
         let cards = library.cards(inDecks: scope.deckIds)
         let levels = library.learnLevels(inDecks: scope.deckIds)
         let notes = library.reviewNotes(inDecks: scope.deckIds)
-        let matching = sort.apply(cards.filter {
-            filter.includes($0) && mastery.includes($0, levels: levels) && matches($0)
-                && (focus?.contains($0.id) ?? true)
+        let now = Date()
+        let matching = sort.apply(cards.filter { card in
+            filter.includes(card, levels: levels, now: now) && matches(card)
+                && (focus?.contains(card.id) ?? true)
+                && (noteFilter == nil || card.materialId == noteFilter)
         })
-        VStack(alignment: .leading, spacing: 12) {
+        let draftCount = cards.filter { $0.status == .draft }.count
+        VStack(alignment: .leading, spacing: 16) {
             if let focus {
                 HStack(spacing: 10) {
                     Text("Showing the \(focus.count == 1 ? "card" : "\(focus.count) cards") for a key term in the overview.")
                         .font(GRASPFont.body)
                         .foregroundColor(GRASPColor.textSecondary)
                     Spacer()
-                    Button("Show All Cards") { self.focus = nil }.fixedSize()
+                    GRASPButton("Show all cards") { self.focus = nil }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(GRASPColor.successSoft)
-                .cornerRadius(8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.inner)
+            } else if noteFilter == nil {
+                let understanding = library.understanding(inDecks: scope.deckIds)
+                UnderstandingPanel(cards: understanding.cards, titles: understanding.titles,
+                                   openNote: { id in
+                                       noteFilter = id
+                                       filter = .all
+                                       shown = Self.pageSize
+                                   },
+                                   practice: onPractice)
+            }
+            if let noteFilter {
+                HStack(spacing: 10) {
+                    Text("Showing the cards from \(library.understanding(inDecks: scope.deckIds).titles[noteFilter] ?? "one note").")
+                        .font(GRASPFont.body)
+                        .foregroundColor(GRASPColor.textSecondary)
+                    Spacer()
+                    GRASPButton("Show all cards") { self.noteFilter = nil }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.inner)
             }
             HStack(spacing: 10) {
-                SegmentedChoice(options: CardFilter.allCases, selection: filter,
-                                label: { "\($0.label) \(cards.filter($0.includes).count)" }) {
+                // The Mac's pills: All, Drafts, Due, Understood, with counts.
+                // Suspended only appears when a card is suspended.
+                let filters = CardFilter.allCases.filter { option in
+                    option != .suspended || filter == .suspended || cards.contains { $0.status == .suspended }
+                }
+                SegmentedChoice(options: filters, selection: filter,
+                                label: { option in
+                                    "\(option.label) \(cards.filter { option.includes($0, levels: levels, now: now) }.count)"
+                                }) {
                     filter = $0
                     shown = Self.pageSize
                 }
-                TextField("Filter cards", text: $text)
-                    .frame(width: 180.0)
                 Spacer()
-                Button(selection == nil ? "Select" : "Done Selecting") {
+                TextField("Filter cards", text: $text)
+                    .frame(width: 160.0)
+                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { sort = $0 ?? .deckOrder }))
+                GRASPButton(selection == nil ? "Select" : "Done") {
                     selection = selection == nil ? [] : nil
                     confirmingBulkDelete = false
                 }
-                .fixedSize()
-                Button("+ New Card") {
+                GRASPButton("+ New card") {
                     editing = CardEditorTarget(card: nil, deckId: scope.deckIds.first)
                 }
-                .fixedSize()
             }
-            HStack(spacing: 10) {
-                // Only approved cards have a Learn level to filter on.
-                if cards.contains(where: { $0.status == .active }) {
-                    SegmentedChoice(options: MasteryFilter.allCases, selection: mastery, label: \.label) {
-                        mastery = $0
-                        shown = Self.pageSize
-                    }
-                }
-                Spacer()
-                Text("Sort").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()
-                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { sort = $0 ?? .deckOrder }))
+
+            if draftCount > 0 && filter != .drafts && selection == nil {
+                DraftsStrip(count: draftCount, review: {
+                    filter = .drafts
+                    shown = Self.pageSize
+                }, approveAll: { library.approveDrafts(inDecks: scope.deckIds) })
             }
 
             if let selection {
@@ -92,8 +119,8 @@ struct CardList: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(matching.prefix(shown)), id: \.id) { card in
-                        CardRowView(card: card, understood: levels[card.id] == .mastered, familiar: levels[card.id] == .familiar,
-                                    reviewNote: notes[card.id],
+                        CardRowView(card: card, state: UnderstandingState.of(level: levels[card.id]),
+                                    reviewNote: notes[card.id], now: now,
                                     selected: selection.map { $0.contains(card.id) }) {
                             if var picked = selection {
                                 if picked.contains(card.id) { picked.remove(card.id) } else { picked.insert(card.id) }
@@ -104,15 +131,12 @@ struct CardList: View {
                         }
                     }
                 }
-                .background(GRASPColor.surface)
-                .cornerRadius(10)
                 if matching.count > shown {
                     HStack(spacing: 10) {
                         Text("Showing \(shown) of \(matching.count)")
                             .font(GRASPFont.meta)
                             .foregroundColor(GRASPColor.textTertiary)
-                        Button("Show \(min(Self.pageSize, matching.count - shown)) More") { shown += Self.pageSize }
-                            .fixedSize()
+                        GRASPButton("Show \(min(Self.pageSize, matching.count - shown)) more") { shown += Self.pageSize }
                     }
                 }
             }
@@ -122,6 +146,7 @@ struct CardList: View {
             text = ""
             selection = nil
             focus = nil
+            noteFilter = nil
         }
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
@@ -192,27 +217,6 @@ struct CardList: View {
     }
 }
 
-/// The Mac's mastery filter: understood means Learn level "mastered".
-enum MasteryFilter: CaseIterable, Equatable {
-    case all, needsReview, understood
-
-    var label: String {
-        switch self {
-        case .all: return "All"
-        case .needsReview: return "Needs Review"
-        case .understood: return "Understood"
-        }
-    }
-
-    func includes(_ card: Card, levels: [String: LearnEngine.Level]) -> Bool {
-        switch self {
-        case .all: return true
-        case .needsReview: return card.status == .active && levels[card.id] != .mastered
-        case .understood: return card.status == .active && levels[card.id] == .mastered
-        }
-    }
-}
-
 /// The Mac's sort options.
 enum CardSort: CaseIterable, Equatable, CustomStringConvertible {
     case deckOrder, alphabetical, dateAdded, dueDate
@@ -220,7 +224,7 @@ enum CardSort: CaseIterable, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case .deckOrder: return "Deck order"
-        case .alphabetical: return "Alphabetical (A–Z)"
+        case .alphabetical: return "Alphabetical (A to Z)"
         case .dateAdded: return "Date added"
         case .dueDate: return "Due date"
         }
@@ -236,94 +240,263 @@ enum CardSort: CaseIterable, Equatable, CustomStringConvertible {
     }
 }
 
+/// The Mac's filter pills (`DeckDetailView.MasteryFilter`): All, Drafts,
+/// Due, Understood. Suspended is Windows' extra pill, shown only when a card
+/// is suspended, since the Mac reaches those through its sort menu.
 enum CardFilter: CaseIterable, Equatable {
-    case all, drafts, active, suspended
+    case all, drafts, due, understood, suspended
 
     var label: String {
         switch self {
         case .all: return "All"
-        case .drafts: return "Pending"
-        case .active: return "Approved"
+        case .drafts: return "Drafts"
+        case .due: return "Due"
+        case .understood: return "Understood"
         case .suspended: return "Suspended"
         }
     }
 
-    func includes(_ card: Card) -> Bool {
+    func includes(_ card: Card, levels: [String: LearnEngine.Level], now: Date) -> Bool {
         switch self {
         case .all: return true
         case .drafts: return card.status == .draft
-        case .active: return card.status == .active
+        case .due: return card.status == .active && card.due <= now
+        case .understood: return card.status == .active && levels[card.id] == .mastered
         case .suspended: return card.status == .suspended
         }
     }
 }
 
-/// One card in the list. Deliberately light: a list page builds every row
-/// at once, and a row with its own drop-down menu and badge views cost
-/// about 30 ms each, so a 50-card page took well over a second to open.
-/// The actions live in the card's window instead, a click away.
+/// The Mac's `CardRowStatus.text`: one muted word on the right of a row.
+enum CardRowStatus {
+    static func text(for card: Card, hasProgress: Bool, now: Date, calendar: Calendar = .current) -> String {
+        switch card.status {
+        case .draft: return "Draft"
+        case .suspended: return "Suspended"
+        case .active: break
+        }
+        if card.reps == 0 && card.lastReview == nil { return hasProgress ? "" : "New" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now),
+                                           to: calendar.startOfDay(for: card.due)).day ?? 0
+        if days < 0 { return "Overdue" }
+        if days == 0 { return "Due today" }
+        if days < 14 { return "in \(days)d" }
+        if days < 60 { return "in \(days / 7)w" }
+        return "in \(max(2, days / 30))mo"
+    }
+}
+
+/// The three understanding pips (recognition, recall, understood), drawn as
+/// at most three runs of glyphs rather than three shapes: a row is built for
+/// every card on the page, and each shape costs a view. Solid pips take the
+/// stage's colour, a self-rated claim is an outline in the secondary tone,
+/// and the rest are the strong hairline. No yellow except recall's stage
+/// colour, as on the Mac.
+struct PipMeter: View {
+    let state: UnderstandingState
+    var suspended = false
+
+    var body: some View {
+        let solid = state.pips.filter { $0 == .solid }.count
+        let dotted = state.pips.filter { $0 == .dotted }.count
+        let empty = 3 - solid - dotted
+        HStack(spacing: 0) {
+            if solid > 0 { run(solid, glyph: "\u{25AC}", color: suspended ? GRASPColor.rejected : stageColor) }
+            if dotted > 0 { run(dotted, glyph: "\u{25AD}", color: GRASPColor.textSecondary) }
+            if empty > 0 { run(empty, glyph: "\u{25AC}", color: GRASPColor.hairlineStrong) }
+        }
+        .fixedSize()
+    }
+
+    private func run(_ count: Int, glyph: String, color: Color) -> some View {
+        Text(String(repeating: glyph, count: count))
+            .font(Font.system(size: 9))
+            .foregroundColor(color)
+    }
+
+    /// The Mac's `UnderstandingState.stageColor`.
+    private var stageColor: Color {
+        switch state.level {
+        case .new: return GRASPColor.textTertiary
+        case .recognition, .familiar: return GRASPColor.textSecondary
+        case .recall: return GRASPColor.accent
+        case .mastered: return GRASPColor.success
+        }
+    }
+}
+
+/// One card in the list, as the Mac draws it: pips at the left for an
+/// approved card (a 2 pt rail for drafts and suspended ones), the front and
+/// back, and one muted status word on the right. Deliberately light: a list
+/// page builds every row at once, and a row with its own drop-down menu cost
+/// about 30 ms. The actions live in the card's window, a click away.
 private struct CardRowView: View {
     let card: Card
-    let understood: Bool
-    var familiar = false
+    let state: UnderstandingState
     /// A flag on a parser-made draft; shown, never acted on.
     var reviewNote: String?
+    let now: Date
     /// nil when not selecting.
     let selected: Bool?
     let open: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                // The Mac's rail: pending amber, suspended rose, approved a
-                // muted gold -- so a long list can be scanned for what
-                // still needs a look without reading a word.
+            HStack(alignment: .top, spacing: 14) {
                 if let selected {
-                    Text(selected ? "✓" : " ")
+                    Text(selected ? "\u{2713}" : " ")
                         .font(Font.system(size: 12, weight: .bold))
-                        .foregroundColor(GRASPColor.canvas)
+                        .foregroundColor(GRASPColor.ink)
                         .frame(width: 18.0, height: 18.0)
-                        .background(selected ? GRASPColor.accent : GRASPColor.hairlineStrong)
-                        .cornerRadius(4)
+                        .background(selected ? GRASPColor.brand : GRASPColor.hairlineStrong)
+                        .cornerRadius(9)
                 }
-                Rectangle().fill(railTint).frame(width: 2.0, height: 34.0)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(card.front).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)
+                leading.frame(width: 40.0, alignment: .leading).padding(.top, 4)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        if card.origin == .aiGenerated && card.status == .draft { AIGlyph(size: 12) }
+                        Text(card.front).font(Font.system(size: 14.5, weight: .medium))
+                            .foregroundColor(GRASPColor.textPrimary)
+                    }
                     Text(card.back).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary).lineLimit(2)
                     if let reviewNote {
                         Text(reviewNote).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(1)
                     }
                 }
                 Spacer()
-                if let label = statusLabel {
-                    Text(label).font(GRASPFont.badge).foregroundColor(railTint).fixedSize()
-                }
+                Text(CardRowStatus.text(for: card, hasProgress: state.hasProgress, now: now))
+                    .font(GRASPFont.meta)
+                    .foregroundColor(card.status == .suspended ? GRASPColor.rejected : GRASPColor.textTertiary)
+                    .fixedSize()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
+            .padding(.vertical, 12)
+            HairlineRule()
         }
         .onTapGesture(perform: open)
     }
 
-    private var railTint: Color {
-        switch card.status {
-        case .draft: return GRASPColor.accent
-        case .suspended: return GRASPColor.rejected
-        case .active: return understood ? GRASPColor.success : GRASPColor.accentMuted
+    @ViewBuilder
+    private var leading: some View {
+        if card.status == .active {
+            PipMeter(state: state)
+        } else {
+            Rectangle()
+                .fill(card.status == .suspended ? GRASPColor.rejected : GRASPColor.hairlineStrong)
+                .frame(width: 2.0, height: 34.0)
         }
     }
+}
 
-    private var statusLabel: String? {
-        var parts: [String] = []
-        if card.status == .draft { parts.append("PENDING") }
-        if card.status == .suspended { parts.append("SUSPENDED") }
-        if card.status == .active && familiar { parts.append("FAMILIAR") }
-        if card.isContextRefined { parts.append("AI REFINED") }
-        if card.origin == .aiGenerated { parts.append("AI") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+/// The Mac's drafts strip: how many drafts wait, a way to see them, and
+/// approving them all at once.
+private struct DraftsStrip: View {
+    let count: Int
+    let review: GRASPAction
+    let approveAll: GRASPAction
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("\u{2750}").font(Font.system(size: 14)).foregroundColor(GRASPColor.textTertiary)
+            Text("\(count) draft\(count == 1 ? "" : "s") to review")
+                .font(GRASPFont.body)
+                .foregroundColor(GRASPColor.textSecondary)
+            Spacer()
+            GRASPButton("Approve all", action: approveAll)
+            GRASPButton("Review drafts", action: review)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.card)
     }
 }
+
+/// The deck page's understanding block, after the Mac's
+/// `UnderstandingSummary`: a bar of the deck's cards by stage, its count
+/// line, the five weakest notes (a tap shows that note's cards) and an
+/// outlined "Practice weakest" that starts a Learn round on up to eight of
+/// them.
+struct UnderstandingPanel: View {
+    let cards: [DeckUnderstanding.Card]
+    let titles: [String: String]
+    let openNote: (String?) -> Void
+    let practice: ([String]) -> Void
+
+    var body: some View {
+        let distribution = DeckUnderstanding.distribution(of: cards)
+        if distribution.total > 0 {
+            let weakest = DeckUnderstanding.weakestNotes(of: cards)
+            let practiceIds = DeckUnderstanding.practiceCards(of: cards)
+            VStack(alignment: .leading, spacing: 10) {
+                UnderstandingBar(distribution: distribution, height: 10.0)
+                Text(distribution.line)
+                    .font(Font.system(size: 12.5))
+                    .foregroundColor(GRASPColor.textSecondary)
+                if !weakest.isEmpty {
+                    Text("Weakest notes")
+                        .font(GRASPFont.eyebrow)
+                        .foregroundColor(GRASPColor.textTertiary)
+                        .padding(.top, 4)
+                    ForEach(weakest, id: \.id) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 10) {
+                                Text(group.materialId.flatMap { titles[$0] } ?? "Other")
+                                    .font(Font.system(size: 13.5, weight: .medium))
+                                    .foregroundColor(GRASPColor.textPrimary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(group.summary)
+                                    .font(Font.system(size: 12))
+                                    .foregroundColor(GRASPColor.textTertiary)
+                                    .fixedSize()
+                            }
+                            UnderstandingBar(distribution: group.distribution, height: 6.0)
+                        }
+                        .padding(.vertical, 5)
+                        .onTapGesture { openNote(group.materialId) }
+                    }
+                }
+                if !practiceIds.isEmpty {
+                    GRASPButton("Practice weakest") { practice(practiceIds) }
+                        .padding(.top, 4)
+                }
+            }
+            .padding(16)
+            .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.card)
+        }
+    }
+}
+
+/// The deck's cards as one bar, left to right: understood (green), recall
+/// (yellow), recognition (light), self-rated (dim), and the not-asked rest
+/// as the track. One GeometryReader and at most five rectangles.
+struct UnderstandingBar: View {
+    let distribution: DeckUnderstanding.Distribution
+    var height = 10.0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width.isFinite ? Double(proxy.size.width) : 0
+            let total = Double(max(distribution.total, 1))
+            let part = { (count: Int) -> Double in (width * Double(count) / total).rounded() }
+            HStack(spacing: 0) {
+                if distribution.solid > 0 { Rectangle().fill(GRASPColor.success).frame(width: part(distribution.solid), height: height) }
+                if distribution.recall > 0 { Rectangle().fill(GRASPColor.accent).frame(width: part(distribution.recall), height: height) }
+                if distribution.recognition > 0 {
+                    Rectangle().fill(GRASPColor.textSecondary).frame(width: part(distribution.recognition), height: height)
+                }
+                if distribution.selfRated > 0 {
+                    Rectangle().fill(GRASPColor.textTertiary).frame(width: part(distribution.selfRated), height: height)
+                }
+                Spacer()
+            }
+            .frame(width: width, height: height)
+            .background(GRASPColor.inset)
+            .cornerRadius(Int(height / 2))
+        }
+        .frame(height: height)
+    }
+}
+
 // MARK: - Editing
 
 struct CardEditorTarget {

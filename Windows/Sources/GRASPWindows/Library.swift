@@ -237,6 +237,32 @@ final class Library {
         return sections
     }
 
+    /// The Mac sidebar's grouping (`SidebarView`, `CourseColors.swift`): the
+    /// current term, then catch-all groups like "Other", then courses with no
+    /// timeline. Every other term is folded into `pastTerms`.
+    var sidebarGroups: (current: [(title: String, courses: [Course])],
+                        past: [(title: String, courses: [Course])]) {
+        func isTerm(_ semester: Semester) -> Bool {
+            semester.slug.range(of: #"^(spring|summer|fall|winter)-\d{4}$"#, options: .regularExpression) != nil
+        }
+        let live = semesters.filter { !(coursesBySemester[$0.id] ?? []).isEmpty }
+        let terms = live.filter(isTerm)
+        let now = Date()
+        let currentTerm = terms.first { term in
+            guard let start = term.startsOn, let end = term.endsOn else { return false }
+            return start <= now && now <= end
+        } ?? terms.max { $0.sortKey < $1.sortKey }
+        var current: [(title: String, courses: [Course])] = []
+        if let currentTerm { current.append((currentTerm.name, coursesBySemester[currentTerm.id] ?? [])) }
+        for semester in live.filter({ !isTerm($0) }).sorted(by: { $0.sortKey > $1.sortKey }) {
+            current.append((semester.name, coursesBySemester[semester.id] ?? []))
+        }
+        if let unfiled = coursesBySemester[nil], !unfiled.isEmpty { current.append(("No timeline", unfiled)) }
+        let past = terms.filter { $0.id != currentTerm?.id }.sorted { $0.sortKey > $1.sortKey }
+            .map { (title: $0.name, courses: coursesBySemester[$0.id] ?? []) }
+        return (current, past)
+    }
+
     func course(_ id: String) -> Course? {
         coursesBySemester.values.lazy.flatMap { $0 }.first { $0.id == id }
     }
@@ -325,6 +351,8 @@ final class Library {
     }
 
     @ObservationIgnored private var dashboardCache: (key: String, value: [Dashboard.DeckSummary])?
+    /// `homeSnapshot()`'s last result, keyed on revision and day.
+    @ObservationIgnored var homeCache: (key: String, value: HomeSnapshot)?
     @ObservationIgnored var guidedExamsCache: (key: String, value: [CalendarEvent])?
     @ObservationIgnored var examPageCache: (key: String, value: StudyGuideActions.ExamPage?)?
 
@@ -354,6 +382,48 @@ final class Library {
         var rng = SystemRandomNumberGenerator()
         return (try? database.queue.read { try Study.learnRound(forDecks: deckIds, using: &rng, db: $0) }) ?? []
     }
+
+    /// A round over just `focus` (the Mac's "Practice weakest"), with wrong
+    /// answers for multiple choice still drawn from the whole deck so a short
+    /// list isn't asked as two-way questions. As the Mac's
+    /// `AppStore.learnRound(deckIds:focusCardIds:)`.
+    func learnRound(inDecks deckIds: [String], focus: Set<String>) -> [LearnEngine.RoundQuestion] {
+        guard !focus.isEmpty else { return learnRound(inDecks: deckIds) }
+        return (try? database.queue.read { db in
+            var rng = SystemRandomNumberGenerator()
+            let all = try Study.learnCandidates(forDecks: deckIds, db: db).map(\.candidate)
+            let picked = all.filter { focus.contains($0.cardId) }
+            var round = LearnEngine.buildRound(from: picked, using: &rng, comebackSlots: 0)
+            for index in round.indices where round[index].type == .multipleChoice && (round[index].choices?.count ?? 0) < 4 {
+                guard let card = picked.first(where: { $0.cardId == round[index].cardId }) else { continue }
+                var choices = LearnEngine.distractors(for: card, in: all, count: 3, using: &rng)
+                choices.append(card.back)
+                round[index].choices = choices.shuffled(using: &rng)
+            }
+            return round
+        }) ?? []
+    }
+
+    /// Each approved card's understanding and the readable titles of their
+    /// notes, for the deck page's meter. Cached on revision.
+    func understanding(inDecks deckIds: [String]) -> (cards: [DeckUnderstanding.Card], titles: [String: String]) {
+        let key = "\(revision)|\(deckIds.joined(separator: ","))"
+        if let cached = understandingCache[key] { return cached }
+        let value = (try? database.queue.read { db -> ([DeckUnderstanding.Card], [String: String]) in
+            let cards = try Study.understanding(forDecks: deckIds, db: db)
+            let titles = try Study.noteTitles(forMaterials: Array(Set(cards.compactMap(\.materialId))), db: db)
+            return (cards, titles)
+        }) ?? ([], [:])
+        if understandingCache.count > 64 || understandingRevision != revision {
+            understandingCache = [:]
+            understandingRevision = revision
+        }
+        understandingCache[key] = value
+        return value
+    }
+
+    @ObservationIgnored private var understandingCache: [String: (cards: [DeckUnderstanding.Card], titles: [String: String])] = [:]
+    @ObservationIgnored private var understandingRevision = -1
 
     func recordLearnAnswer(cardId: String, wasCorrect: Bool) {
         record { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, db: $0) }

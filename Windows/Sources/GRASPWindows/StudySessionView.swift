@@ -8,6 +8,8 @@ import SwiftCrossUI
 enum StudyMode {
     case flashcards([Card])
     case learn
+    /// A Learn round on just these cards ("Practice weakest").
+    case practice(Set<String>)
     case test
 }
 
@@ -289,6 +291,8 @@ struct LearnSession: View {
     let library: Library
     let deckName: String
     let deckIds: [String]
+    /// Only these cards, for "Practice weakest"; empty for the whole deck.
+    var focus: Set<String> = []
     let finish: () -> Void
 
     @State var queue: [LearnEngine.RoundQuestion] = []
@@ -355,7 +359,7 @@ struct LearnSession: View {
     }
 
     private func startRound() {
-        queue = library.learnRound(inDecks: deckIds)
+        queue = library.learnRound(inDecks: deckIds, focus: focus)
         roundTotal = queue.count
         completed = 0
         roundCorrect = 0
