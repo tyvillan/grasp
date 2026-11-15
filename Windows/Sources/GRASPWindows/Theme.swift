@@ -1,35 +1,39 @@
 import Foundation
 import SwiftCrossUI
 
-/// GRASP's palette, the same tokens as the Mac's `GRASPColor`
-/// (`Sources/GRASP/Shared/Theme.swift`): warm amber as the accent against a
-/// black ground, teal for mastery, and an elevation ladder of surfaces
-/// (`inset` < `canvas` < `surface` < `surfaceRaised`). Keep the hex values
-/// in step with the Mac's.
+/// GRASP's palette: the same tokens as the Mac's `GRASPColor`
+/// (`Sources/GRASP/Shared/Theme.swift`, listed in DESIGN.md "Colour"). Yellow
+/// is a fill (`brand`) or, as text, `accent` (gold on cream in light mode).
+/// Depth is the surface ladder `inset` < `canvas` < `surface` < `surfaceRaised`
+/// and 1 pt hairlines, never shadows. Keep the hex values in step with the Mac's.
 enum GRASPColor {
-    static let canvas = adaptive(light: 0xF7F6F2, dark: 0x000000)
-    static let inset = adaptive(light: 0xEDEBE4, dark: 0x08080B)
-    static let surface = adaptive(light: 0xFFFFFF, dark: 0x101014)
-    static let surfaceRaised = adaptive(light: 0xFFFFFF, dark: 0x191920)
-    /// The Mac's sidebar is translucent material tinted toward `canvas`.
-    /// WinUI has no material here, so this is its flat equivalent: a step
-    /// lighter than the deck column, which is a step lighter than the canvas.
-    static let sidebar = adaptive(light: 0xEFEDE7, dark: 0x16161B)
+    static let canvas = adaptive(light: 0xF7F4E3, dark: 0x0E100F)
+    static let inset = adaptive(light: 0xEEEAD4, dark: 0x0A0B0A)
+    static let surface = adaptive(light: 0xFFFDF3, dark: 0x171917)
+    static let surfaceRaised = adaptive(light: 0xFFFFFF, dark: 0x1F221F)
+    /// The Mac's sidebar is a `surface` panel.
+    static let sidebar = surface
 
-    static let hairline = adaptive(light: 0xE6E3DA, dark: 0x1F1F27)
-    static let hairlineStrong = adaptive(light: 0xD3CFC3, dark: 0x2E2E3A)
+    static let hairline = adaptive(light: 0xE2DDC4, dark: 0x2C2E2A)
+    static let hairlineStrong = adaptive(light: 0xCFC9AC, dark: 0x3B3E38)
 
-    static let accent = adaptive(light: 0x9C6208, dark: 0xF2B84B)
-    static let accentSoft = adaptive(light: 0xF6E7C9, dark: 0x332B18)
-    static let accentMuted = adaptive(light: 0xC79A4A, dark: 0x8A6B2A)
+    /// Yellow as a fill, and the text that sits on it.
+    static let brand = Color(rgb: 0xFFD43B)
+    static let ink = Color(rgb: 0x0E100F)
+    /// Yellow as text or an icon.
+    static let accent = adaptive(light: 0x7A5900, dark: 0xFFD43B)
+    static let accentSoft = adaptive(light: 0xFFF0B0, dark: 0x2E2912)
+    static let accentMuted = adaptive(light: 0xB08A1A, dark: 0xA08A35)
     static let success = adaptive(light: 0x14705E, dark: 0x5FC9B5)
     static let successSoft = adaptive(light: 0xDBEDE8, dark: 0x112824)
     static let rejected = adaptive(light: 0xB2453F, dark: 0xE08A83)
     static let rejectedSoft = adaptive(light: 0xF5DEDA, dark: 0x2E1714)
 
-    static let textPrimary = adaptive(light: 0x1A1B24, dark: 0xEFEEF6)
-    static let textSecondary = adaptive(light: 0x5F5E6D, dark: 0x9695A6)
-    static let textTertiary = adaptive(light: 0x8C8A97, dark: 0x646374)
+    /// Cream on dark, ink on light.
+    static let textPrimary = adaptive(light: 0x14160F, dark: 0xFFFCE1)
+    static let textSecondary = adaptive(light: 0x4A4A3E, dark: 0xB9B7A5)
+    /// Meta and status words. Never lighter (4.5:1 floor).
+    static let textTertiary = adaptive(light: 0x6A695B, dark: 0x8C8C7E)
 
     /// The lesson figures' two line colours (the Mac's `FigurePalette`).
     static let figureBlue = adaptive(light: 0x2F6FD0, dark: 0x58C4DD)
@@ -55,35 +59,81 @@ extension Color {
         let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         self.init(rgb: UInt32(digits, radix: 16) ?? 0)
     }
+
+    /// A stored hex at a given opacity: a course colour as a soft fill.
+    init(hex: String, opacity: Double) {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        let rgb = UInt32(digits, radix: 16) ?? 0
+        self.init(red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255,
+                  blue: Double(rgb & 0xFF) / 255, opacity: opacity)
+    }
 }
 
-/// The Mac's type scale (`GRASPType`), minus tracking, which WinUI text
-/// doesn't take.
+/// Corner radii and the 4 pt grid (DESIGN.md "Shape and depth").
+enum GRASPRadius {
+    /// Cards, strips and sheets.
+    static let card = 14
+    /// Rows and wells.
+    static let inner = 10
+    /// A pill: larger than half of any control's height.
+    static let pill = 40
+}
+
+enum GRASPSpace {
+    static let xs = 4.0, sm = 8.0, md = 12.0, lg = 16.0, xl = 24.0, xxl = 32.0, huge = 40.0
+}
+
+/// The Mac's type scale (`GRASPType`, DESIGN.md "Type"). Segoe UI stands in
+/// for Bricolage Grotesque and Instrument Sans until the bundled families can
+/// be loaded (see Windows/PATCHES.md); sizes and weights are the Mac's, minus
+/// tracking, which WinUI text doesn't take.
 enum GRASPFont {
-    static let display = Font.system(size: 32, weight: .bold)
-    static let title = Font.system(size: 17, weight: .semibold)
-    static let rowTitle = Font.system(size: 13, weight: .medium)
-    static let eyebrow = Font.system(size: 11, weight: .semibold)
-    static let body = Font.system(size: 13)
-    static let meta = Font.system(size: 11)
-    static let numeral = Font.system(size: 28, weight: .semibold)
-    static let badge = Font.system(size: 10, weight: .bold)
+    static let display = Font.system(size: 36, weight: .heavy)
+    static let lessonTitle = Font.system(size: 32, weight: .heavy)
+    static let numeral = Font.system(size: 30, weight: .heavy)
+    static let proseH2 = Font.system(size: 22, weight: .semibold)
+    static let title = Font.system(size: 18, weight: .semibold)
+    static let studyPrompt = Font.system(size: 26)
+    static let lede = Font.system(size: 19)
+    static let prose = Font.system(size: 16)
+    static let body = Font.system(size: 14)
+    static let rowTitle = Font.system(size: 14, weight: .medium)
+    static let meta = Font.system(size: 12.5)
+    static let eyebrow = Font.system(size: 12, weight: .semibold)
+    /// A due count inside its pill.
+    static let badge = Font.system(size: 11, weight: .bold)
+    static let button = Font.system(size: 13.5, weight: .semibold)
 }
 
-/// A small uppercase label over a group of rows ("FALL 2026", "DECKS").
+/// The small yellow rounded square from the wordmark.
+struct BrandDot: View {
+    var size = 6.0
+
+    var body: some View {
+        Rectangle().fill(GRASPColor.brand).frame(width: size, height: size).cornerRadius(1)
+    }
+}
+
+/// A small label over a group of rows: a brand dot, then the words in
+/// tracked-capitals style ("FALL 2026", "DECKS").
 struct SectionLabel: View {
     let text: String
 
     init(_ text: String) { self.text = text }
 
     var body: some View {
-        Text(text.uppercased())
-            .font(GRASPFont.eyebrow)
-            .foregroundColor(GRASPColor.textTertiary)
+        HStack(spacing: 8) {
+            BrandDot()
+            Text(text.uppercased())
+                .font(GRASPFont.eyebrow)
+                .foregroundColor(GRASPColor.textSecondary)
+                .lineLimit(1)
+        }
     }
 }
 
-/// The amber due-count pill the Mac shows beside decks and courses.
+/// The due-count pill the Mac shows beside decks and courses: muted words
+/// on a hairline-edged well, with the number in `accent`.
 struct DueBadge: View {
     let count: Int
 
@@ -91,9 +141,9 @@ struct DueBadge: View {
         Text("\(count)")
             .font(GRASPFont.badge)
             .foregroundColor(GRASPColor.accent)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(GRASPColor.accentSoft)
-            .cornerRadius(8)
+            .cornerRadius(9)
     }
 }

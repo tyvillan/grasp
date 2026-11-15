@@ -28,6 +28,9 @@ final class AppSettings {
     var focusWorkMinutes = 25 { didSet { save() } }
     var focusBreakMinutes = 5 { didSet { save() } }
     var focusCardTarget = 20 { didSet { save() } }
+    /// Home's ticked plan steps, "yyyy-MM-dd|id,id": today's only, as the
+    /// Mac's `todayPlanChecked`.
+    var todayPlanChecked = "" { didSet { save() } }
 
     @ObservationIgnored private let file: URL
     @ObservationIgnored private var isLoading = false
@@ -41,6 +44,7 @@ final class AppSettings {
         var focusWorkMinutes: Int?
         var focusBreakMinutes: Int?
         var focusCardTarget: Int?
+        var todayPlanChecked: String?
     }
 
     init(file: URL) {
@@ -57,6 +61,7 @@ final class AppSettings {
         focusWorkMinutes = stored.focusWorkMinutes ?? focusWorkMinutes
         focusBreakMinutes = stored.focusBreakMinutes ?? focusBreakMinutes
         focusCardTarget = stored.focusCardTarget ?? focusCardTarget
+        todayPlanChecked = stored.todayPlanChecked ?? ""
     }
 
     /// The calendar the app's date grids use, starting the week on the
@@ -72,7 +77,8 @@ final class AppSettings {
         let stored = Stored(dailyGoal: dailyGoal, weekStartsOnMonday: weekStartsOnMonday,
                             calendarMode: calendarMode, notesFolder: notesFolder,
                             aiTestQuestions: aiTestQuestions, focusWorkMinutes: focusWorkMinutes,
-                            focusBreakMinutes: focusBreakMinutes, focusCardTarget: focusCardTarget)
+                            focusBreakMinutes: focusBreakMinutes, focusCardTarget: focusCardTarget,
+                            todayPlanChecked: todayPlanChecked)
         guard let data = try? JSONEncoder().encode(stored) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Not atomic: Windows refuses the rename an atomic write ends with

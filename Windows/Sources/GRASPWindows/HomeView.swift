@@ -2,264 +2,296 @@ import Foundation
 import GRASPCore
 import SwiftCrossUI
 
-/// The dashboard, after the Mac's `HomeView`: the wordmark, a greeting,
-/// a strip of figures with today's goal, upcoming exams, and a shelf of
-/// course tiles. The Mac's "pick up where you left off" card and recent
-/// decks come later.
+/// Home, after the Mac's `HomeView` and `HomePieces`: one obvious thing to do.
+///
+/// The hero is the next exam as a giant yellow countdown; beside it, Today's
+/// plan (two to four checkable steps with time estimates and the screen's one
+/// yellow button) and "Today so far". Below, the next exams as plain cards,
+/// one card that says what the big due number means, and the deck you were
+/// last in. No course colours here: courses are named in muted text only.
 struct HomeView: View {
     let library: Library
     @Binding var route: Route
     /// Opens a course at a deck (nil for All Cards).
     let onStudy: (String, String?) -> Void
 
-    private static let horizontalPadding = 32.0
+    /// The Mac's column: 40 pt sides, at most 1180 wide.
+    private static let sidePadding = 40.0
+    private static let maxWidth = 1180.0
+    private static let gap = 16.0
 
     var body: some View {
         // Read so a review or a sync redraws the figures.
         let _ = library.revision
+        let snapshot = library.homeSnapshot()
         let streak = library.studyStreak()
-        let upcoming = library.upcomingExams()
-        // Outside the ScrollView, where the width is known, as on the Mac.
         let decks = library.dashboardDecks()
-        let headline = Dashboard.jumpBackIn(decks)
-        let recents = Dashboard.recents(decks)
         GeometryReader { proxy in
-            let content = proxy.size.width.isFinite ? proxy.size.width - 2 * Self.horizontalPadding : 800
-            // The Mac's rule: the Recent rail sits beside the main column
-            // from 860 points wide, and folds underneath below that.
-            let showsRail = proxy.size.width >= 860
-            let mainWidth = showsRail ? content - Self.railWidth - 32 : content
+            let available = proxy.size.width.isFinite ? Double(proxy.size.width) : 1000
+            let width = min(Self.maxWidth, max(320, available - 2 * Self.sidePadding))
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    statStrip(streak: streak).padding(.top, 26)
-                    dailyGoalBar(streak: streak).padding(.top, 14)
-                    if showsRail {
-                        HStack(alignment: .top, spacing: 32) {
-                            mainColumn(upcoming: upcoming, headline: headline, width: mainWidth)
-                            RecentRail(decks: recents) { onStudy($0.courseId, $0.deckId) }
-                                .frame(width: Self.railWidth)
-                        }
-                        .padding(.top, 32)
-                    } else {
-                        VStack(alignment: .leading, spacing: 36) {
-                            mainColumn(upcoming: upcoming, headline: headline, width: mainWidth)
-                            RecentRail(decks: recents) { onStudy($0.courseId, $0.deckId) }
-                        }
-                        .padding(.top, 32)
+                VStack(alignment: .leading, spacing: Int(Self.gap)) {
+                    header(streak: streak)
+                        .padding(.bottom, 8)
+                    topRow(snapshot: snapshot, streak: streak, width: width)
+                    lowerCards(snapshot: snapshot, width: width)
+                    if let deck = Dashboard.jumpBackIn(decks) {
+                        ContinueCard(deck: deck, width: width, onContinue: {
+                            library.requestStudy(deckId: deck.deckId)
+                            onStudy(deck.courseId, deck.deckId)
+                        }, onOpen: {
+                            onStudy(deck.courseId, deck.deckId)
+                        })
+                        .padding(.top, 16)
                     }
                 }
-                .padding(.horizontal, Int(Self.horizontalPadding))
-                .padding(.top, 28)
-                .padding(.bottom, 40)
+                .frame(width: width, alignment: .leading)
+                .padding(.leading, Int(Self.sidePadding))
+                .padding(.top, 32)
+                .padding(.bottom, 48)
             }
-        }
-    }
-
-    private static let railWidth = 260.0
-
-    /// Upcoming exams first -- a test in three days outranks whatever deck
-    /// was open last -- then "pick up where you left off", then the courses.
-    private func mainColumn(upcoming: [CalendarEvent], headline: Dashboard.DeckSummary?, width: Double) -> some View {
-        VStack(alignment: .leading, spacing: 34) {
-            if !upcoming.isEmpty {
-                upcomingExams(upcoming)
-            }
-            if let headline {
-                ContinueCard(deck: headline, onContinue: {
-                    library.requestStudy(deckId: headline.deckId)
-                    onStudy(headline.courseId, headline.deckId)
-                }, onOpen: {
-                    onStudy(headline.courseId, headline.deckId)
-                })
-                .frame(maxWidth: 720.0)
-            }
-            coursesShelf(width: width)
         }
     }
 
     // MARK: - Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Text("G.R.A.S.P")
-                    .font(Font.system(size: 11, weight: .bold))
-                    .foregroundColor(GRASPColor.accent)
-                Rectangle().fill(GRASPColor.hairlineStrong).frame(width: 14.0, height: 1.0)
-                Text("Gather Resources, Apply, Study, Perform")
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.textTertiary)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(greeting)
-                    .font(GRASPFont.display)
-                    .foregroundColor(GRASPColor.textPrimary)
+    private func header(streak: StudyProgress.Streak) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                SectionLabel("Today")
                 Text(Self.dateLine(Date()))
                     .font(GRASPFont.body)
                     .foregroundColor(GRASPColor.textTertiary)
             }
+            Spacer()
+            if streak.days > 0 {
+                // The Mac's StreakPill: outlined, never yellow.
+                Text("\(streak.days)-day streak")
+                    .font(Font.system(size: 13, weight: .semibold))
+                    .foregroundColor(GRASPColor.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .edged(fill: GRASPColor.surface, edge: GRASPColor.hairlineStrong, radius: 15)
+                    .fixedSize()
+            }
+            GRASPButton("Open calendar \u{2192}") { route = .calendar }
         }
     }
 
-    /// "Welcome back, Tyler", by the profile's first name. A fresh Windows
-    /// profile is called "Me", which reads oddly, so that one gets no name
-    /// until it's renamed in Settings.
-    private var greeting: String {
-        let first = library.profile.name.split(separator: " ").first.map(String.init) ?? ""
-        return first.isEmpty || first == "Me" ? "Welcome back" : "Welcome back, \(first)"
-    }
-
-    /// "Friday, September 25", as the Mac formats it.
+    /// "Sunday, November 15", as the Mac formats it.
     static func dateLine(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
         return formatter.string(from: date)
     }
 
-    // MARK: - Figures
+    // MARK: - Hero, plan and today so far
+
+    /// Below 820 pt the hero and the plan stack, as on the Mac.
+    @ViewBuilder
+    private func topRow(snapshot: HomeSnapshot, streak: StudyProgress.Streak, width: Double) -> some View {
+        let checked = checkedSteps
+        let plan = snapshot.plan
+        // SwiftCrossUI can't stretch two columns to the taller one, so the
+        // row's height is worked out: the plan's rows plus Today so far.
+        let planHeight = plan.steps.isEmpty ? 190.0 : 132.0 + Double(plan.steps.count) * 74.0
+        let height = max(520.0, planHeight + Self.gap + 200.0)
+        if width >= 820 {
+            let column = (width - Self.gap) / 2
+            HStack(alignment: .top, spacing: Int(Self.gap)) {
+                hero(snapshot: snapshot)
+                    .card(padding: 28, width: column, height: height)
+                VStack(alignment: .leading, spacing: Int(Self.gap)) {
+                    planCard(plan, checked: checked, width: column)
+                    todaySoFar(plan: plan, checked: checked, streak: streak, testsToday: snapshot.testsToday,
+                               width: column, height: height - planHeight - Self.gap)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Int(Self.gap)) {
+                hero(snapshot: snapshot).card(padding: 28, width: width, height: 460.0)
+                planCard(plan, checked: checked, width: width)
+                todaySoFar(plan: plan, checked: checked, streak: streak, testsToday: snapshot.testsToday,
+                           width: width, height: nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func hero(snapshot: HomeSnapshot) -> some View {
+        if let exam = snapshot.exams.first {
+            CountdownHero(event: exam, courseName: exam.courseId.flatMap { library.courseName($0) },
+                          days: library.daysUntil(exam), standing: snapshot.standings[exam.id])
+                .onTapGesture { open(exam) }
+        } else {
+            DueHero(totalDue: totalDue)
+        }
+    }
 
     private var totalDue: Int { library.decks.reduce(0) { $0 + $1.due } }
 
-    private func statStrip(streak: StudyProgress.Streak) -> some View {
-        let cards = library.decks.reduce(0) { $0 + $1.total }
-        let courses = library.courseSections.reduce(0) { $0 + $1.courses.count }
-        return HStack(spacing: 0) {
-            StatFigure(value: totalDue, label: "Due today", tint: totalDue > 0 ? GRASPColor.accent : nil)
-            statDivider
-            StatFigure(value: cards, label: "Cards", tint: nil)
-            statDivider
-            StatFigure(value: courses, label: "Courses", tint: nil)
-            statDivider
-            // Teal only while it's alive: a grey 0 isn't news.
-            StatFigure(value: streak.days, label: "Day streak",
-                       tint: streak.days > 0 ? GRASPColor.success : nil)
-            Spacer()
-        }
-    }
-
-    /// Today's progress toward the daily goal (Settings), as on the Mac.
-    /// Hidden once the goal is met and nothing is left due: a finished day
-    /// should feel finished.
-    @ViewBuilder
-    private func dailyGoalBar(streak: StudyProgress.Streak) -> some View {
-        let goal = library.settings.dailyGoal
-        if goal > 0 && !(streak.reviewsToday >= goal && totalDue == 0) {
-            let met = streak.reviewsToday >= goal
-            let progress = min(1, Double(streak.reviewsToday) / Double(goal))
-            let barWidth = 420.0
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(met ? "Daily goal met -- \(streak.reviewsToday) cards reviewed"
-                             : "\(streak.reviewsToday) of \(goal) cards today")
-                        .font(GRASPFont.meta)
-                        .foregroundColor(met ? GRASPColor.success : GRASPColor.textSecondary)
-                    if !streak.studiedToday && streak.days > 0 {
-                        Text("Study today to keep your \(streak.days)-day streak")
-                            .font(GRASPFont.meta)
-                            .foregroundColor(GRASPColor.accent)
-                    }
-                }
-                HStack(spacing: 0) {
-                    Rectangle().fill(met ? GRASPColor.success : GRASPColor.accent)
-                        .frame(width: (barWidth * progress).rounded(), height: 4.0)
-                    // hairlineStrong, not inset: on the black canvas an inset
-                    // track disappears and the bar reads as nothing.
-                    Rectangle().fill(GRASPColor.hairlineStrong)
-                        .frame(width: (barWidth * (1 - progress)).rounded(), height: 4.0)
-                }
-                .cornerRadius(2)
-            }
-        }
-    }
-
-    // MARK: - Upcoming exams
-
-    private func upcomingExams(_ events: [CalendarEvent]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                SectionLabel("Upcoming")
+    private func planCard(_ plan: TodayPlan, checked: Set<String>, width: Double) -> some View {
+        let minutesLeft = plan.steps.filter { !checked.contains($0.id) }.reduce(0) { $0 + $1.minutes }
+        let allDone = !plan.steps.isEmpty && plan.steps.allSatisfy { checked.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center) {
+                Text("Today's plan")
+                    .font(Font.system(size: 24, weight: .heavy))
+                    .foregroundColor(GRASPColor.textPrimary)
                 Spacer()
-                Text("Open calendar")
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.accent)
-                    .onTapGesture { route = .calendar }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(events, id: \.id) { event in
-                    ExamAlertRow(
-                        event: event,
-                        courseName: event.courseId.flatMap { library.courseName($0) }
-                    ) {
-                        if let courseId = event.courseId { onStudy(courseId, library.studyTarget(for: event)) }
-                    }
+                if !plan.steps.isEmpty {
+                    Text(allDone ? "All done" : "about \(minutesLeft) min left")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
                 }
             }
-        }
-        .frame(maxWidth: 720.0)
-    }
-
-    private var statDivider: some View {
-        Rectangle()
-            .fill(GRASPColor.hairlineStrong)
-            .frame(width: 1.0, height: 26.0)
-            .padding(.horizontal, 22)
-    }
-
-    // MARK: - Courses
-
-    private func coursesShelf(width: Double) -> some View {
-        let tiles = courseTiles
-        let layout = Self.gridLayout(width: width)
-        return VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("Your courses")
-            if tiles.isEmpty {
-                Text("Import your notes folder, or sign in to sync, to see your courses here.")
+            .padding(.bottom, 12)
+            if plan.steps.isEmpty {
+                Text("Nothing due and no exams coming up. Add an exam in the calendar and the plan will build itself around it.")
                     .font(GRASPFont.body)
                     .foregroundColor(GRASPColor.textTertiary)
+                    .padding(.vertical, 12)
             } else {
-                // SwiftCrossUI has no grid, so rows of fixed-width tiles.
-                VStack(alignment: .leading, spacing: Int(Self.tileSpacing)) {
-                    ForEach(Self.rows(of: tiles, size: layout.columns), id: \.first!.id) { row in
-                        HStack(spacing: Int(Self.tileSpacing)) {
-                            ForEach(row, id: \.id) { tile in
-                                CourseTile(tile: tile) { route = .course(tile.id) }
-                                    .frame(width: layout.tileWidth)
-                            }
-                        }
+                ForEach(Array(plan.steps.enumerated()), id: \.element.id) { index, step in
+                    if index > 0 { HairlineRule() }
+                    PlanStepRow(step: step, isDone: checked.contains(step.id),
+                                onToggle: { toggle(step) }, onOpen: { run(step) })
+                }
+                GRASPButton(allDone ? "Plan done" : (checked.isEmpty ? "Start today's plan" : "Continue today's plan"),
+                            kind: .primary) {
+                    if let next = plan.steps.first(where: { !checked.contains($0.id) }) { run(next) }
+                }
+                .disabled(allDone)
+                .padding(.top, 16)
+            }
+        }
+        .card(padding: 28, width: width)
+    }
+
+    /// What has actually happened today: cards reviewed against the daily
+    /// goal, tests finished, and how many of today's plan steps are ticked.
+    private func todaySoFar(plan: TodayPlan, checked: Set<String>, streak: StudyProgress.Streak,
+                            testsToday: Int, width: Double, height: Double?) -> some View {
+        let doneSteps = plan.steps.filter { checked.contains($0.id) }.count
+        let goal = library.settings.dailyGoal
+        let reviewed = streak.reviewsToday
+        return VStack(alignment: .leading, spacing: 14) {
+            SectionLabel("Today so far")
+            HStack(alignment: .top, spacing: 24) {
+                Figure(value: "\(reviewed)", label: reviewed == 1 ? "card reviewed" : "cards reviewed")
+                Figure(value: "\(testsToday)", label: testsToday == 1 ? "test finished" : "tests finished")
+                if !plan.steps.isEmpty {
+                    Figure(value: "\(doneSteps) of \(plan.steps.count)", label: "plan steps done")
+                }
+                Spacer()
+            }
+            if goal > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressBar(fraction: min(1, Double(reviewed) / Double(goal)),
+                                tint: GRASPColor.textSecondary, height: 4.0)
+                    Text(reviewed >= goal
+                         ? "Daily goal of \(goal) cards reached"
+                         : "\(goal - reviewed) more to reach today's goal of \(goal)")
+                        .font(GRASPFont.meta)
+                        .foregroundColor(GRASPColor.textTertiary)
+                }
+            }
+            Spacer()
+        }
+        .card(padding: 24, width: width, height: height)
+    }
+
+    // MARK: - Ticking steps off
+
+    private var checkedSteps: Set<String> {
+        let parts = library.settings.todayPlanChecked.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, parts[0] == Self.todayKey else { return [] }
+        return Set(parts[1].split(separator: ",").map(String.init))
+    }
+
+    private static var todayKey: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+
+    private func toggle(_ step: TodayPlan.Step) {
+        var set = checkedSteps
+        if set.contains(step.id) { set.remove(step.id) } else { set.insert(step.id) }
+        library.settings.todayPlanChecked = Self.todayKey + "|" + set.sorted().joined(separator: ",")
+    }
+
+    private func run(_ step: TodayPlan.Step) {
+        switch step.action {
+        case .review(let courseId, let deckId):
+            guard !courseId.isEmpty else { return }
+            if let deckId { library.requestStudy(deckId: deckId) }
+            onStudy(courseId, deckId)
+        case .continueDeck(let courseId, let deckId):
+            library.requestStudy(deckId: deckId)
+            onStudy(courseId, deckId)
+        case .openExam(let eventId):
+            if let event = library.homeSnapshot().exams.first(where: { $0.id == eventId }) { open(event) }
+        }
+    }
+
+    /// The exam's study page when a guide says which lectures it covers,
+    /// else its deck, else the course's All Cards.
+    private func open(_ event: CalendarEvent) {
+        guard let courseId = event.courseId else { return }
+        onStudy(courseId, library.studyTarget(for: event))
+    }
+
+    // MARK: - Lower cards
+
+    /// The next two exams after the hero's, then "Everything else", as
+    /// four-across tiles (the Mac's adaptive grid at this width).
+    private func lowerCards(snapshot: HomeSnapshot, width: Double) -> some View {
+        let columns = width >= 900 ? 4 : (width >= 600 ? 2 : 1)
+        let tileWidth = (width - Double(columns - 1) * Self.gap) / Double(columns)
+        var tiles: [LowerTile] = snapshot.exams.dropFirst().prefix(2).map { .exam($0) }
+        tiles.append(.due)
+        return VStack(alignment: .leading, spacing: Int(Self.gap)) {
+            ForEach(Self.rows(of: tiles, size: columns), id: \.first!.id) { row in
+                HStack(alignment: .top, spacing: Int(Self.gap)) {
+                    ForEach(row, id: \.id) { tile in
+                        lowerTile(tile, standings: snapshot.standings)
+                            .card(padding: 24, width: tileWidth, height: 160.0)
                     }
                 }
             }
         }
     }
 
-    private static let tileSpacing = 10.0
-
-    /// The Mac's `GridItem(.adaptive(minimum: 172, maximum: 230))`: as many
-    /// columns as fit at 172 wide or more, each at most 230.
-    static func gridLayout(width proposed: Double) -> (columns: Int, tileWidth: Double) {
-        // GeometryReader can be offered an infinite (or unset) width while
-        // SwiftCrossUI measures the page; converting that to Int crashes.
-        let width = proposed.isFinite && proposed > 0 ? proposed : 3 * 230 + 2 * tileSpacing
-        let columns = max(1, Int((width + tileSpacing) / (172 + tileSpacing)))
-        let tileWidth = min(230, (width - Double(columns - 1) * tileSpacing) / Double(columns))
-        return (columns, max(172, tileWidth.rounded(.down)))
+    @ViewBuilder
+    private func lowerTile(_ tile: LowerTile, standings: [String: ExamPlan.Standing]) -> some View {
+        switch tile {
+        case .exam(let event):
+            ExamCard(event: event, standing: standings[event.id])
+                .onTapGesture { open(event) }
+        case .due:
+            VStack(alignment: .leading, spacing: 6) {
+                SectionLabel("Everything else")
+                Text("\(totalDue) card\(totalDue == 1 ? "" : "s") due")
+                    .font(Font.system(size: 19, weight: .heavy))
+                    .foregroundColor(GRASPColor.textPrimary)
+                Text(totalDue == 0
+                     ? "You're clear. New cards come due as you learn them."
+                     : "You don't need to clear them all. The plan covers what matters before your exams.")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+        }
     }
 
-    /// Every course that has cards, in sidebar order, with its totals.
-    private var courseTiles: [CourseTileData] {
-        let semesterNames = Dictionary(uniqueKeysWithValues: library.semesters.map { ($0.id, $0.name) })
-        return library.courseSections.flatMap(\.courses).compactMap { course in
-            let decks = library.decks(inCourse: course.id)
-            guard !decks.isEmpty else { return nil }
-            return CourseTileData(
-                id: course.id,
-                name: course.name,
-                eyebrow: course.code ?? course.semesterId.flatMap { semesterNames[$0] },
-                colorHex: course.colorHex,
-                cards: decks.reduce(0) { $0 + $1.total },
-                due: decks.reduce(0) { $0 + $1.due }
-            )
+    private enum LowerTile {
+        case exam(CalendarEvent), due
+        var id: String {
+            switch self {
+            case .exam(let event): return event.id
+            case .due: return "due"
+            }
         }
     }
 
@@ -268,25 +300,32 @@ struct HomeView: View {
     }
 }
 
-struct CourseTileData: Identifiable {
-    let id: String
-    let name: String
-    let eyebrow: String?
-    let colorHex: String?
-    let cards: Int
-    let due: Int
+extension View {
+    /// The Mac's `graspCard`: a `surface` panel with a hairline edge and the
+    /// card radius. `width` and `height` are the card's outer size; the
+    /// content is framed inside them, less the padding and the edge.
+    func card(padding: Double, width: Double? = nil, height: Double? = nil) -> some View {
+        let inset = 2 * padding + 2
+        return self
+            .frame(width: width.map { max(0, $0 - inset) }, height: height.map { max(0, $0 - inset) },
+                   alignment: .topLeading)
+            .padding(Int(padding))
+            .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.card)
+    }
 }
 
-private struct StatFigure: View {
-    let value: Int
+// MARK: - Pieces
+
+/// A figure and its label ("260" over "due").
+private struct Figure: View {
+    let value: String
     let label: String
-    let tint: Color?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("\(value)")
-                .font(Font.system(size: 15, weight: .semibold))
-                .foregroundColor(tint ?? GRASPColor.textPrimary)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(Font.system(size: 28, weight: .heavy))
+                .foregroundColor(GRASPColor.textPrimary)
             Text(label)
                 .font(GRASPFont.meta)
                 .foregroundColor(GRASPColor.textTertiary)
@@ -295,208 +334,220 @@ private struct StatFigure: View {
     }
 }
 
-/// One upcoming exam: what, which course, when, how long you have, and a
-/// way to start studying for it. The tint escalates as the date closes in:
-/// neutral a month out, amber inside a week, terracotta in the last three
-/// days, as on the Mac.
-private struct ExamAlertRow: View {
+/// The next exam as a giant yellow numeral, what it is, and where you stand.
+private struct CountdownHero: View {
     let event: CalendarEvent
     let courseName: String?
-    let onStudy: () -> Void
-
-    private var tint: Color {
-        let days = event.daysAway(from: Date())
-        if days <= 3 { return GRASPColor.rejected }
-        if days <= 7 { return GRASPColor.accent }
-        return GRASPColor.textSecondary
-    }
+    let days: Int
+    let standing: ExamPlan.Standing?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Rectangle().fill(tint).frame(width: 3.0, height: 34.0).cornerRadius(2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.displayTitle)
-                    .font(GRASPFont.rowTitle)
-                    .foregroundColor(GRASPColor.textPrimary)
-                    .lineLimit(1)
-                Text(detail)
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.textSecondary)
-                    .lineLimit(1)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            SectionLabel("Next exam")
+            Text(days == 0 ? "Today" : "\(days)")
+                .font(Font.system(size: days == 0 ? 120 : 190, weight: .heavy))
+                .foregroundColor(GRASPColor.accent)
+                .lineLimit(1)
+            Text(days == 0 ? event.displayTitle : "day\(days == 1 ? "" : "s") to your\n\(event.displayTitle)")
+                .font(Font.system(size: 26, weight: .heavy))
+                .foregroundColor(GRASPColor.textPrimary)
             Spacer()
-            Text(event.countdownText())
-                .font(GRASPFont.meta.weight(.semibold))
-                .foregroundColor(tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(GRASPColor.inset)
-                .cornerRadius(10)
-            if event.courseId != nil {
-                Button("Study") { onStudy() }.fixedSize()
+            if let standing, standing.activeCards > 0 {
+                VStack(alignment: .leading, spacing: 14) {
+                    HairlineRule()
+                    HStack(alignment: .top, spacing: 24) {
+                        Figure(value: "\(standing.dueCards)", label: "due")
+                        Figure(value: "\(standing.weakCards)",
+                               label: standing.weakCards == 1 ? "weak spot" : "weak spots")
+                        Figure(value: "\(standing.activeCards)", label: "cards in play")
+                        Spacer()
+                    }
+                    Text(readinessNote(standing))
+                        .font(GRASPFont.body)
+                        .foregroundColor(GRASPColor.textSecondary)
+                }
+                .padding(.bottom, 16)
             }
+            Text(detail)
+                .font(GRASPFont.meta)
+                .foregroundColor(GRASPColor.textTertiary)
+                .lineLimit(2)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(GRASPColor.surface)
-        .cornerRadius(10)
+    }
+
+    private func readinessNote(_ standing: ExamPlan.Standing) -> String {
+        let tested: String
+        switch standing.daysSinceTest {
+        case nil: tested = "You haven't taken a practice test on this yet."
+        case 0?: tested = "You took a practice test today."
+        case 1?: tested = "Your last practice test was yesterday."
+        case let n?: tested = "Your last practice test was \(n) days ago."
+        }
+        if standing.weakCards > 0 {
+            return "Drill the \(standing.weakCards) weak spot\(standing.weakCards == 1 ? "" : "s") first. " + tested
+        }
+        return standing.dueCards > 0 ? "Clear what's due, then test yourself. " + tested : tested
     }
 
     private var detail: String {
         var parts: [String] = []
         if let courseName { parts.append(courseName) }
-        parts.append(CalendarFormat.string(event.startsAt, template: "MMMd"))
-        if let timeText = event.timeText { parts.append(timeText) }
+        parts.append(CalendarFormat.string(event.startsAt, template: "EEEMMMd"))
+        if let time = event.timeText { parts.append(time) }
         return parts.joined(separator: " · ")
     }
 }
 
-/// A course on the dashboard: dot and code, the name, then its card and
-/// due counts. No border at rest; lighter on hover, as on the Mac.
-private struct CourseTile: View {
-    let tile: CourseTileData
-    let open: () -> Void
-    @State var isHovering = false
+/// When no exam is coming: the due count is the number that matters.
+private struct DueHero: View {
+    let totalDue: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(tile.colorHex.map { Color(hex: $0) } ?? GRASPColor.hairlineStrong)
-                    .frame(width: 6.0, height: 6.0)
-                if let eyebrow = tile.eyebrow {
-                    Text(eyebrow.uppercased())
-                        .font(GRASPFont.eyebrow)
+            SectionLabel("Due today")
+            Text("\(totalDue)")
+                .font(Font.system(size: 190, weight: .heavy))
+                .foregroundColor(GRASPColor.accent)
+                .lineLimit(1)
+            Text(totalDue == 1 ? "card waiting" : "cards waiting")
+                .font(Font.system(size: 26, weight: .heavy))
+                .foregroundColor(GRASPColor.textPrimary)
+            Spacer()
+            Text("No exams in the next month.")
+                .font(GRASPFont.meta)
+                .foregroundColor(GRASPColor.textTertiary)
+        }
+    }
+}
+
+/// One plan step: a ring that ticks it off, the step, and its time. The rest
+/// of the row starts it.
+private struct PlanStepRow: View {
+    let step: TodayPlan.Step
+    let isDone: Bool
+    let onToggle: () -> Void
+    let onOpen: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ring.onTapGesture(perform: onToggle)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(step.title)
+                        .font(Font.system(size: 14.5, weight: .semibold))
+                        .foregroundColor(isDone ? GRASPColor.textTertiary : GRASPColor.textPrimary)
+                    Text(step.subtitle)
+                        .font(GRASPFont.meta)
                         .foregroundColor(GRASPColor.textTertiary)
                         .lineLimit(1)
                 }
                 Spacer()
-            }
-            Text(tile.name)
-                .font(GRASPFont.title)
-                .foregroundColor(GRASPColor.textPrimary)
-                .lineLimit(2)
-                .padding(.top, 8)
-            Spacer()
-            HStack(spacing: 5) {
-                Text("\(tile.cards) cards")
+                Text("\(step.minutes) min")
                     .font(GRASPFont.meta)
                     .foregroundColor(GRASPColor.textTertiary)
-                if tile.due > 0 {
-                    Text("·").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
-                    Text("\(tile.due) due")
-                        .font(GRASPFont.meta)
-                        .foregroundColor(GRASPColor.accent)
-                }
             }
+            .onTapGesture(perform: onOpen)
         }
-        .padding(13)
-        .frame(height: 112.0)
-        .background(isHovering ? GRASPColor.surfaceRaised : GRASPColor.surface)
-        .cornerRadius(10)
-        .onHover { isHovering = $0 }
-        .onTapGesture(perform: open)
+        .padding(.vertical, 14)
+    }
+
+    /// The Mac's CheckRing: a cream ring at 40%, filled yellow with an ink
+    /// check when done.
+    @ViewBuilder
+    private var ring: some View {
+        if isDone {
+            Text("\u{2713}")
+                .font(Font.system(size: 14, weight: .bold))
+                .foregroundColor(GRASPColor.ink)
+                .frame(width: 26.0, height: 26.0)
+                .background(GRASPColor.brand)
+                .cornerRadius(13)
+        } else {
+            Circle()
+                .stroke(GRASPColor.textSecondary, style: StrokeStyle(width: 1.5))
+                .frame(width: 26.0, height: 26.0)
+        }
     }
 }
 
-/// "Pick up where you left off": the one raised element on the dashboard,
-/// so "where was I?" is answered before anything else is read.
-private struct ContinueCard: View {
-    let deck: Dashboard.DeckSummary
-    let onContinue: () -> Void
-    let onOpen: () -> Void
+/// One later exam: when, what, and where you stand. Plain, no course colour.
+private struct ExamCard: View {
+    let event: CalendarEvent
+    let standing: ExamPlan.Standing?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(when.uppercased())
+                .font(GRASPFont.eyebrow)
+                .foregroundColor(GRASPColor.textTertiary)
+                .lineLimit(1)
+            Text(event.displayTitle)
+                .font(Font.system(size: 19, weight: .heavy))
+                .foregroundColor(GRASPColor.textPrimary)
+                .lineLimit(2)
+            Text(summary)
+                .font(GRASPFont.meta)
+                .foregroundColor(GRASPColor.textTertiary)
+                .lineLimit(1)
+        }
+    }
+
+    private var when: String {
+        var text = CalendarFormat.string(event.startsAt, template: "EEEMMMd")
+        if let time = event.timeText { text += " · " + time }
+        return text
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        if let standing {
+            parts.append("\(standing.dueCards) due")
+            if standing.weakCards > 0 {
+                parts.append("\(standing.weakCards) weak spot\(standing.weakCards == 1 ? "" : "s")")
+            }
+        }
+        parts.append(event.countdownText())
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// "Pick up where you left off": the deck you were last in.
+private struct ContinueCard: View {
+    let deck: Dashboard.DeckSummary
+    let width: Double
+    let onContinue: GRASPAction
+    let onOpen: GRASPAction
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
             SectionLabel(deck.dueCount > 0 ? "Pick up where you left off" : "Last studied")
             HStack(alignment: .bottom, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(deck.deckName)
-                        .font(Font.system(size: 24, weight: .semibold))
+                        .font(Font.system(size: 22, weight: .heavy))
                         .foregroundColor(GRASPColor.textPrimary)
-                    Text(deck.courseName).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
+                    Text(deck.courseName).font(GRASPFont.body).foregroundColor(GRASPColor.textTertiary)
                 }
                 Spacer()
                 if deck.dueCount > 0 {
                     HStack(alignment: .bottom, spacing: 5) {
-                        Text("\(deck.dueCount)").font(GRASPFont.numeral).foregroundColor(GRASPColor.accent)
+                        Text("\(deck.dueCount)").font(GRASPFont.numeral).foregroundColor(GRASPColor.textPrimary)
                         Text("due").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
                     }
                 }
             }
-            .padding(.top, 14)
             VStack(alignment: .leading, spacing: 7) {
-                ProgressBar(fraction: deck.cardCount == 0 ? 0 : Double(deck.reviewedCount) / Double(deck.cardCount))
+                ProgressBar(fraction: deck.cardCount == 0 ? 0 : Double(deck.reviewedCount) / Double(deck.cardCount),
+                            tint: GRASPColor.brand)
                 Text("\(deck.reviewedCount) of \(deck.cardCount) cards reviewed")
                     .font(GRASPFont.meta)
                     .foregroundColor(GRASPColor.textTertiary)
             }
-            .padding(.top, 20)
             HStack(spacing: 8) {
-                Button("Continue") { onContinue() }.disabled(deck.dueCount == 0).fixedSize()
-                Button("Open Deck") { onOpen() }.fixedSize()
-            }
-            .padding(.top, 20)
-        }
-        .padding(22)
-        .background(GRASPColor.surfaceRaised)
-        .cornerRadius(14)
-    }
-}
-
-/// Decks studied recently, newest first.
-private struct RecentRail: View {
-    let decks: [Dashboard.DeckSummary]
-    let open: (Dashboard.DeckSummary) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionLabel("Recent")
-            if decks.isEmpty {
-                Text("Decks you study will collect here.")
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.textTertiary)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(decks, id: \.deckId) { deck in
-                        RecentRow(deck: deck).onTapGesture { open(deck) }
-                    }
-                }
+                GRASPButton("Continue", action: onContinue).disabled(deck.dueCount == 0)
+                GRASPButton("Open deck", action: onOpen)
             }
         }
-    }
-}
-
-private struct RecentRow: View {
-    let deck: Dashboard.DeckSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(deck.deckName).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary).lineLimit(1)
-                    Text(deck.courseName).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(1)
-                }
-                Spacer()
-                if let last = deck.lastReviewedAt {
-                    Text(RecentRow.ago(last)).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).fixedSize()
-                }
-            }
-            .padding(.vertical, 9)
-            .padding(.horizontal, 8)
-            Rectangle().fill(GRASPColor.hairlineStrong).frame(height: 1.0)
-        }
-    }
-
-    /// "5m ago", "3h ago", "2d ago" -- the Mac's narrow relative style.
-    nonisolated static func ago(_ date: Date, now: Date = Date()) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        switch seconds {
-        case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m ago"
-        case ..<86_400: return "\(Int(seconds / 3600))h ago"
-        case ..<(86_400 * 30): return "\(Int(seconds / 86_400))d ago"
-        default: return "\(Int(seconds / (86_400 * 30)))mo ago"
-        }
+        .card(padding: 24, width: width)
     }
 }

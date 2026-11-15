@@ -15,6 +15,7 @@ nonisolated enum WindowIcon {
             for _ in 0..<80 {
                 if let window = mainWindow() {
                     apply(to: window)
+                    WindowChrome.apply(to: window)
                     return
                 }
                 Thread.sleep(forTimeInterval: 0.25)

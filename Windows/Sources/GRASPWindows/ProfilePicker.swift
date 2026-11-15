@@ -22,7 +22,7 @@ struct ProfilePicker: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("G R A S P").font(Font.system(size: 15, weight: .bold)).foregroundColor(GRASPColor.accent)
-                Text("Who's studying?").font(Font.system(size: 26, weight: .semibold)).foregroundColor(GRASPColor.textPrimary)
+                Text("Who's studying?").font(Font.system(size: 32, weight: .heavy)).foregroundColor(GRASPColor.textPrimary)
             }
             .padding(.top, 60)
 
@@ -105,24 +105,22 @@ struct ProfilePicker: View {
     }
 }
 
-/// A round avatar with the name's initials.
+/// The Mac's avatar: the first initial in ink on a solid yellow circle.
 struct Avatar: View {
     let name: String
     let size: Double
 
     var body: some View {
-        Text(initials)
-            .font(Font.system(size: size * 0.34, weight: .semibold))
-            .foregroundColor(GRASPColor.accent)
+        Text(initial)
+            .font(Font.system(size: size * 0.38, weight: .bold))
+            .foregroundColor(GRASPColor.ink)
             .frame(width: size, height: size)
-            .background(GRASPColor.accentSoft)
+            .background(GRASPColor.brand)
             .cornerRadius(Int(size / 2))
     }
 
-    private var initials: String {
-        let words = name.split(separator: " ").prefix(2)
-        let letters = words.compactMap(\.first).map(String.init).joined()
-        return letters.isEmpty ? "?" : letters.uppercased()
+    private var initial: String {
+        name.first.map { String($0).uppercased() } ?? "?"
     }
 }
 
@@ -133,16 +131,16 @@ private struct ProfileTile: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Avatar(name: name, size: 64)
-            Text(name + (locked ? " 🔒" : ""))
-                .font(GRASPFont.rowTitle)
+        VStack(spacing: 14) {
+            Avatar(name: name, size: 68)
+            Text(name + (locked ? " \u{1F512}" : ""))
+                .font(Font.system(size: 15, weight: .medium))
                 .foregroundColor(GRASPColor.textPrimary)
                 .lineLimit(1)
         }
-        .frame(width: 140.0, height: 140.0)
-        .background(isSelected ? GRASPColor.accentSoft : GRASPColor.surface)
-        .cornerRadius(14)
+        .frame(width: 148.0, height: 148.0)
+        .edged(fill: isSelected ? GRASPColor.surfaceRaised : GRASPColor.surface,
+               edge: isSelected ? GRASPColor.hairlineStrong : GRASPColor.hairline, radius: GRASPRadius.card)
         .onTapGesture(perform: action)
     }
 }
@@ -152,16 +150,18 @@ private struct NewProfileTile: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
+        // The Mac draws this one dashed; SwiftCrossUI strokes have no dash,
+        // so it is the bare canvas with a strong hairline.
+        VStack(spacing: 14) {
             Text("+")
-                .font(Font.system(size: 26, weight: .medium))
-                .foregroundColor(GRASPColor.textTertiary)
-                .frame(width: 64.0, height: 64.0)
-            Text("New profile").font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textTertiary)
+                .font(Font.system(size: 30, weight: .light))
+                .foregroundColor(GRASPColor.textSecondary)
+                .frame(width: 68.0, height: 68.0)
+            Text("New profile").font(Font.system(size: 15)).foregroundColor(GRASPColor.textSecondary)
         }
-        .frame(width: 140.0, height: 140.0)
-        .background(isSelected ? GRASPColor.accentSoft : GRASPColor.inset)
-        .cornerRadius(14)
+        .frame(width: 148.0, height: 148.0)
+        .edged(fill: isSelected ? GRASPColor.surfaceRaised : GRASPColor.canvas,
+               edge: GRASPColor.hairlineStrong, radius: GRASPRadius.card)
         .onTapGesture(perform: action)
     }
 }

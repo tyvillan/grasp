@@ -112,7 +112,7 @@ struct ContentView: View {
                 .frame(width: 240.0)
                 .frame(maxHeight: .infinity)
                 .background(GRASPColor.sidebar)
-            Rectangle().fill(GRASPColor.hairline).frame(width: 1.0)
+            HairlineColumn()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(GRASPColor.canvas)
@@ -160,93 +160,69 @@ struct ContentView: View {
 
 // MARK: - Sidebar
 
-/// "Home", then courses under their semesters, newest first, as on the Mac.
-/// The list scrolls, so a big library can't push the window off the
-/// screen; import and the account panel stay pinned at the bottom.
+//// The Mac's sidebar (`SidebarView`): the wordmark, the places, then the
+/// current term's courses and catch-all groups, with every older term folded
+/// behind one "Past terms" row. Import sits as two quiet links above the
+/// profile button, which opens Settings (account, profile, sign out).
 struct Sidebar: View {
     let library: Library
     @Binding var route: Route
     @Environment(\.chooseFile) var chooseFile
     @State var addingCourse = false
+    @State var pastTermsOpen = false
 
     var body: some View {
+        let groups = library.sidebarGroups
         VStack(alignment: .leading, spacing: 0) {
-            Text("GRASP")
-                .font(GRASPFont.title)
-                .foregroundColor(GRASPColor.textPrimary)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+            HStack(spacing: 10) {
+                Rectangle().fill(GRASPColor.brand).frame(width: 16.0, height: 16.0).cornerRadius(3)
+                Text("GRASP")
+                    .font(Font.system(size: 20, weight: .heavy))
+                    .foregroundColor(GRASPColor.textPrimary)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    SidebarRow(title: "Home", dot: nil, isSelected: route == .home) {
-                        route = .home
+                    SidebarRow(title: "Home", dot: nil, isSelected: route == .home) { route = .home }
+                    SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) { route = .calendar }
+                    SidebarRow(title: "Search", dot: nil, isSelected: route == .search) { route = .search }
+                    ForEach(groups.current, id: \.title) { section in
+                        groupLabel(section.title)
+                        courseRows(section.courses)
                     }
-                    SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) {
-                        route = .calendar
-                    }
-                    SidebarRow(title: "Search", dot: nil, isSelected: route == .search) {
-                        route = .search
-                    }
-                    ForEach(library.courseSections, id: \.title) { section in
-                        SectionLabel(section.title)
-                            .padding(.horizontal, 10)
-                            .padding(.top, 14)
-                            .padding(.bottom, 4)
-                        ForEach(section.courses, id: \.id) { course in
-                            SidebarRow(
-                                title: course.name,
-                                dot: course.colorHex.map { Color(hex: $0) } ?? GRASPColor.hairlineStrong,
-                                isSelected: route == .course(course.id)
-                            ) {
-                                route = .course(course.id)
-                            }
-                        }
+                    if !groups.past.isEmpty {
+                        pastTerms(groups.past)
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
             }
             .frame(maxHeight: .infinity)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
-                Button("Import notes folder…") {
-                    Task {
-                        guard let folder = await chooseFile(
-                            title: "Choose your notes folder",
-                            defaultButtonLabel: "Import",
-                            allowSelectingFiles: false,
-                            allowSelectingDirectories: true
-                        ) else { return }
-                        // Remembered for Settings' "Import Now".
-                        library.settings.notesFolder = folder.path
-                        await library.importVault(at: folder)
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                HairlineRule()
+                if library.isImporting {
+                    ProgressView("Importing…")
+                } else if let status = library.status {
+                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(2)
                 }
-                .disabled(library.isImporting)
-                Text("+ New Course")
-                    .font(GRASPFont.meta)
-                    .foregroundColor(GRASPColor.textTertiary)
-                    .onTapGesture { addingCourse = true }
                 if library.decks.isEmpty {
-                    Button("Try sample notes") {
+                    GRASPButton("Try sample notes") {
                         Task { await library.importSample() }
                     }
                     .disabled(library.isImporting)
                 }
-                if library.isImporting {
-                    ProgressView("Importing…")
-                } else if let status = library.status {
-                    Text(status).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
+                HStack(spacing: 14) {
+                    footerLink("Import notes", action: importFolder)
+                    footerLink("New course") { addingCourse = true }
                 }
-                SidebarRow(title: "Settings", dot: nil, isSelected: route == .settings) {
-                    route = .settings
-                }
-                AccountPanel(account: library.account)
+                profileButton
             }
-            .padding(12)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
         }
         .sheet(isPresented: $addingCourse) {
             OrganizeSheetView(library: library, sheet: .newCourse,
@@ -254,10 +230,112 @@ struct Sidebar: View {
                               close: { addingCourse = false })
         }
     }
+
+    private func groupLabel(_ title: String) -> some View {
+        SectionLabel(title)
+            .padding(.leading, 12)
+            .padding(.top, 18)
+            .padding(.bottom, 4)
+    }
+
+    private func courseRows(_ courses: [Course]) -> some View {
+        ForEach(courses, id: \.id) { course in
+            SidebarRow(
+                title: course.name,
+                dot: course.colorHex.map { Color(hex: $0) } ?? GRASPColor.textTertiary,
+                isSelected: route == .course(course.id)
+            ) {
+                route = .course(course.id)
+            }
+        }
+    }
+
+    /// Every older term behind one row, open while a course inside it is
+    /// the current page.
+    @ViewBuilder
+    private func pastTerms(_ terms: [(title: String, courses: [Course])]) -> some View {
+        let count = terms.reduce(0) { $0 + $1.courses.count }
+        let open = pastTermsOpen || terms.contains { $0.courses.contains { route == .course($0.id) } }
+        HStack(spacing: 8) {
+            Text(open ? "\u{2304}" : "\u{203A}")
+                .font(Font.system(size: 13))
+                .foregroundColor(GRASPColor.textTertiary)
+                .frame(width: 10.0)
+            Text("Past terms").font(Font.system(size: 13)).foregroundColor(GRASPColor.textTertiary)
+            Spacer()
+            Text("\(count) course\(count == 1 ? "" : "s")")
+                .font(Font.system(size: 13))
+                .foregroundColor(GRASPColor.textTertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .padding(.top, 16)
+        .onTapGesture { pastTermsOpen = !open }
+        if open {
+            ForEach(terms, id: \.title) { term in
+                groupLabel(term.title)
+                courseRows(term.courses)
+            }
+        }
+    }
+
+    private func footerLink(_ title: String, action: @escaping () -> Void) -> some View {
+        Text("+ \(title)")
+            .font(Font.system(size: 12.5))
+            .foregroundColor(GRASPColor.textTertiary)
+            .onTapGesture(perform: action)
+    }
+
+    /// The Mac's profile button: a yellow avatar with the first initial and
+    /// the first name, opening Settings. The second line is the sync state.
+    private var profileButton: some View {
+        let name = library.profile.name
+        return HStack(spacing: 10) {
+            Text((name.first.map { String($0) } ?? "?").uppercased())
+                .font(Font.system(size: 12, weight: .bold))
+                .foregroundColor(GRASPColor.ink)
+                .frame(width: 28.0, height: 28.0)
+                .background(GRASPColor.brand)
+                .cornerRadius(14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name.split(separator: " ").first.map(String.init) ?? name)
+                    .font(Font.system(size: 13.5, weight: .medium))
+                    .foregroundColor(route == .settings ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+                    .lineLimit(1)
+                Text(syncLine)
+                    .font(Font.system(size: 11.5))
+                    .foregroundColor(GRASPColor.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .onTapGesture { route = .settings }
+    }
+
+    private var syncLine: String {
+        guard let account = library.account, account.email != nil else { return "Not syncing" }
+        return account.isSyncing ? "Syncing…" : (account.status ?? "Signed in")
+    }
+
+    private func importFolder() {
+        Task {
+            guard let folder = await chooseFile(
+                title: "Choose your notes folder",
+                defaultButtonLabel: "Import",
+                allowSelectingFiles: false,
+                allowSelectingDirectories: true
+            ) else { return }
+            // Remembered for Settings' "Import Now".
+            library.settings.notesFolder = folder.path
+            await library.importVault(at: folder)
+        }
+    }
 }
 
 /// One sidebar row: an optional colour dot in a fixed slot (so every name
-/// starts on the same x), then the name. Selected rows use GRASP's amber.
+/// starts on the same x), then the name, up to two lines as on the Mac. The
+/// current row is bold cream with the 3 pt yellow bar; the others are
+/// regular weight in the secondary tone.
 struct SidebarRow: View {
     let title: String
     let dot: Color?
@@ -265,21 +343,32 @@ struct SidebarRow: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
+        // The bar is an overlay only on the current row: an overlay on
+        // every row cost about 4 ms each, on every screen switch.
+        if isSelected {
+            row.overlay(alignment: .leading) {
+                Rectangle().fill(GRASPColor.brand).frame(width: 3.0, height: 20.0).cornerRadius(1)
+            }
+            .onTapGesture(perform: action)
+        } else {
+            row.onTapGesture(perform: action)
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 10) {
             if let dot {
-                Circle().fill(dot).frame(width: 7.0, height: 7.0).frame(width: 16.0)
+                Circle().fill(dot).frame(width: 8.0, height: 8.0).frame(width: 18.0)
             }
             Text(title)
-                .font(GRASPFont.rowTitle)
-                .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
-                .lineLimit(1)
+                .font(Font.system(size: 14, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
+                .lineLimit(2)
             Spacer()
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(isSelected ? GRASPColor.accentSoft : Color.clear)
-        .cornerRadius(6)
-        .onTapGesture(perform: action)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
     }
 }
 
@@ -306,6 +395,7 @@ struct CourseView: View {
 
         HStack(spacing: 0) {
             DeckColumn(
+                library: library,
                 course: course,
                 decks: decks,
                 allCards: allCards,
@@ -388,6 +478,7 @@ struct CourseView: View {
 /// The course's decks, laid out like the Mac's `DeckListView`: name on the
 /// left, then the due badge and the card count in a right-aligned column.
 struct DeckColumn: View {
+    let library: Library
     let course: Course
     let decks: [DeckRow]
     let allCards: DeckScope
@@ -421,7 +512,7 @@ struct DeckColumn: View {
                 VStack(alignment: .leading, spacing: 2) {
                     DeckColumnRow(
                         name: "All Cards", kicker: nil, isAllCards: true, cards: allCards.total, due: allCards.due,
-                        isSelected: selectedId == allCards.id
+                        understanding: nil, isSelected: selectedId == allCards.id
                     ) { select(nil) }
                     ForEach(exams, id: \.id) { exam in
                         ExamColumnRow(exam: exam, isSelected: selectedId == DeckScope.examId(exam.id)) {
@@ -431,7 +522,7 @@ struct DeckColumn: View {
                     ForEach(decks, id: \.id) { deck in
                         DeckColumnRow(
                             name: deck.name, kicker: deck.kicker, isAllCards: false, cards: deck.total, due: deck.due,
-                            isSelected: selectedId == deck.id
+                            understanding: understanding(deck.id), isSelected: selectedId == deck.id
                         ) { select(deck.id) }
                     }
                 }
@@ -441,8 +532,18 @@ struct DeckColumn: View {
             .frame(maxHeight: .infinity)
         }
     }
+
+    /// A deck's cards by stage, for the thin bar under its name; nil when
+    /// nobody has been asked about any of them yet.
+    private func understanding(_ deckId: String) -> DeckUnderstanding.Distribution? {
+        let distribution = DeckUnderstanding.distribution(of: library.understanding(inDecks: [deckId]).cards)
+        return distribution.total > distribution.notAsked ? distribution : nil
+    }
 }
 
+/// A deck in the column, as the Mac's `DeckRow`: the lecture date above the
+/// name, a thin understanding bar under it once cards have been asked, and
+/// one labelled number on the right ("42 due", else "44 cards").
 struct DeckColumnRow: View {
     let name: String
     /// The lecture date, small above the name.
@@ -450,10 +551,22 @@ struct DeckColumnRow: View {
     let isAllCards: Bool
     let cards: Int
     let due: Int
+    let understanding: DeckUnderstanding.Distribution?
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
+        if isSelected {
+            row.overlay(alignment: .leading) {
+                Rectangle().fill(GRASPColor.brand).frame(width: 3.0, height: 18.0).cornerRadius(1)
+            }
+            .onTapGesture(perform: action)
+        } else {
+            row.onTapGesture(perform: action)
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 if let kicker {
@@ -464,23 +577,31 @@ struct DeckColumnRow: View {
                 }
                 Text(name)
                     .font(isAllCards ? GRASPFont.rowTitle.weight(.semibold) : GRASPFont.rowTitle)
-                    .foregroundColor(isSelected ? GRASPColor.accent : GRASPColor.textPrimary)
+                    .foregroundColor(GRASPColor.textPrimary)
                     .lineLimit(1)
+                if let understanding {
+                    UnderstandingBar(distribution: understanding, width: 150.0, height: 4.0)
+                        .padding(.top, 4)
+                }
             }
             Spacer()
+            // Plain text: yellow on the deck page belongs to Study.
             if due > 0 {
-                DueBadge(count: due)
+                Text("\(due) due")
+                    .font(Font.system(size: 12, weight: .semibold))
+                    .foregroundColor(GRASPColor.textPrimary)
+                    .fixedSize()
+            } else {
+                Text("\(cards) card\(cards == 1 ? "" : "s")")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+                    .fixedSize()
             }
-            Text("\(cards)")
-                .font(GRASPFont.meta)
-                .foregroundColor(GRASPColor.textTertiary)
-                .frame(width: 30.0, alignment: .trailing)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(isSelected ? GRASPColor.accentSoft : Color.clear)
-        .cornerRadius(6)
-        .onTapGesture(perform: action)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(isSelected ? GRASPColor.surfaceRaised : Color.clear)
+        .cornerRadius(GRASPRadius.inner)
     }
 }
 
@@ -503,8 +624,8 @@ struct DeckView: View {
     @State var focusCards: Set<String>?
 
     enum DeckTab: String, CaseIterable {
-        case cards = "Cards"
         case overview = "Overview"
+        case cards = "Cards"
     }
 
     var body: some View {
@@ -559,23 +680,6 @@ struct DeckView: View {
 
     enum DeckTool { case fillGaps, duplicates, files }
 
-    /// The Mac's deck tools: the AI actions, and duplicate review.
-    private var toolsMenu: some View {
-        Menu("Tools") {
-            if hasModel {
-                if scope.drafts > 0 {
-                    Button("Refine \(scope.drafts) Drafts with AI") {
-                        library.refineDeckWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope))
-                    }
-                }
-                Button("Fill Gaps with AI…") { tool = .fillGaps }
-            }
-            Button("Review Duplicates…") { tool = .duplicates }
-            Button("Files in This Deck…") { tool = .files }
-        }
-        .fixedSize()
-    }
-
     @ViewBuilder
     private func session(_ mode: StudyMode) -> some View {
         switch mode {
@@ -583,6 +687,8 @@ struct DeckView: View {
             FlashcardSession(library: library, deckName: scope.title, cards: cards, finish: end)
         case .learn:
             LearnSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
+        case .practice(let cards):
+            LearnSession(library: library, deckName: scope.title, deckIds: scope.deckIds, focus: cards, finish: end)
         case .test:
             TestSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
         }
@@ -600,69 +706,66 @@ struct DeckView: View {
         if !due.isEmpty { mode = .flashcards(due) }
     }
 
+    /// The Mac's deck header: the deck's name large, the Overview / Cards
+    /// tabs at the right, then Study (the page's one yellow button), Learn
+    /// and Test as outlined pills, and one ••• menu for the deck's tools.
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .bottom, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    SectionLabel(scope.courseName)
-                    Text(scope.title).font(GRASPFont.display).foregroundColor(GRASPColor.textPrimary)
-                    Text(summary).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
-                }
+            HStack(alignment: .center, spacing: 12) {
+                Text(scope.title)
+                    .font(GRASPFont.display)
+                    .foregroundColor(GRASPColor.textPrimary)
+                    .lineLimit(1)
                 Spacer()
                 SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
-                if let deck {
-                    Menu("•••") {
-                        Button(deck.kicker == nil ? "Set Lecture Date…" : "Change Lecture Date…") {
-                            organize(.lectureDate(deck))
-                        }
-                        Button("Rename Deck…") { organize(.renameDeck(deck)) }
-                        Button("Delete Deck…") { organize(.deleteDeck(deck)) }
-                    }
-                    .fixedSize()
-                }
             }
-            // Study, Learn and Test in a fixed order, as on the Mac.
-            HStack(spacing: 8) {
-                Button(scope.due == 0 ? "Study (nothing due)" : "Study \(scope.due) Due") {
+            HStack(spacing: 10) {
+                GRASPButton("Study", kind: .primary) {
                     mode = .flashcards(library.dueCards(inDecks: scope.deckIds))
                 }
                 .disabled(scope.due == 0)
-                .fixedSize()
-                Button("Learn") { mode = .learn }.disabled(scope.total == scope.drafts).fixedSize()
-                Button("Test") { mode = .test }.disabled(scope.total == scope.drafts).fixedSize()
-                if scope.drafts > 0 {
-                    Button("Approve \(scope.drafts) Drafts") { library.approveDrafts(inDecks: scope.deckIds) }
-                        .fixedSize()
-                }
+                GRASPButton("Learn") { mode = .learn }.disabled(scope.total == scope.drafts)
+                GRASPButton("Test") { mode = .test }.disabled(scope.total == scope.drafts)
                 Spacer()
-                toolsMenu
+                deckMenu
             }
         }
         .padding(.horizontal, 28)
-        .padding(.top, 24)
+        .padding(.top, 22)
         .padding(.bottom, 16)
+    }
+
+    /// The deck's own actions and the tools, in one menu: SwiftCrossUI has
+    /// no right-click, and one menu on the page costs one view, not one a row.
+    private var deckMenu: some View {
+        Menu("•••") {
+            if hasModel {
+                if scope.drafts > 0 {
+                    Button("Refine \(scope.drafts) drafts with AI") {
+                        library.refineDeckWithAI(inDecks: scope.deckIds, courseId: library.courseId(of: scope))
+                    }
+                }
+                Button("Fill gaps with AI…") { tool = .fillGaps }
+            }
+            Button("Review duplicates…") { tool = .duplicates }
+            Button("Files in this deck…") { tool = .files }
+            if let deck {
+                Button(deck.kicker == nil ? "Set lecture date…" : "Change lecture date…") {
+                    organize(.lectureDate(deck))
+                }
+                Button("Rename deck…") { organize(.renameDeck(deck)) }
+                Button("Delete deck…") { organize(.deleteDeck(deck)) }
+            }
+        }
+        .fixedSize()
     }
 
     private var cardsPage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if scope.drafts > 0 && scope.due == 0 {
-                    Text("New cards start as drafts. Approve them to study them.")
-                        .foregroundColor(GRASPColor.textSecondary)
-                }
-                CardList(library: library, scope: scope, focus: $focusCards)
-            }
-            .padding(28)
+            CardList(library: library, scope: scope, focus: $focusCards,
+                     onPractice: { mode = .practice(Set($0)) })
+                .padding(.horizontal, 28)
+                .padding(.vertical, 20)
         }
-    }
-
-    /// "268 cards · 127 due · 141 drafts · 40 understood".
-    private var summary: String {
-        var parts = ["\(scope.total) cards"]
-        if scope.due > 0 { parts.append("\(scope.due) due") }
-        if scope.drafts > 0 { parts.append("\(scope.drafts) drafts") }
-        let understood = library.learnLevels(inDecks: scope.deckIds).values.filter { $0 == .mastered }.count
-        if understood > 0 { parts.append("\(understood) understood") }
-        return parts.joined(separator: " · ")
     }
 }
