@@ -31,6 +31,7 @@ struct TestSession: View {
             TestRun(library: library, deckName: deckName, attemptId: attemptId, questions: questions,
                     warning: warning, close: finish) { graded in
                 library.finishTest(attemptId: attemptId)
+                FeedbackService.shared.noteTestFinished()
                 phase = .results(attemptId: attemptId, graded: graded)
             }
         case .results(let attemptId, let graded):

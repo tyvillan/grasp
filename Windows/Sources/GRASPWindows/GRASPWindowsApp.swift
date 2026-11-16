@@ -110,6 +110,9 @@ struct ContentView: View {
     @State var selectedDecks: [String: String] = [:]
 
     var body: some View {
+        // Read here, in the body, so opening Send feedback redraws the
+        // window: a read inside the sheet's Binding alone isn't tracked.
+        let feedbackOpen = feedback.isPresenting
         HStack(spacing: 0) {
             Sidebar(library: library, route: $route)
                 .frame(width: Sidebar.width)
@@ -119,6 +122,19 @@ struct ContentView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(GRASPColor.canvas)
+                // The soft feedback ask, at the bottom right, never blocking.
+                .overlay(alignment: .bottomTrailing) {
+                    if let ask = feedback.showingAsk {
+                        FeedbackAskCard(ask: ask)
+                    }
+                }
+        }
+        .watch(route) {
+            Self.noteScreen(route)
+            feedback.showAskIfDue()
+        }
+        .sheet(isPresented: Binding(get: { feedbackOpen }, set: { if !$0 { feedback.isPresenting = false } })) {
+            SendFeedbackSheet { feedback.isPresenting = false }
         }
         #if os(Windows)
         .onAppear {
@@ -126,8 +142,33 @@ struct ContentView: View {
             // Ask Ollama once now, so the first deck page already knows
             // whether its AI items show (see Library.lastLocalModel).
             Task { _ = await library.localModel() }
+            // Starts the week for the soft asks (skipped for a library that
+            // already has content) and sends any feedback that was waiting.
+            feedback.start(libraryHasData: !library.decks.isEmpty || !library.coursesBySemester.isEmpty)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                feedback.showAskIfDue()
+            }
         }
         #endif
+    }
+
+    private var feedback: FeedbackService { FeedbackService.shared }
+
+    /// The screen feedback names, in fixed words. A deck page sets its own.
+    private static func noteScreen(_ route: Route) {
+        switch route {
+        case .home: FeedbackScreen.current = .home
+        case .calendar: FeedbackScreen.current = .calendar
+        case .settings: FeedbackScreen.current = .settings
+        case .search: FeedbackScreen.current = .search
+        case .library: FeedbackScreen.current = .library
+        case .studyGuides, .studyGuide: FeedbackScreen.current = .studyGuides
+        case .course:
+            if ![.deckCards, .deckOverview, .deckQuestions].contains(FeedbackScreen.current) {
+                FeedbackScreen.current = .course
+            }
+        }
     }
 
     @ViewBuilder
@@ -238,6 +279,11 @@ struct Sidebar: View {
                     footerLink("Import notes", action: importFolder)
                     footerLink("New course") { addingCourse = true }
                 }
+                // The Mac's quiet Send feedback, just above the profile button.
+                Text("Send feedback")
+                    .font(Font.system(size: 13.5))
+                    .foregroundColor(GRASPColor.textSecondary)
+                    .onTapGesture { FeedbackService.shared.open() }
                 profileButton
             }
             .padding(.horizontal, 16)
@@ -687,7 +733,11 @@ struct DeckView: View {
             if mode != nil { end() }
             takeStudyRequest()
         }
-        .onAppear { takeStudyRequest() }
+        .onAppear {
+            takeStudyRequest()
+            noteFeedbackScreen()
+        }
+        .watch(feedbackScreen) { noteFeedbackScreen() }
         .quietTask {
             let found = await library.localModel() != nil
             if hasModel != found { hasModel = found }
@@ -734,6 +784,31 @@ struct DeckView: View {
     private func end() {
         mode = nil
         library.finishSession()
+        // The end of a session is a moment with no sheet up: the first
+        // finished Test's ask can appear now.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            FeedbackService.shared.showAskIfDue()
+        }
+    }
+
+    /// What feedback names this page: the study mode, else the tab.
+    private var feedbackScreen: FeedbackScreen {
+        switch mode {
+        case .flashcards: return .study
+        case .learn, .practice: return .learn
+        case .test: return .test
+        case nil:
+            switch tab {
+            case .overview: return .deckOverview
+            case .cards: return .deckCards
+            case .questions: return .deckQuestions
+            }
+        }
+    }
+
+    private func noteFeedbackScreen() {
+        FeedbackScreen.current = feedbackScreen
     }
 
     /// Arrived from Home's "Continue": start the flashcards right away.

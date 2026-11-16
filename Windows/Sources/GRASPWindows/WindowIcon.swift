@@ -50,6 +50,12 @@ nonisolated enum WindowIcon {
 
     nonisolated(unsafe) private static var cachedWindow: HWND?
 
+    /// The GRASP window, for a feedback screenshot of it.
+    static func mainWindowHandle() -> HWND? {
+        if cachedWindow == nil || !IsWindow(cachedWindow) { cachedWindow = mainWindow() }
+        return cachedWindow
+    }
+
     /// This process's visible top-level window, if it's up yet.
     private static func mainWindow() -> HWND? {
         final class Search { var found: HWND? }
