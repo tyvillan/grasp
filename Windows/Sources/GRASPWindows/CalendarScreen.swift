@@ -132,7 +132,7 @@ struct CalendarScreen: View {
         // the last real width it saw, so they all agree.
         GeometryReader { proxy in
         let size = proxy.size
-        let width = Self.rememberedWidth(size.width)
+        let width = PaneWidth.width(size.width)
         VStack(spacing: 0) {
             header(events: events)
             Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
@@ -159,26 +159,6 @@ struct CalendarScreen: View {
                 EventEditor(library: library, target: editor) { self.editor = nil }
             }
         }
-    }
-
-    /// The pane's last real width.
-    private static var lastWidth: Double?
-
-    /// The width for this pass. The 0 and infinity passes need a guess, and
-    /// a wrong guess sticks: the grid's nodes keep the layout they made for
-    /// it, since the real pass offers them the same size. The window's
-    /// width less the sidebar is the pane's real width, so the first visit
-    /// after launch (which used to fall back to 1400, about 26 pt narrow)
-    /// and a resized window both start right.
-    private static func rememberedWidth(_ proposed: Double) -> Double {
-        if proposed.isFinite && proposed > 0 {
-            lastWidth = Double(proposed)
-            return Double(proposed)
-        }
-        #if os(Windows)
-        if let client = WindowIcon.clientWidth(), client > Sidebar.width + 1 { return client - Sidebar.width - 1 }
-        #endif
-        return lastWidth ?? 1400
     }
 
     /// The header, its rule and the legend under the month.

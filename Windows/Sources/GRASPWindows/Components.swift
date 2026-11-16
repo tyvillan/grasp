@@ -348,3 +348,25 @@ extension Binding where Value: Equatable {
         Binding(get: { self.wrappedValue }, set: { if $0 != self.wrappedValue { self.wrappedValue = $0 } })
     }
 }
+
+/// The detail pane's width for a `GeometryReader` pass. SwiftCrossUI runs a
+/// reader at width 0 and infinity before the real width, and a wrong guess
+/// sticks: the content's nodes keep the layout they made for it, since the
+/// real pass offers them the same size. The window's width less the sidebar
+/// is the pane's real width, so the first visit after launch (the calendar
+/// used to fall back to 1400, about 26 pt narrow) and a resized window both
+/// start right.
+enum PaneWidth {
+    private static var lastWidth: Double?
+
+    static func width(_ proposed: Double) -> Double {
+        if proposed.isFinite && proposed > 0 {
+            lastWidth = Double(proposed)
+            return Double(proposed)
+        }
+        #if os(Windows)
+        if let client = WindowIcon.clientWidth(), client > Sidebar.width + 1 { return client - Sidebar.width - 1 }
+        #endif
+        return lastWidth ?? 1400
+    }
+}

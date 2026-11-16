@@ -88,6 +88,7 @@ enum Route: Hashable {
     case calendar
     case settings
     case search
+    case library
     case course(String)
 }
 
@@ -138,6 +139,8 @@ struct ContentView: View {
             SettingsScreen(library: library, switchProfile: switchProfile)
         case .search:
             SearchScreen(library: library, onOpenDeck: study)
+        case .library:
+            LibraryScreen(library: library)
         case .course(let courseId):
             if let course = library.course(courseId) {
                 CourseView(
@@ -196,6 +199,7 @@ struct Sidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     SidebarRow(title: "Home", dot: nil, isSelected: route == .home) { route = .home }
                     SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) { route = .calendar }
+                    SidebarRow(title: "Library", dot: nil, isSelected: route == .library) { route = .library }
                     SidebarRow(title: "Search", dot: nil, isSelected: route == .search) { route = .search }
                     ForEach(groups.current, id: \.title) { section in
                         groupLabel(section.title)
