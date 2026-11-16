@@ -89,6 +89,8 @@ enum Route: Hashable {
     case settings
     case search
     case library
+    case studyGuides
+    case studyGuide(StudyGuideTarget)
     case course(String)
 }
 
@@ -141,6 +143,10 @@ struct ContentView: View {
             SearchScreen(library: library, onOpenDeck: study)
         case .library:
             LibraryScreen(library: library)
+        case .studyGuides:
+            StudyGuidesScreen(library: library) { route = .studyGuide($0) }
+        case .studyGuide(let target):
+            StudyGuidePage(library: library, target: target) { route = .studyGuides }
         case .course(let courseId):
             if let course = library.course(courseId) {
                 CourseView(
@@ -199,6 +205,7 @@ struct Sidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     SidebarRow(title: "Home", dot: nil, isSelected: route == .home) { route = .home }
                     SidebarRow(title: "Calendar", dot: nil, isSelected: route == .calendar) { route = .calendar }
+                    SidebarRow(title: "Study guides", dot: nil, isSelected: isStudyGuides) { route = .studyGuides }
                     SidebarRow(title: "Library", dot: nil, isSelected: route == .library) { route = .library }
                     SidebarRow(title: "Search", dot: nil, isSelected: route == .search) { route = .search }
                     ForEach(groups.current, id: \.title) { section in
@@ -322,6 +329,14 @@ struct Sidebar: View {
             Spacer()
         }
         .onTapGesture { route = .settings }
+    }
+
+    /// The Study guides row stays lit while one of its guides is open.
+    private var isStudyGuides: Bool {
+        switch route {
+        case .studyGuides, .studyGuide: return true
+        default: return false
+        }
     }
 
     private var syncLine: String {

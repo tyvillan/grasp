@@ -370,6 +370,7 @@ final class Library {
     @ObservationIgnored var homeCache: (key: String, value: HomeSnapshot)?
     @ObservationIgnored var guidedExamsCache: (key: String, value: [CalendarEvent])?
     @ObservationIgnored var examPageCache: (key: String, value: StudyGuideActions.ExamPage?)?
+    @ObservationIgnored var hubCache: (key: String, value: [StudyGuideActions.HubCourse])?
 
     /// Home's "Continue" opens a deck straight into flashcards: the deck
     /// page takes this on arrival.
