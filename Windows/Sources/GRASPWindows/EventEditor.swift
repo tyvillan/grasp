@@ -190,16 +190,16 @@ struct EventEditor: View {
     }
 
     private func planDescription(cards: Int, hasPlan: Bool) -> String {
-        guard cards > 0 else { return "No active cards in this deck yet -- add or approve some first." }
+        guard cards > 0 else { return "No active cards in this deck yet. Add or approve some first." }
         let event = edited
         let days = event.daysAway(from: Date())
         let plan = StudyPlanner.plan(cardCount: cards, from: Date(), examDate: event.startsAt)
         let existing = hasPlan ? "Replaces the current plan. " : ""
         let ending = plan.last?.isFinalReview == true
             ? ", ending with a full review the day before"
-            : " -- the exam is too soon for a separate review day, so it's all one push"
+            : ". The exam is too soon for a separate review day, so it's all one push"
         return "\(existing)\(cards) cards across \(days) day\(days == 1 ? "" : "s") "
-            + "-- \(plan.count) study block\(plan.count == 1 ? "" : "s")\(ending)."
+            + "in \(plan.count) study block\(plan.count == 1 ? "" : "s")\(ending)."
     }
 
     // MARK: - Saving

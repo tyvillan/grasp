@@ -127,7 +127,7 @@ private struct FileRow: View {
                     Text(file.material.title).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary).lineLimit(1)
                     Text(folder).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary).lineLimit(1)
                     if url != nil && !exists {
-                        Text("Not found on this PC -- moved, deleted, or not synced here")
+                        Text("Not found on this PC. It was moved, deleted, or not synced here.")
                             .font(GRASPFont.meta)
                             .foregroundColor(GRASPColor.rejected)
                     }

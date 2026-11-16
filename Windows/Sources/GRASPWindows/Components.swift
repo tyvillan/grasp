@@ -370,3 +370,79 @@ enum PaneWidth {
         return lastWidth ?? 1400
     }
 }
+
+// MARK: - Sheets
+
+/// The Mac's `GRASPSheet`, as the Library page's sheets draw it: a yellow
+/// square eyebrow, a heavy title (with the sparkle for AI), a muted line,
+/// the content, then the buttons on the right. One yellow button at most.
+struct GRASPSheet<Content: View, Footer: View>: View {
+    let eyebrow: String
+    let title: String
+    var message: String?
+    var ai = false
+    var width = 520.0
+    let content: Content
+    let footer: Footer
+
+    init(eyebrow: String, title: String, message: String? = nil, ai: Bool = false, width: Double = 520,
+         @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
+        self.eyebrow = eyebrow
+        self.title = title
+        self.message = message
+        self.ai = ai
+        self.width = width
+        self.content = content()
+        self.footer = footer()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionLabel(eyebrow)
+            HStack(spacing: 8) {
+                if ai { AIGlyph(size: 16) }
+                Text(title)
+                    .font(Font.system(size: 22, weight: .heavy))
+                    .foregroundColor(GRASPColor.textPrimary)
+            }
+            if let message {
+                Text(message)
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+            content
+            HStack(spacing: 8) { footer }
+        }
+        .padding(24)
+        .frame(width: width)
+        .background(GRASPColor.canvas)
+    }
+}
+
+/// A small label above a field in a sheet.
+struct FieldLabel: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(GRASPFont.eyebrow)
+            .foregroundColor(GRASPColor.textTertiary)
+    }
+}
+
+/// A tick box: a rounded square that fills yellow with an ink check, as in
+/// the Mac's popups.
+struct TickBox: View {
+    let isOn: Bool
+    var round = false
+
+    var body: some View {
+        Text(isOn ? "\u{2713}" : " ")
+            .font(Font.system(size: 12, weight: .bold))
+            .foregroundColor(GRASPColor.ink)
+            .frame(width: 18.0, height: 18.0)
+            .background(isOn ? GRASPColor.brand : GRASPColor.hairlineStrong)
+            .cornerRadius(round ? 9 : 5)
+    }
+}

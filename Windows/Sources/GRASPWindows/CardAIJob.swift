@@ -22,10 +22,12 @@ final class CardAIJob {
 
     /// Runs `work` with the local model and the job's progress reporter;
     /// `work` returns the sentence to show when it's done.
-    func run(library: Library, _ work: @escaping (any CardGenerator, GRASPDatabase) async -> String) {
+    func run(library: Library, generator override: (any CardGenerator)? = nil,
+             _ work: @escaping (any CardGenerator, GRASPDatabase) async -> String) {
         task = Task { [weak self] in
             guard let self else { return }
-            let generator = await CardGenerators.select()
+            let generator: any CardGenerator
+            if let override { generator = override } else { generator = await CardGenerators.select() }
             guard await generator.isAvailable else {
                 result = "Ollama isn't running, so nothing was changed. Settings shows its status."
                 isFinished = true
@@ -54,7 +56,7 @@ extension Library {
         startCardJob("Checking drafts against your notes…", courseId: courseId) { generator, database in
             let summary = await CardAI.refineDeck(inDecks: deckIds, using: generator, database: database)
             if summary.isEmpty {
-                return "Every draft checked out fine -- nothing read like assignment text, and nothing needed rewording."
+                return "Every draft checked out fine. Nothing read like assignment text, and nothing needed rewording."
             }
             var parts: [String] = []
             if !summary.context.refined.isEmpty {
@@ -76,7 +78,7 @@ extension Library {
             let added = await CardAI.generateAdditionalCards(inDecks: deckIds, maxPerNote: perNote, topic: topic,
                                                              using: generator, database: database)
             return added == 0
-                ? "No gaps found -- the notes' concepts are already covered by cards."
+                ? "No gaps found. The notes' concepts are already covered by cards."
                 : "Added \(added) new card\(added == 1 ? "" : "s"), marked AI and waiting in Pending for your review."
         }
     }
@@ -87,7 +89,7 @@ extension Library {
             switch await CardAI.refineCard(cardId, using: generator, database: database) {
             case .refined: return "The card was refined. Revert AI Rewrite on the card undoes a rewrite from the notes."
             case .removed: return "The card was removed: its note doesn't support it as a real definition."
-            case .unavailable: return "Nothing to change -- the card already reads well against its note."
+            case .unavailable: return "Nothing to change. The card already reads well against its note."
             }
         }
     }

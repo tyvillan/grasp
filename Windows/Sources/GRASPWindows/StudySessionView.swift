@@ -330,7 +330,7 @@ struct LearnSession: View {
     private var checkpoint: some View {
         VStack(spacing: 0) {
             SectionLabel("Checkpoint")
-            Text(roundIncorrect == 0 ? "Clean round" : roundCorrect == 0 ? "Rough round -- worth another pass" : "Round complete")
+            Text(roundIncorrect == 0 ? "Clean round" : roundCorrect == 0 ? "Rough round, worth another pass" : "Round complete")
                 .font(Font.system(size: 22, weight: .semibold))
                 .foregroundColor(GRASPColor.textPrimary)
                 .padding(.top, 8)
@@ -727,9 +727,9 @@ private struct VerdictLine: View {
         if answer.wasOverridden { return "✓ Marked correct" }
         switch answer.verdict {
         case .correct: return "✓ Correct"
-        case .close: return "✓ Close -- check your spelling"
+        case .close: return "✓ Close. Check your spelling"
         default:
-            return question.type == .written ? "✕ Not quite" : "✕ Not quite -- \(MathNotation.prettify(question.correctAnswer))"
+            return question.type == .written ? "✕ Not quite" : "✕ Not quite. The answer is \(MathNotation.prettify(question.correctAnswer))"
         }
     }
 }

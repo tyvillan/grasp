@@ -102,6 +102,6 @@ final class OverviewJob {
         default: list = "\(names.count) notes"
         }
         return "\(list) couldn't be written" + (wroteAny ? "; the rest were." : ".")
-            + " The model either came back with nothing usable or stopped responding -- check that Ollama is running."
+            + " The model either came back with nothing usable or stopped responding. Check that Ollama is running."
     }
 }

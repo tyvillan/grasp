@@ -42,6 +42,11 @@ final class AppSettings {
     /// Tests add questions the local model writes from your notes, as the
     /// Mac's "AI test questions" setting does.
     var aiTestQuestions = false { didSet { save() } }
+    /// Test setup's two sources, as on the Mac: "Quiz me on flashcards" (on
+    /// by default) and "Include questions" (the deck's saved questions; on
+    /// by default when AI test questions were on, which used to add them).
+    var testFlashcards = true { didSet { save() } }
+    var testQuestions = false { didSet { save() } }
     /// The focus timer's work and break lengths and its per-interval card
     /// target (0 hides it), with the Mac's defaults.
     var focusWorkMinutes = 25 { didSet { save() } }
@@ -66,6 +71,8 @@ final class AppSettings {
         var todayPlanChecked: String?
         var notesLayout: NotesLayout?
         var notesTimeframe: String?
+        var testFlashcards: Bool?
+        var testQuestions: Bool?
     }
 
     init(file: URL) {
@@ -85,6 +92,8 @@ final class AppSettings {
         todayPlanChecked = stored.todayPlanChecked ?? ""
         notesLayout = stored.notesLayout ?? notesLayout
         notesTimeframe = stored.notesTimeframe ?? ""
+        testFlashcards = stored.testFlashcards ?? true
+        testQuestions = stored.testQuestions ?? aiTestQuestions
     }
 
     /// The calendar the app's date grids use, starting the week on the
@@ -102,7 +111,8 @@ final class AppSettings {
                             aiTestQuestions: aiTestQuestions, focusWorkMinutes: focusWorkMinutes,
                             focusBreakMinutes: focusBreakMinutes, focusCardTarget: focusCardTarget,
                             todayPlanChecked: todayPlanChecked, notesLayout: notesLayout,
-                            notesTimeframe: notesTimeframe)
+                            notesTimeframe: notesTimeframe, testFlashcards: testFlashcards,
+                            testQuestions: testQuestions)
         guard let data = try? JSONEncoder().encode(stored) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Not atomic: Windows refuses the rename an atomic write ends with
