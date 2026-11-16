@@ -466,6 +466,8 @@ struct QuestionsTabTests {
         #expect(history[other.id] == nil)
         #expect(QuestionHistory(right: 2, of: 3).line == "Right 2 of the last 3")
         #expect(QuestionHistory(right: 0, of: 0).line == nil)
+        #expect(QuestionHistory(right: 1, of: 1).line == "Right 1 of 1")
+        #expect(QuestionHistory(right: 0, of: 1).line == "Right 0 of 1")
     }
 
     @Test("an unfinished test remembers which saved question each item was")

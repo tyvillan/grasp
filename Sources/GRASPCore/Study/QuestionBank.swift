@@ -86,7 +86,7 @@ public struct QuestionHistory: Sendable, Equatable {
     /// "Right 2 of the last 3", or nil when it has not been asked yet.
     public var line: String? {
         guard of > 0 else { return nil }
-        return of == 1 ? "Right 1 of 1" : "Right \(right) of the last \(of)"
+        return of == 1 ? "Right \(right) of 1" : "Right \(right) of the last \(of)"
     }
 }
 
