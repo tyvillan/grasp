@@ -161,12 +161,24 @@ struct CalendarScreen: View {
         }
     }
 
-    /// The pane's last real width; the first pass of a launch guesses.
-    private static var lastWidth = 1400.0
+    /// The pane's last real width.
+    private static var lastWidth: Double?
 
+    /// The width for this pass. The 0 and infinity passes need a guess, and
+    /// a wrong guess sticks: the grid's nodes keep the layout they made for
+    /// it, since the real pass offers them the same size. The window's
+    /// width less the sidebar is the pane's real width, so the first visit
+    /// after launch (which used to fall back to 1400, about 26 pt narrow)
+    /// and a resized window both start right.
     private static func rememberedWidth(_ proposed: Double) -> Double {
-        if proposed.isFinite && proposed > 0 { lastWidth = Double(proposed) }
-        return lastWidth
+        if proposed.isFinite && proposed > 0 {
+            lastWidth = Double(proposed)
+            return Double(proposed)
+        }
+        #if os(Windows)
+        if let client = WindowIcon.clientWidth(), client > Sidebar.width + 1 { return client - Sidebar.width - 1 }
+        #endif
+        return lastWidth ?? 1400
     }
 
     /// The header, its rule and the legend under the month.
