@@ -2,19 +2,17 @@ import Foundation
 import GRASPCore
 import SwiftCrossUI
 
-/// Settings, after the Mac's General and Advanced tabs, limited to what
-/// works on Windows so far: profile, account and sync, the daily goal,
-/// calendar preferences, the notes folder, local AI status, hidden courses
-/// and excluded folders. The Mac's focus timer, AI test questions and
-/// duplicate/off-topic sweeps arrive with those features.
+/// Settings, after the Mac's tabs, limited to what works on Windows so far:
+/// profile, account and sync, the daily goal, the focus timer, calendar
+/// preferences and local AI. The notes folder, archived courses, excluded
+/// folders and the library-wide checks live on the Library page, as on the
+/// Mac.
 struct SettingsScreen: View {
     let library: Library
     let switchProfile: () -> Void
     @Environment(\.chooseFile) var chooseFile
     @State var profileName = ""
     @State var newPIN = ""
-    @State var showingDuplicates = false
-    @State var duplicateGroups: [CardAI.DuplicateGroup] = []
     /// The model GRASP uses; empty means GRASP's pick (the Mac's
     /// "picking a model pins it").
     @State var chosenModel = UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey) ?? ""
@@ -42,11 +40,7 @@ struct SettingsScreen: View {
                 studyGoalSection
                 focusTimerSection
                 calendarSection
-                notesFolderSection
                 localAISection
-                hiddenCoursesSection
-                excludedFoldersSection
-                duplicatesSection
                 aboutSection
             }
             .padding(.horizontal, 32)
@@ -174,7 +168,7 @@ struct SettingsScreen: View {
             stepper(settings.focusCardTarget == 0 ? "No card target" : "\(settings.focusCardTarget) cards per interval",
                     minus: { settings.focusCardTarget = max(0, settings.focusCardTarget - 5) },
                     plus: { settings.focusCardTarget = min(200, settings.focusCardTarget + 5) })
-            Caption("Used by the focus timer in a flashcard session. It never pauses or interrupts you -- when an interval is up the bar changes colour and waits.")
+            Caption("Used by the focus timer in a flashcard session. It never pauses or interrupts you. When an interval is up, the bar changes colour and waits.")
         }
     }
 
@@ -184,25 +178,6 @@ struct SettingsScreen: View {
             Text(label).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary).frame(width: 180.0)
             Button("+") { plus() }.fixedSize()
             Spacer()
-        }
-    }
-
-    private var duplicatesSection: some View {
-        SettingsCard("Duplicate Cards") {
-            HStack(spacing: 8) {
-                Button("Scan All Courses for Duplicates…") {
-                    duplicateGroups = library.duplicateGroupsAcrossAllCourses()
-                    showingDuplicates = true
-                }
-                .fixedSize()
-                Spacer()
-            }
-            Caption("Looks for near-identical cards across every course, not just one deck -- it catches the same material imported under two course folders. Nothing is removed automatically: you pick which card survives in each group.")
-        }
-        .sheet(isPresented: $showingDuplicates) {
-            DuplicateReviewSheet(groups: duplicateGroups, merge: { library.mergeDuplicates($0) }) {
-                showingDuplicates = false
-            }
         }
     }
 
@@ -217,40 +192,6 @@ struct SettingsScreen: View {
                                 label: \.rawValue) { settings.calendarMode = $0 }
             }
             Caption("The calendar remembers the last view you picked, too.")
-        }
-    }
-
-    private var notesFolderSection: some View {
-        SettingsCard("Notes Folder") {
-            HStack(spacing: 8) {
-                Text(settings.notesFolder ?? "None chosen yet")
-                    .font(GRASPFont.body)
-                    .foregroundColor(settings.notesFolder == nil ? GRASPColor.textTertiary : GRASPColor.textPrimary)
-                    .lineLimit(1)
-                Spacer()
-                Button("Choose…") {
-                    Task {
-                        guard let folder = await chooseFile(
-                            title: "Choose your notes folder", defaultButtonLabel: "Choose",
-                            allowSelectingFiles: false, allowSelectingDirectories: true
-                        ) else { return }
-                        settings.notesFolder = folder.path
-                    }
-                }
-                .fixedSize()
-                Button("Import Now") {
-                    guard let path = settings.notesFolder else { return }
-                    Task { await library.importVault(at: URL(fileURLWithPath: path, isDirectory: true)) }
-                }
-                .disabled(settings.notesFolder == nil || library.isImporting)
-                .fixedSize()
-            }
-            if library.isImporting {
-                Caption("Importing…")
-            } else if let status = library.status {
-                Caption(status)
-            }
-            Caption("GRASP only reads from this folder; it never writes to your notes. It looks for College\\<semester>\\<course> folders inside it. PDFs and images are read with Windows' own text recognition.")
         }
     }
 
@@ -301,28 +242,11 @@ struct SettingsScreen: View {
                         Text("AI test questions")
                             .font(GRASPFont.rowTitle)
                             .foregroundColor(GRASPColor.textPrimary)
-                        Caption("Tests mix in written questions the model writes from your notes -- about a third of the questions, up to 10. Starting a test takes a little longer; you can skip the wait.")
+                        Caption("Tests mix in written questions the model writes from your notes: about a third of the questions, up to 10. Starting a test takes a little longer; you can skip the wait.")
                     }
                     Spacer()
                     SegmentedChoice(options: [false, true], selection: library.settings.aiTestQuestions,
                                     label: { $0 ? "On" : "Off" }) { library.settings.aiTestQuestions = $0 }
-                }
-                Rectangle().fill(GRASPColor.hairline).frame(height: 1.0)
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Check all cards against their notes")
-                            .font(GRASPFont.rowTitle)
-                            .foregroundColor(GRASPColor.textPrimary)
-                        Caption("A one-time sweep, card by card: a definition that reads like assignment instructions or a vague fragment is rewritten from its note, or removed if the note doesn't support one. Rewrites can be reverted from each card. Takes a while on a big library.")
-                    }
-                    Spacer()
-                    Button("Check All Cards") { library.sweepAllCardsWithAI() }
-                        .disabled(library.cardJob(forCourse: nil).map { !$0.isFinished } ?? false)
-                        .fixedSize()
-                }
-                if let job = library.cardJob(forCourse: nil) {
-                    CardJobStrip(job: job) { library.dismissCardJob(forCourse: nil) }
-                        .cornerRadius(6)
                 }
             }
         }
@@ -333,40 +257,6 @@ struct SettingsScreen: View {
         case .checking: return "Checking…"
         case .notDetected: return "Ollama Not Detected"
         case .running: return "Ollama Running"
-        }
-    }
-
-    private var hiddenCoursesSection: some View {
-        SettingsCard("Hidden Courses") {
-            if library.archivedCourses.isEmpty {
-                Caption("Courses you archive (on any device) appear here.")
-            } else {
-                ForEach(library.archivedCourses, id: \.id) { course in
-                    HStack(spacing: 8) {
-                        Text(course.name).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary)
-                        Spacer()
-                        Button("Unarchive") { library.unarchiveCourse(course.id) }.fixedSize()
-                    }
-                }
-                Caption("Hidden from the sidebar and Home, but their notes and cards are untouched.")
-            }
-        }
-    }
-
-    private var excludedFoldersSection: some View {
-        SettingsCard("Excluded Folders") {
-            if library.excludedFolders.isEmpty {
-                Caption("Deleting a course that came from your notes folder excludes its folder here, so the next import doesn't bring it back.")
-            } else {
-                ForEach(library.excludedFolders, id: \.self) { path in
-                    HStack(spacing: 8) {
-                        Text(path).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary).lineLimit(1)
-                        Spacer()
-                        Button("Re-include") { library.includeFolder(path) }.fixedSize()
-                    }
-                }
-                Caption("Skipped entirely on your next import. Adding files back to one of these folders re-includes it automatically.")
-            }
         }
     }
 

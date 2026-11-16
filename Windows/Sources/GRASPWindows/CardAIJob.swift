@@ -102,6 +102,18 @@ extension Library {
         }
     }
 
+    /// The same sweep, limited to the courses picked on the Library page.
+    func sweepCardsWithAI(inCourses courseIds: Set<String>) {
+        let headline = courseIds.count == 1 ? "Checking one course against its notes\u{2026}"
+            : "Checking \(courseIds.count) courses against their notes\u{2026}"
+        startCardJob(headline, courseId: nil) { generator, database in
+            let summary = await CardAI.sweepCards(inCourses: courseIds, using: generator, database: database)
+            return summary.isEmpty
+                ? "Every card checked out against its note."
+                : "Rewrote \(summary.refined.count) and removed \(summary.removed.count). Rewrites can be reverted from each card."
+        }
+    }
+
     func duplicateGroupsAcrossAllCourses() -> [CardAI.DuplicateGroup] {
         (try? database.queue.read { try CardAI.duplicateGroupsAcrossAllCourses(db: $0) }) ?? []
     }

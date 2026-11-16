@@ -11,6 +11,20 @@ final class AppSettings {
         case month = "Month", week = "Week", agenda = "Agenda"
     }
 
+    /// How the notes folder is read, as the Mac's `AppStore.NotesLayout`.
+    enum NotesLayout: String, Codable, CaseIterable {
+        case automatic, vault, folders, none
+
+        var title: String {
+            switch self {
+            case .automatic: return "Automatic"
+            case .vault: return "Obsidian vault"
+            case .folders: return "Any folder"
+            case .none: return "None"
+            }
+        }
+    }
+
     /// Cards a day that count as a full day; 0 means no goal. The Mac's
     /// "Study Goals" setting, with the same default.
     var dailyGoal = 20 { didSet { save() } }
@@ -20,6 +34,11 @@ final class AppSettings {
     var calendarMode: CalendarMode = .month { didSet { save() } }
     /// The notes folder "Import now" re-imports; nil until one is chosen.
     var notesFolder: String? { didSet { save() } }
+    /// How the notes folder is read; Automatic picks the vault layout when
+    /// it finds a College folder inside.
+    var notesLayout: NotesLayout = .automatic { didSet { save() } }
+    /// The term new courses from "Any folder" go under ("Fall 2026").
+    var notesTimeframe = "" { didSet { save() } }
     /// Tests add questions the local model writes from your notes, as the
     /// Mac's "AI test questions" setting does.
     var aiTestQuestions = false { didSet { save() } }
@@ -45,6 +64,8 @@ final class AppSettings {
         var focusBreakMinutes: Int?
         var focusCardTarget: Int?
         var todayPlanChecked: String?
+        var notesLayout: NotesLayout?
+        var notesTimeframe: String?
     }
 
     init(file: URL) {
@@ -62,6 +83,8 @@ final class AppSettings {
         focusBreakMinutes = stored.focusBreakMinutes ?? focusBreakMinutes
         focusCardTarget = stored.focusCardTarget ?? focusCardTarget
         todayPlanChecked = stored.todayPlanChecked ?? ""
+        notesLayout = stored.notesLayout ?? notesLayout
+        notesTimeframe = stored.notesTimeframe ?? ""
     }
 
     /// The calendar the app's date grids use, starting the week on the
@@ -78,7 +101,8 @@ final class AppSettings {
                             calendarMode: calendarMode, notesFolder: notesFolder,
                             aiTestQuestions: aiTestQuestions, focusWorkMinutes: focusWorkMinutes,
                             focusBreakMinutes: focusBreakMinutes, focusCardTarget: focusCardTarget,
-                            todayPlanChecked: todayPlanChecked)
+                            todayPlanChecked: todayPlanChecked, notesLayout: notesLayout,
+                            notesTimeframe: notesTimeframe)
         guard let data = try? JSONEncoder().encode(stored) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Not atomic: Windows refuses the rename an atomic write ends with

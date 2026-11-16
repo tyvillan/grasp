@@ -91,6 +91,8 @@ final class Library {
     var status: String?
     /// Set while any import runs (the notes folder, or files into a course).
     var isImporting = false
+    /// What the last folder import did, for the Library page.
+    private(set) var lastImportSummary: ImportSummary?
     /// Sign-in and sync. Set up after the library loads, since it reloads
     /// the library when another device's changes arrive.
     private(set) var account: Account!
@@ -290,11 +292,24 @@ final class Library {
     @ObservationIgnored private var cachedVaultPaths: VaultPathMap?
 
     /// Imports a notes folder laid out as `College/<semester>/<course>/`.
-    func importVault(at root: URL) async {
+    /// Reads the notes folder the way the Library page's Layout says (the
+    /// Mac's `runImport`): as a vault, as plain course folders, or, for
+    /// Automatic, as a vault when it has a College folder inside.
+    func importVault(at root: URL, layout: AppSettings.NotesLayout? = nil) async {
+        let layout = layout ?? settings.notesLayout
+        guard layout != .none else {
+            status = "Folder reading is off. Add files to a course by hand instead."
+            return
+        }
         isImporting = true
         defer { isImporting = false }
         do {
-            let summary = try await VaultScanner(database: database, paths: vaultPaths()).scan(vaultRoot: root)
+            let scanner = VaultScanner(database: database, paths: vaultPaths())
+            let asVault = layout == .vault || (layout == .automatic && VaultScanner.hasVaultLayout(root))
+            let timeframe = settings.notesTimeframe.trimmingCharacters(in: .whitespaces)
+            let summary = asVault ? try await scanner.scan(vaultRoot: root)
+                                  : try await scanner.scanFolders(root: root, timeframe: timeframe.isEmpty ? nil : timeframe)
+            lastImportSummary = summary
             if summary.courseCount == 0 {
                 status = "No courses found. GRASP looks for College\\<semester>\\<course> folders inside \(root.lastPathComponent)."
             } else {
@@ -313,7 +328,7 @@ final class Library {
     func importSample() async {
         do {
             let root = try Self.supportDirectory().appendingPathComponent("Sample Notes", isDirectory: true)
-            await importVault(at: try SampleVault.write(to: root))
+            await importVault(at: try SampleVault.write(to: root), layout: .vault)
         } catch {
             status = "Couldn't write the sample notes: \(error.localizedDescription)"
         }
