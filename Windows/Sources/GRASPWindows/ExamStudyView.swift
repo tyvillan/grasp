@@ -32,6 +32,20 @@ extension Library {
         }) ?? 0) > 0
     }
 
+    /// A guide with no exam, read as its own page (`isPracticeSet`).
+    func practicePage(guideId: String) -> StudyGuideActions.ExamPage? {
+        (try? database.queue.read { try StudyGuideActions.practicePage(guideId: guideId, db: $0) }) ?? nil
+    }
+
+    /// The Study guides page: every course's exams and guides.
+    func studyGuideHub(now: Date = Date()) -> [StudyGuideActions.HubCourse] {
+        let key = "\(revision)#\(Calendar.current.startOfDay(for: now).timeIntervalSince1970)"
+        if let cached = hubCache, cached.key == key { return cached.value }
+        let value = (try? database.queue.read { try StudyGuideActions.hub(now: now, db: $0) }) ?? []
+        hubCache = (key, value)
+        return value
+    }
+
     func examPage(examEventId: String) -> StudyGuideActions.ExamPage? {
         let key = "\(revision)#\(examEventId)"
         if let cached = examPageCache, cached.key == key { return cached.value }
@@ -116,6 +130,9 @@ struct ExamStudyView: View {
     let course: Course
     let exam: CalendarEvent
     let organize: (OrganizeSheet) -> Void
+    /// Set for a guide with no exam: its page has no Study tab and no Add
+    /// Study Guide, and its header says "Practice set".
+    var practiceGuideId: String?
     @State var tab: Tab = .guide
     @State var message: String?
     @Environment(\.chooseFile) var chooseFile
@@ -127,11 +144,14 @@ struct ExamStudyView: View {
     }
 
     var body: some View {
-        let page = library.examPage(examEventId: exam.id)
+        let page = practiceGuideId.map { library.practicePage(guideId: $0) } ?? library.examPage(examEventId: exam.id)
         let decks = library.decks(inCourse: course.id)
+        let isPractice = practiceGuideId != nil
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                SegmentedChoice(options: Tab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                if !isPractice {
+                    SegmentedChoice(options: Tab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                }
                 Spacer()
                 if library.isImporting {
                     Text("Reading guide…").font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary).fixedSize()
@@ -151,9 +171,10 @@ struct ExamStudyView: View {
                     }
                     .fixedSize()
                 }
-                Button("Add Study Guide…") { addGuide() }
-                    .disabled(library.isImporting)
-                    .fixedSize()
+                if !isPractice {
+                    GRASPButton("Add study guide\u{2026}") { addGuide() }
+                        .disabled(library.isImporting)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
@@ -279,7 +300,7 @@ private struct ExamHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(Self.date(page.exam.startsAt)) · \(page.exam.countdownText())".uppercased())
+            Text((page.isPracticeSet ? "Practice set" : "\(Self.date(page.exam.startsAt)) · \(page.exam.countdownText())").uppercased())
                 .font(GRASPFont.eyebrow)
                 .foregroundColor(GRASPColor.accent)
             Text(page.exam.title)
@@ -444,7 +465,7 @@ private struct PartSection: View {
         let covered = decks.filter { part.deckIds.contains($0.id) }
         return HStack(spacing: 8) {
             Text(covered.isEmpty
-                 ? "No lecture deck yet -- this guide is the only source for this part."
+                 ? "No lecture deck yet. This guide is the only source for this part."
                  : covered.map(\.name).joined(separator: ", "))
                 .font(GRASPFont.meta)
                 .foregroundColor(covered.isEmpty ? GRASPColor.textTertiary : GRASPColor.textSecondary)
