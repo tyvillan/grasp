@@ -190,7 +190,7 @@ private struct FocusTimerSettings: View {
             stepper("Card target per interval", value: settings.focusCardTarget, unit: "cards", range: 0...200, step: 5) {
                 settings.focusCardTarget = $0
             }
-            Text("Set the card target to 0 to hide it. The timer never interrupts a session -- it changes colour when an interval is up and waits for you.")
+            Text("Set the card target to 0 to hide it. The timer never interrupts a session. It changes colour when an interval is up and waits for you.")
                 .font(GRASPFont.meta)
                 .foregroundColor(GRASPColor.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

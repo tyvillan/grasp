@@ -109,7 +109,7 @@ private struct CourseEditor: View {
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("e.g. Fall 2026 (leave empty for No Timeline)", text: $timeline)
                     if original?.folderPath != nil {
-                        Text("Changing this here sticks -- importing again never overwrites a course's timeline once it's set.")
+                        Text("Changing this here sticks. Importing again never overwrites a course's timeline once it's set.")
                             .font(GRASPFont.meta)
                             .foregroundColor(GRASPColor.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -123,7 +123,7 @@ private struct CourseEditor: View {
                         SectionLabel("Source folder")
                         Text(folder).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
                     } else {
-                        Text("Added by hand -- no notes folder, so importing won't add notes to it.")
+                        Text("Added by hand, with no notes folder, so importing won't add notes to it.")
                             .font(GRASPFont.meta)
                             .foregroundColor(GRASPColor.textSecondary)
                     }

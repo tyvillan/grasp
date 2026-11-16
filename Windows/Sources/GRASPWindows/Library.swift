@@ -514,19 +514,6 @@ final class Library {
         return result
     }
 
-    /// Questions saved against these decks (the test bank: code questions
-    /// and hand-written or imported ones), asked the way the test's Written
-    /// and Multiple choice settings say. As on the Mac, they come first.
-    func bankQuestions(inDecks deckIds: [String], count: Int, allowWritten: Bool, allowMultipleChoice: Bool)
-        -> [LearnEngine.RoundQuestion] {
-        guard count > 0, allowWritten || allowMultipleChoice else { return [] }
-        return (try? database.queue.read { db in
-            var rng = SystemRandomNumberGenerator()
-            return try CodeQuestionBank.pickRound(count: count, inDecks: deckIds, allowWritten: allowWritten,
-                                                  allowMultipleChoice: allowMultipleChoice, using: &rng, db: db)
-        }) ?? []
-    }
-
     func submitTestAnswer(attemptId: String, ordinal: Int, given: String, isCorrect: Bool) {
         record { try Study.submitTestAnswer(attemptId: attemptId, ordinal: ordinal, given: given, isCorrect: isCorrect, db: $0) }
     }
@@ -782,14 +769,22 @@ final class Library {
 
     func dismissCardJob(forCourse courseId: String?) { cardJobs[courseId ?? ""] = nil }
 
-    /// One card AI job at a time per course.
-    func startCardJob(_ headline: String, courseId: String?,
+    /// One card AI job at a time per course. `generator` replaces the chosen
+    /// model (the screenshot stand-in); nil picks the model as usual.
+    func startCardJob(_ headline: String, courseId: String?, generator: (any CardGenerator)? = nil,
                       _ work: @escaping (any CardGenerator, GRASPDatabase) async -> String) {
         guard cardJob(forCourse: courseId).map(\.isFinished) ?? true else { return }
         let job = CardAIJob(headline: headline)
         cardJobs[courseId ?? ""] = job
-        job.run(library: self, work)
+        job.run(library: self, generator: generator, work)
     }
+
+    /// What the last "Generate test questions with AI" run did, for the
+    /// Questions tab's banner.
+    var lastQuestionDraftRun: QuestionDraftRun?
+    /// A deck's saved questions with their history and meters, per revision.
+    @ObservationIgnored let questionCache = RevisionCache<QuestionListing>()
+    @ObservationIgnored let questionCountCache = RevisionCache<Int>(limit: 48)
 
     /// A lesson was just saved: show it, and sync it to the Mac.
     func overviewsChanged() {

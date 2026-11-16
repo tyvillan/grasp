@@ -74,6 +74,8 @@ private struct TestSetup: View {
     @State var shuffle = true
     @State var excludeKnown = false
     @State var noQuestions = false
+    /// "Include questions" for a deck with no cards, on until turned off here.
+    @State var questionsWithoutCards = true
     /// While the model writes questions: what it's doing, and how far along.
     @State var writing: String?
     @State var writingFraction = 0.0
@@ -81,7 +83,25 @@ private struct TestSetup: View {
     @State var skip = SkipBox()
 
     private var anyType: Bool { multipleChoice || written || trueFalse }
-    private var usesAI: Bool { library.settings.aiTestQuestions && written }
+    /// The deck's approved cards: with none, a test comes from its saved
+    /// questions alone.
+    private var hasCards: Bool { library.cards(inDecks: deckIds).contains { $0.status == .active } }
+    /// What the test will really use, whatever the saved switches say.
+    private var useFlashcards: Bool { hasCards && library.settings.testFlashcards }
+    private var useQuestions: Bool { hasCards ? library.settings.testQuestions : questionsWithoutCards }
+    /// Fresh AI questions go with the flashcard side, as on the Mac.
+    private var usesAI: Bool { library.settings.aiTestQuestions && written && useFlashcards }
+    private var sourcesProblem: String? {
+        Study.testSourcesProblem(includeFlashcards: useFlashcards, includeQuestions: useQuestions)
+    }
+
+    private var config: TestBuilder.Config {
+        TestBuilder.Config(
+            questionCount: questionCount, allowMultipleChoice: multipleChoice, allowWritten: written,
+            allowTrueFalse: trueFalse, shuffle: shuffle, excludeMastered: excludeKnown,
+            includeFlashcards: useFlashcards
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -103,6 +123,7 @@ private struct TestSetup: View {
                         Pill(title: "True / False", isOn: trueFalse) { trueFalse.toggle() }
                     }
                 }
+                row("Sources") { sources }
                 row("Options") {
                     HStack(spacing: 6) {
                         Pill(title: "Shuffle order", isOn: shuffle) { shuffle.toggle() }
@@ -115,14 +136,19 @@ private struct TestSetup: View {
                         .foregroundColor(GRASPColor.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if !anyType {
+                if let sourcesProblem {
+                    Text(sourcesProblem).font(GRASPFont.meta).foregroundColor(GRASPColor.rejected)
+                } else if !anyType {
                     Text("Pick at least one question type.").font(GRASPFont.meta).foregroundColor(GRASPColor.rejected)
                 } else if noQuestions {
-                    Text(excludeKnown
-                         ? "No cards match -- every card here is marked as known. Turn off \"Only cards I haven't marked as known\" to test on them anyway."
-                         : "No approved cards match these settings, so there's nothing to test.")
+                    Text(useFlashcards && excludeKnown
+                         ? "No cards match. Every card here is marked as known. Turn off \"Only cards I haven't marked as known\" to test on them anyway."
+                         : useFlashcards ? "No cards or saved questions match these settings, so there's nothing to test."
+                         : "No saved questions match these settings, so there's nothing to test.")
                         .font(GRASPFont.meta)
                         .foregroundColor(GRASPColor.rejected)
+                } else {
+                    matchingLine
                 }
                 if let writing {
                     VStack(alignment: .leading, spacing: 6) {
@@ -140,7 +166,9 @@ private struct TestSetup: View {
                 HStack(spacing: 8) {
                     Spacer()
                     Button("Cancel") { cancel() }.disabled(writing != nil).fixedSize()
-                    Button("Start Test") { begin() }.disabled(!anyType || writing != nil).fixedSize()
+                    Button("Start Test") { begin() }
+                        .disabled(!anyType || writing != nil || sourcesProblem != nil)
+                        .fixedSize()
                 }
             }
             .frame(maxWidth: 560.0)
@@ -156,19 +184,61 @@ private struct TestSetup: View {
         }
     }
 
+    /// How many questions these settings can really ask, when it's fewer
+    /// than asked for.
+    @ViewBuilder
+    private var matchingLine: some View {
+        let matching = library.matchingTestQuestionCount(deckIds: deckIds, config: config, includeQuestions: useQuestions)
+        if matching < questionCount {
+            Text(matching == 0 ? "No questions match these types."
+                 : "\(matching) question\(matching == 1 ? "" : "s") match these types. The test will have \(matching).")
+                .font(GRASPFont.meta)
+                .foregroundColor(matching == 0 ? GRASPColor.rejected : GRASPColor.textTertiary)
+        }
+    }
+
+    /// The Mac's two independent sources: the deck's flashcards, and the
+    /// questions saved on its Questions tab.
+    private var sources: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Pill(title: "Quiz me on flashcards", isOn: useFlashcards) {
+                    if hasCards { library.settings.testFlashcards.toggle() }
+                }
+                Text(hasCards ? "Questions made from this deck's cards." : "This deck has no cards.")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Pill(title: "Include questions", isOn: useQuestions) {
+                    if hasCards { library.settings.testQuestions.toggle() } else { questionsWithoutCards.toggle() }
+                }
+                Text(savedQuestionsCaption)
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+            }
+        }
+    }
+
+    /// What "Include questions" will do, in a line.
+    private var savedQuestionsCaption: String {
+        let saved = library.questionCounts(inDecks: deckIds).active
+        guard saved > 0 else { return "No saved questions yet. Add some on the deck's Questions tab." }
+        let noun = "\(saved) saved question\(saved == 1 ? "" : "s")"
+        return useFlashcards
+            ? "\(noun) from this deck's Questions tab. About a third of the test."
+            : "\(noun) from this deck's Questions tab. The whole test comes from them."
+    }
+
     private func begin() {
-        let config = TestBuilder.Config(
-            questionCount: questionCount, allowMultipleChoice: multipleChoice, allowWritten: written,
-            allowTrueFalse: trueFalse, shuffle: shuffle, excludeMastered: excludeKnown
-        )
+        let config = self.config
         noQuestions = false
         // Saved questions come first, as on the Mac: they were checked, or
-        // written by hand. They share the AI questions' room in the test.
-        let room = Study.aiQuestionBudget(for: questionCount)
-        let saved = library.settings.aiTestQuestions
-            ? library.bankQuestions(inDecks: deckIds, count: room, allowWritten: written, allowMultipleChoice: multipleChoice)
-            : []
-        let budget = room - saved.count
+        // written by hand. With flashcards on they are about a third of the
+        // test; with questions alone, all of it. Fresh AI questions only
+        // fill the room left in the usual third.
+        let saved = useQuestions ? library.savedQuestionsForTest(inDecks: deckIds, config: config) : []
+        let budget = Study.aiQuestionBudget(for: questionCount) - saved.count
         guard usesAI, budget > 0 else {
             launch(config, aiQuestions: saved, warning: nil)
             return

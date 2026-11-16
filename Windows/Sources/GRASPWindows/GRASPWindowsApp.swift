@@ -653,6 +653,7 @@ struct DeckView: View {
     enum DeckTab: String, CaseIterable {
         case overview = "Overview"
         case cards = "Cards"
+        case questions = "Questions"
     }
 
     var body: some View {
@@ -670,6 +671,12 @@ struct DeckView: View {
                         focusCards = Set(ids)
                         tab = .cards
                     }, scope: scope)
+                } else if tab == .questions {
+                    ScrollView {
+                        QuestionsTab(library: library, scope: scope, canGenerate: canGenerate)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 20)
+                    }
                 } else {
                     cardsPage
                 }
@@ -739,15 +746,32 @@ struct DeckView: View {
     /// The Mac's deck header: the deck's name large, the Overview / Cards
     /// tabs at the right, then Study (the page's one yellow button), Learn
     /// and Test as outlined pills, and one ••• menu for the deck's tools.
+    /// Whether a model can write test questions: Ollama is up, or the
+    /// screenshot stand-in is on.
+    private var canGenerate: Bool {
+        hasModel || StubHooks.enabled("GRASP_STUB_QUESTIONS")
+    }
+
     private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Two cached counting queries: drafts beside the tab, and whether
+        // Test has saved questions to ask when the deck has no cards.
+        let questions = library.questionCounts(inDecks: scope.deckIds)
+        let canTest = Study.testAvailability(activeCards: scope.total == scope.drafts ? 0 : 1,
+                                             activeQuestions: questions.active).isAvailable
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
                 Text(scope.title)
                     .font(GRASPFont.display)
                     .foregroundColor(GRASPColor.textPrimary)
                     .lineLimit(1)
                 Spacer()
-                SegmentedChoice(options: DeckTab.allCases, selection: tab, label: \.rawValue) { tab = $0 }
+                // The draft count is part of the label ("Questions 4", as on the
+                // iPhone): a separate count view squeezed the label to "Qu..."
+                // when it appeared after the first layout.
+                SegmentedChoice(options: DeckTab.allCases, selection: tab,
+                                label: { $0 == .questions && questions.drafts > 0 ? "Questions \(questions.drafts)" : $0.rawValue }) {
+                    if tab != $0 { tab = $0 }
+                }
             }
             HStack(spacing: 10) {
                 GRASPButton("Study", kind: .primary) {
@@ -755,7 +779,7 @@ struct DeckView: View {
                 }
                 .disabled(scope.due == 0)
                 GRASPButton("Learn") { mode = .learn }.disabled(scope.total == scope.drafts)
-                GRASPButton("Test") { mode = .test }.disabled(scope.total == scope.drafts)
+                GRASPButton("Test") { mode = .test }.disabled(!canTest)
                 Spacer()
                 deckMenu
             }
