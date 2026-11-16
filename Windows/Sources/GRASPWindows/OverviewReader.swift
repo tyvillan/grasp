@@ -22,8 +22,8 @@ struct OverviewPane: View {
     @State var pending: [MissingNote]?
     /// Which local model would write, or nil when Ollama isn't up. Checked
     /// when the tab opens, since the server can come and go.
-    @State var model: String?
-    @State var checkedModel = false
+    @State var model: String? = Library.lastLocalModel ?? nil
+    @State var checkedModel = Library.lastLocalModel != nil
 
     /// The reading measure, as on the Mac: near 75 characters a line.
     static let measure = 680.0
@@ -67,13 +67,15 @@ struct OverviewPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .onChange(of: scope.id) {
-            lessonIndex = 0
-            pending = nil
+        .watch(scope.id) {
+            // Only what differs: each @State write redraws the lesson.
+            if lessonIndex != 0 { lessonIndex = 0 }
+            if pending != nil { pending = nil }
         }
-        .task {
-            model = await library.localModel()
-            checkedModel = true
+        .quietTask {
+            let found = await library.localModel()
+            if model != found { model = found }
+            if !checkedModel { checkedModel = true }
         }
     }
 
@@ -153,7 +155,12 @@ struct OverviewPane: View {
                 .fixedSize()
             Picker(of: choices, selection: Binding(
                 get: { choices[index] },
-                set: { lessonIndex = $0?.index ?? 0 }
+                set: { choice in
+                    // The drop-down reports its selection when it is made; a
+                    // write of the same index would redraw the whole lesson.
+                    let new = choice?.index ?? 0
+                    if new != lessonIndex { lessonIndex = new }
+                }
             ))
             Spacer()
             GRASPButton("\u{2190} Previous") { lessonIndex = index - 1 }.disabled(index == 0)

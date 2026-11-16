@@ -109,7 +109,7 @@ struct ContentView: View {
     var body: some View {
         HStack(spacing: 0) {
             Sidebar(library: library, route: $route)
-                .frame(width: 240.0)
+                .frame(width: Sidebar.width)
                 .frame(maxHeight: .infinity)
                 .background(GRASPColor.sidebar)
             HairlineColumn()
@@ -118,7 +118,12 @@ struct ContentView: View {
                 .background(GRASPColor.canvas)
         }
         #if os(Windows)
-        .onAppear { KeyCommands.install() }
+        .onAppear {
+            KeyCommands.install()
+            // Ask Ollama once now, so the first deck page already knows
+            // whether its AI items show (see Library.lastLocalModel).
+            Task { _ = await library.localModel() }
+        }
         #endif
     }
 
@@ -165,6 +170,9 @@ struct ContentView: View {
 /// behind one "Past terms" row. Import sits as two quiet links above the
 /// profile button, which opens Settings (account, profile, sign out).
 struct Sidebar: View {
+    /// Its fixed width; a 1 pt rule follows it.
+    static let width = 240.0
+
     let library: Library
     @Binding var route: Route
     @Environment(\.chooseFile) var chooseFile
@@ -536,7 +544,7 @@ struct DeckColumn: View {
     /// A deck's cards by stage, for the thin bar under its name; nil when
     /// nobody has been asked about any of them yet.
     private func understanding(_ deckId: String) -> DeckUnderstanding.Distribution? {
-        let distribution = DeckUnderstanding.distribution(of: library.understanding(inDecks: [deckId]).cards)
+        let distribution = library.distribution(ofDeck: deckId)
         return distribution.total > distribution.notAsked ? distribution : nil
     }
 }
@@ -649,12 +657,15 @@ struct DeckView: View {
             }
         }
         // A new deck starts fresh, not mid-way through the last one's session.
-        .onChange(of: scope.id) {
+        .watch(scope.id) {
             if mode != nil { end() }
             takeStudyRequest()
         }
         .onAppear { takeStudyRequest() }
-        .task { hasModel = await library.localModel() != nil }
+        .quietTask {
+            let found = await library.localModel() != nil
+            if hasModel != found { hasModel = found }
+        }
         .sheet(isPresented: Binding(get: { tool != nil }, set: { if !$0 { tool = nil } })) {
             switch tool {
             case .fillGaps:
@@ -675,7 +686,7 @@ struct DeckView: View {
 
     /// Whether Ollama is up, checked when the page opens: the AI items only
     /// appear when there's a model to run them, as on the Mac.
-    @State var hasModel = false
+    @State var hasModel = (Library.lastLocalModel ?? nil) != nil
     @State var tool: DeckTool?
 
     enum DeckTool { case fillGaps, duplicates, files }

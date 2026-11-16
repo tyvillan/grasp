@@ -318,3 +318,33 @@ struct HairlineRow<Content: View>: View {
         }
     }
 }
+
+// MARK: - Watching without redrawing
+
+extension View {
+    /// `onChange(of:)` hung on a zero-size view behind this one.
+    /// SwiftCrossUI's `OnChangeModifier` keeps the last value in an `@State`,
+    /// and every write to it (the first when the view appears, then one per
+    /// change) lays out and commits everything the modifier wraps again. On
+    /// the deck page that was the whole card list or lesson, five to seven
+    /// extra passes of 70 to 200 ms after every click. Behind a zero-size
+    /// view, that write redraws only the empty view.
+    func watch<Value: Equatable>(_ value: Value, perform action: @escaping () -> Void) -> some View {
+        background(Color.clear.frame(width: 0.0, height: 0.0).onChange(of: value, perform: action))
+    }
+
+    /// `task` the same way: `TaskModifier` stores its task in an `@State`
+    /// through an `onChange`, which redraws whatever it wraps.
+    func quietTask(_ action: @escaping () async -> Void) -> some View {
+        background(Color.clear.frame(width: 0.0, height: 0.0).task(action))
+    }
+}
+
+extension Binding where Value: Equatable {
+    /// The same binding, but a write of the value it already holds is
+    /// dropped. WinUI controls report their value back when they are made,
+    /// and every `@State` write redraws the view that owns it.
+    func changesOnly() -> Binding<Value> {
+        Binding(get: { self.wrappedValue }, set: { if $0 != self.wrappedValue { self.wrappedValue = $0 } })
+    }
+}

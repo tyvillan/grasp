@@ -34,6 +34,22 @@ nonisolated enum WindowIcon {
         }
     }
 
+    /// The main window's client width in points (pixels over the DPI
+    /// scale), or nil before the window is up. Only for a first guess at a
+    /// pane's width (see `CalendarScreen.rememberedWidth`); never size
+    /// content from it, or the content's own needs feed back into the
+    /// window's size.
+    static func clientWidth() -> Double? {
+        if cachedWindow == nil || !IsWindow(cachedWindow) { cachedWindow = mainWindow() }
+        guard let window = cachedWindow else { return nil }
+        var rect = RECT()
+        guard GetClientRect(window, &rect) else { return nil }
+        let scale = Double(max(96, GetDpiForWindow(window))) / 96
+        return Double(rect.right - rect.left) / scale
+    }
+
+    nonisolated(unsafe) private static var cachedWindow: HWND?
+
     /// This process's visible top-level window, if it's up yet.
     private static func mainWindow() -> HWND? {
         final class Search { var found: HWND? }

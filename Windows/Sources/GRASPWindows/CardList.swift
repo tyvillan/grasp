@@ -90,9 +90,9 @@ struct CardList: View {
                     shown = Self.pageSize
                 }
                 Spacer()
-                TextField("Filter cards", text: $text)
+                TextField("Filter cards", text: $text.changesOnly())
                     .frame(width: 160.0)
-                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { sort = $0 ?? .deckOrder }))
+                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { let new = $0 ?? .deckOrder; if new != sort { sort = new } }))
                 GRASPButton(selection == nil ? "Select" : "Done") {
                     selection = selection == nil ? [] : nil
                     confirmingBulkDelete = false
@@ -143,12 +143,13 @@ struct CardList: View {
                 }
             }
         }
-        .onChange(of: scope.id) {
-            shown = Self.pageSize
-            text = ""
-            selection = nil
-            focus = nil
-            noteFilter = nil
+        .watch(scope.id) {
+            // Only what differs: each @State write redraws the whole list.
+            if shown != Self.pageSize { shown = Self.pageSize }
+            if !text.isEmpty { text = "" }
+            if selection != nil { selection = nil }
+            if focus != nil { focus = nil }
+            if noteFilter != nil { noteFilter = nil }
         }
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
@@ -289,31 +290,28 @@ enum CardRowStatus {
 }
 
 /// The three understanding pips (recognition, recall, understood), drawn as
-/// at most three runs of glyphs rather than three shapes: a row is built for
-/// every card on the page, and each shape costs a view. Solid pips take the
-/// stage's colour, a self-rated claim is an outline in the secondary tone,
-/// and the rest are the strong hairline. No yellow except recall's stage
-/// colour, as on the Mac.
+/// one run of glyphs: a single Text per row, since a row is built for every
+/// card on the page and each view costs. A reached step is a solid bar, the
+/// rest are outlines, all in one colour: the stage's (green understood,
+/// yellow recall, light recognition), the secondary tone for a self-rated
+/// claim, the strong hairline for a card nobody has asked about, and coral
+/// when suspended. Shape carries the step count, colour the stage.
 struct PipMeter: View {
     let state: UnderstandingState
     var suspended = false
 
     var body: some View {
-        let solid = state.pips.filter { $0 == .solid }.count
-        let dotted = state.pips.filter { $0 == .dotted }.count
-        let empty = 3 - solid - dotted
-        HStack(spacing: 0) {
-            if solid > 0 { run(solid, glyph: "\u{25AC}", color: suspended ? GRASPColor.rejected : stageColor) }
-            if dotted > 0 { run(dotted, glyph: "\u{25AD}", color: GRASPColor.textSecondary) }
-            if empty > 0 { run(empty, glyph: "\u{25AC}", color: GRASPColor.hairlineStrong) }
-        }
-        .fixedSize()
-    }
-
-    private func run(_ count: Int, glyph: String, color: Color) -> some View {
-        Text(String(repeating: glyph, count: count))
+        Text(state.pips.map { $0 == .solid ? "\u{25AC}" : "\u{25AD}" }.joined())
             .font(Font.system(size: 9))
             .foregroundColor(color)
+            .fixedSize()
+    }
+
+    private var color: Color {
+        if suspended { return GRASPColor.rejected }
+        if state.pips.contains(.solid) { return stageColor }
+        if state.pips.contains(.dotted) { return GRASPColor.textSecondary }
+        return GRASPColor.hairlineStrong
     }
 
     /// The Mac's `UnderstandingState.stageColor`.

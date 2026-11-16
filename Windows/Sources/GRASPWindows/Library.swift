@@ -405,25 +405,71 @@ final class Library {
     }
 
     /// Each approved card's understanding and the readable titles of their
-    /// notes, for the deck page's meter. Cached on revision.
+    /// notes, for the deck page's meter. Kept per deck (or set of decks) and
+    /// read again only when one of those decks' cards changed, by
+    /// `deckSignatures`: a review in one deck leaves every other deck's
+    /// meter as it was.
     func understanding(inDecks deckIds: [String]) -> (cards: [DeckUnderstanding.Card], titles: [String: String]) {
-        let key = "\(revision)|\(deckIds.joined(separator: ","))"
-        if let cached = understandingCache[key] { return cached }
+        meter(inDecks: deckIds).value
+    }
+
+    /// One deck's cards by stage, for the deck column's thin bar. Worked
+    /// out once with the deck's meter, not on every redraw.
+    func distribution(ofDeck deckId: String) -> DeckUnderstanding.Distribution {
+        meter(inDecks: [deckId]).distribution
+    }
+
+    private typealias Meter = (signature: String, value: (cards: [DeckUnderstanding.Card], titles: [String: String]),
+                               distribution: DeckUnderstanding.Distribution)
+
+    private func meter(inDecks deckIds: [String]) -> Meter {
+        let signatures = deckSignatures()
+        let key = deckIds.joined(separator: ",")
+        let signature = deckIds.map { signatures[$0] ?? "" }.joined(separator: ";")
+        if let cached = meterCache[key], cached.signature == signature { return cached }
         let value = (try? database.queue.read { db -> ([DeckUnderstanding.Card], [String: String]) in
             let cards = try Study.understanding(forDecks: deckIds, db: db)
             let titles = try Study.noteTitles(forMaterials: Array(Set(cards.compactMap(\.materialId))), db: db)
             return (cards, titles)
         }) ?? ([], [:])
-        if understandingCache.count > 64 || understandingRevision != revision {
-            understandingCache = [:]
-            understandingRevision = revision
-        }
-        understandingCache[key] = value
+        let meter: Meter = (signature, value, DeckUnderstanding.distribution(of: value.0))
+        if meterCache.count > 96 { meterCache = [:] }
+        meterCache[key] = meter
+        return meter
+    }
+
+    @ObservationIgnored private var meterCache: [String: Meter] = [:]
+
+    /// A fingerprint of each deck's cards and their Learn progress: how many
+    /// there are, the latest edit, how many are approved, the latest answer
+    /// and the sum of levels and runs. One grouped query per library
+    /// revision; a deck's meter is rebuilt only when its fingerprint moves.
+    private func deckSignatures() -> [String: String] {
+        if let cached = signatureCache, cached.revision == revision { return cached.value }
+        let value = { () -> [String: String] in
+            let rows = (try? database.queue.read { db in
+                try Row.fetchAll(db, sql: """
+                    SELECT deckCard.deckId AS deckId, COUNT(*), MAX(card.updatedAt),
+                           SUM(card.status = 'active'), MAX(learnState.lastSeenAt),
+                           TOTAL(learnState.level), TOTAL(learnState.consecutiveCorrect)
+                    FROM deckCard
+                    JOIN card ON card.id = deckCard.cardId AND card.deletedAt IS NULL
+                    LEFT JOIN learnState ON learnState.cardId = card.id
+                    GROUP BY deckCard.deckId
+                    """)
+            }) ?? []
+            var result: [String: String] = [:]
+            for row in rows {
+                guard let deckId = row["deckId"] as String? else { continue }
+                result[deckId] = row.databaseValues.map { "\($0)" }.joined(separator: "|")
+            }
+            return result
+        }()
+        signatureCache = (revision, value)
         return value
     }
 
-    @ObservationIgnored private var understandingCache: [String: (cards: [DeckUnderstanding.Card], titles: [String: String])] = [:]
-    @ObservationIgnored private var understandingRevision = -1
+    @ObservationIgnored private var signatureCache: (revision: Int, value: [String: String])?
 
     func recordLearnAnswer(cardId: String, wasCorrect: Bool) {
         record { try Study.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect, db: $0) }
@@ -434,14 +480,12 @@ final class Library {
     }
 
     func learnLevels(inDecks deckIds: [String]) -> [String: LearnEngine.Level] {
-        let key = "\(revision)|\(deckIds.joined(separator: ","))"
-        if let cached = levelsCache, cached.key == key { return cached.value }
-        let value = (try? database.queue.read { try Study.learnLevels(forDecks: deckIds, db: $0) }) ?? [:]
-        levelsCache = (key, value)
-        return value
+        levelsCache.value(revision: revision, key: deckIds.joined(separator: ",")) {
+            (try? database.queue.read { try Study.learnLevels(forDecks: deckIds, db: $0) }) ?? [:]
+        }
     }
 
-    @ObservationIgnored private var levelsCache: (key: String, value: [String: LearnEngine.Level])?
+    @ObservationIgnored private let levelsCache = RevisionCache<[String: LearnEngine.Level]>()
 
     /// Writes the attempt; nil when every card was filtered out.
     func startTest(inDecks deckIds: [String], config: TestBuilder.Config, aiQuestions: [LearnEngine.RoundQuestion] = [])
@@ -482,29 +526,26 @@ final class Library {
     // MARK: - Cards
 
     func cards(inDecks deckIds: [String]) -> [Card] {
-        let key = "\(revision)|\(deckIds.joined(separator: ","))"
-        if let cached = cardsCache, cached.key == key { return cached.value }
-        let value = (try? database.queue.read { try CardActions.cards(inDecks: deckIds, db: $0) }) ?? []
-        cardsCache = (key, value)
-        return value
+        cardsCache.value(revision: revision, key: deckIds.joined(separator: ",")) {
+            (try? database.queue.read { try CardActions.cards(inDecks: deckIds, db: $0) }) ?? []
+        }
     }
 
-    /// The last card list read, for the same reason as `overviewCache`.
-    @ObservationIgnored private var cardsCache: (key: String, value: [Card])?
+    /// The card lists read since the last change, so going back to a deck
+    /// doesn't read it again.
+    @ObservationIgnored private let cardsCache = RevisionCache<[Card]>()
 
     /// The review flags on parser-made drafts ("Looks like a duplicate of
     /// ...", "This front looks like a heading."), by card id. Worked out
     /// once per library revision: it compares every draft with the cards
     /// before it, which a list redraw mustn't repeat.
     func reviewNotes(inDecks deckIds: [String]) -> [String: String] {
-        let key = "\(revision)|\(deckIds.joined(separator: ","))"
-        if let cached = reviewNotesCache, cached.key == key { return cached.value }
-        let value = CardQuality.reviewNotes(for: cards(inDecks: deckIds))
-        reviewNotesCache = (key, value)
-        return value
+        reviewNotesCache.value(revision: revision, key: deckIds.joined(separator: ",")) {
+            CardQuality.reviewNotes(for: cards(inDecks: deckIds))
+        }
     }
 
-    @ObservationIgnored private var reviewNotesCache: (key: String, value: [String: String])?
+    @ObservationIgnored private let reviewNotesCache = RevisionCache<[String: String]>()
 
     func card(_ id: String) -> Card? {
         try? database.queue.read { try Card.fetchOne($0, key: id) }
@@ -685,19 +726,18 @@ final class Library {
     /// tab reads them. Overviews are written on the Mac (or later, here via
     /// Ollama) and arrive with sync.
     func deckOverview(inDecks deckIds: [String]) -> DeckOverview? {
-        let key = "\(revision)|\(deckIds.joined(separator: ","))"
-        if let cached = overviewCache, cached.key == key { return cached.value }
-        let value = try? database.queue.read { db in
-            try DeckOverviewReader.read(deckIds: deckIds, db: db, cache: diagramCache)
+        overviewCache.value(revision: revision, key: deckIds.joined(separator: ",")) {
+            try? database.queue.read { db in
+                try DeckOverviewReader.read(deckIds: deckIds, db: db, cache: diagramCache)
+            }
         }
-        overviewCache = (key, value)
-        return value
     }
 
-    /// The last overview read. A deck's page redraws on every click inside
-    /// it, and assembling a course's lessons (clean-up, card links, figures)
-    /// is the heaviest read in the app; it only changes with `revision`.
-    @ObservationIgnored private var overviewCache: (key: String, value: DeckOverview?)?
+    /// The overviews read since the last change. A deck's page redraws on
+    /// every click inside it, and assembling a course's lessons (clean-up,
+    /// card links, figures) is the heaviest read in the app; it only changes
+    /// with `revision`. A few decks' worth, so going back is instant.
+    @ObservationIgnored private let overviewCache = RevisionCache<DeckOverview?>(limit: 8)
     @ObservationIgnored private let diagramCache = DiagramLayoutCache()
 
     /// The overview run for each course, if one has started.
@@ -744,11 +784,21 @@ final class Library {
     /// Whether the local model is up, and which one GRASP would use.
     func localModel() async -> String? {
         let probe = OllamaGenerator()
-        guard await probe.isAvailable else { return nil }
-        return OllamaModelChoice.resolve(
+        guard await probe.isAvailable else {
+            Self.lastLocalModel = .some(nil)
+            return nil
+        }
+        let model = OllamaModelChoice.resolve(
             preferred: UserDefaults.standard.string(forKey: OllamaModelChoice.defaultsKey),
             installed: await probe.installedModels())
+        Self.lastLocalModel = .some(model)
+        return model
     }
+
+    /// The last answer from `localModel()`, or nil before the first check.
+    /// A deck page or overview starts from it, so the check only redraws
+    /// the page when Ollama has come or gone since.
+    nonisolated(unsafe) static var lastLocalModel: String??
 
 }
 
@@ -758,4 +808,29 @@ struct RowReductionSteps {
     let states: [RationalMatrix]
     let steps: [RowOperation]
     let fromNote: Bool
+}
+
+/// Values worked out from the database, kept by key until the library's
+/// revision moves on (any change, here or from a sync). A handful of keys,
+/// so switching between a course's decks and back reads nothing twice.
+final class RevisionCache<Value> {
+    private var revision = -1
+    private var values: [String: Value] = [:]
+    private let limit: Int
+
+    init(limit: Int = 24) {
+        self.limit = limit
+    }
+
+    func value(revision: Int, key: String, make: () -> Value) -> Value {
+        if revision != self.revision {
+            values = [:]
+            self.revision = revision
+        }
+        if let value = values[key] { return value }
+        let value = make()
+        if values.count >= limit { values = [:] }
+        values[key] = value
+        return value
+    }
 }
