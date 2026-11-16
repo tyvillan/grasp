@@ -26,7 +26,7 @@ create table if not exists public.feedback (
     screen          text        check (char_length(screen) <= 100),
     app_version     text        check (char_length(app_version) <= 40),
     build           text        check (char_length(build) <= 40),
-    platform        text        check (platform in ('mac', 'iphone')),
+    platform        text        check (platform in ('mac', 'iphone', 'windows')),
     os_version      text        check (char_length(os_version) <= 60),
     device_model    text        check (char_length(device_model) <= 60),
     ai_mode         text        check (ai_mode in ('cloud', 'local', 'off')),
@@ -140,3 +140,9 @@ create policy "Send feedback screenshots" on storage.objects
         bucket_id = 'feedback-screenshots'
         and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'
     );
+
+-- Tables made before Windows sent feedback keep the old platform list.
+-- Safe to run again.
+alter table public.feedback drop constraint if exists feedback_platform_check;
+alter table public.feedback add constraint feedback_platform_check
+    check (platform in ('mac', 'iphone', 'windows'));

@@ -417,7 +417,7 @@ private struct QuestionRow: View {
                     } else {
                         HStack(spacing: 8) {
                             PipMeter(state: state, suspended: isSuspended)
-                            Text(Self.historyLine(history))
+                            Text(history?.line ?? "Not asked yet")
                                 .font(GRASPFont.meta)
                                 .foregroundColor(GRASPColor.textTertiary)
                             if isSuspended {
@@ -434,14 +434,6 @@ private struct QuestionRow: View {
             HairlineRule()
         }
         .onTapGesture(perform: open)
-    }
-
-    /// The core's `QuestionHistory.line`, except after a single answer:
-    /// the core says "Right 1 of 1" even when that answer was wrong
-    /// (reported for the Mac session to fix there).
-    static func historyLine(_ history: QuestionHistory?) -> String {
-        guard let history, history.of > 0 else { return "Not asked yet" }
-        return history.of == 1 ? "Right \(history.right) of 1" : (history.line ?? "Not asked yet")
     }
 }
 
