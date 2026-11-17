@@ -125,11 +125,11 @@ struct EventEditor: View {
                         Button("Delete…") { confirmingDelete = true }.fixedSize()
                     }
                     Spacer()
-                    Button("Cancel") { close() }.fixedSize()
-                    Button(isNew ? "Add Event" : "Save") { save() }
+                    GRASPButton("Cancel") { close() }
+                    GRASPButton(isNew ? "Add event" : "Save", kind: .primary) { save() }
                         .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .fixedSize()
                 }
+                .returnConfirms(multiline: true) { if !title.trimmingCharacters(in: .whitespaces).isEmpty { save() } }
             }
         }
         .padding(24)

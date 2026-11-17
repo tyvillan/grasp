@@ -515,6 +515,7 @@ private struct LibraryListSheet: View {
                 Spacer()
                 GRASPButton("Done", kind: .primary) { close() }
             }
+            .returnConfirms { close() }
         }
         .padding(24)
         .frame(width: 500.0)

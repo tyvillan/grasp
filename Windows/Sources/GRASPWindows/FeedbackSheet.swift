@@ -27,7 +27,7 @@ struct SendFeedbackSheet: View {
     var body: some View {
         GRASPSheet(eyebrow: "Feedback", title: "Send feedback",
                    message: phase.isDone ? nil : "What's working, what's confusing, what you wish it did.",
-                   width: 560) {
+                   width: 560, confirm: { confirm() }, multiline: !phase.isDone) {
             if case .done(let text) = phase {
                 HStack(spacing: 10) {
                     Text("\u{2713}").font(GRASPFont.rowTitle.weight(.bold)).foregroundColor(GRASPColor.success)
@@ -203,6 +203,14 @@ struct SendFeedbackSheet: View {
             .foregroundColor(GRASPColor.textTertiary)
             .frame(width: 300.0, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Return: Done once sent; else Send when it can go (Ctrl+Return, since
+    /// the message box takes plain Return for new lines).
+    private func confirm() {
+        if phase.isDone { close(); return }
+        guard draft.problem == nil, phase != .sending, !preparing, !service.rateLimitReached else { return }
+        Task { await send() }
     }
 
     // MARK: Actions

@@ -349,6 +349,23 @@ extension Binding where Value: Equatable {
     }
 }
 
+/// The window's width as the root reader last saw it, for the few places
+/// that change shape when the window is narrow (the Cards toolbar). Read in
+/// a body; the reader re-creates the content on every resize, so bodies see
+/// the new width.
+enum WindowLayout {
+    nonisolated(unsafe) private(set) static var width = 1700.0
+
+    /// Under this the Cards toolbar takes two rows (its one row needs about
+    /// 1,400 pt of window beside the sidebar and deck column).
+    static let narrowBelow = 1440.0
+    static var isNarrow: Bool { width < narrowBelow }
+
+    static func note(width: Double) {
+        if width.isFinite && width > 0 { self.width = width }
+    }
+}
+
 /// The detail pane's width for a `GeometryReader` pass. SwiftCrossUI runs a
 /// reader at width 0 and infinity before the real width, and a wrong guess
 /// sticks: the content's nodes keep the layout they made for it, since the
@@ -382,16 +399,22 @@ struct GRASPSheet<Content: View, Footer: View>: View {
     var message: String?
     var ai = false
     var width = 520.0
+    /// What Return does: the sheet's yellow button. Nil when it has none.
+    var confirm: (() -> Void)?
+    var multiline = false
     let content: Content
     let footer: Footer
 
     init(eyebrow: String, title: String, message: String? = nil, ai: Bool = false, width: Double = 520,
+         confirm: (() -> Void)? = nil, multiline: Bool = false,
          @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
         self.eyebrow = eyebrow
         self.title = title
         self.message = message
         self.ai = ai
         self.width = width
+        self.confirm = confirm
+        self.multiline = multiline
         self.content = content()
         self.footer = footer()
     }
@@ -411,11 +434,43 @@ struct GRASPSheet<Content: View, Footer: View>: View {
                     .foregroundColor(GRASPColor.textTertiary)
             }
             content
-            HStack(spacing: 8) { footer }
+            if let confirm {
+                HStack(spacing: 8) { footer }.returnConfirms(multiline: multiline, confirm)
+            } else {
+                HStack(spacing: 8) { footer }
+            }
         }
         .padding(24)
         .frame(width: width)
         .background(GRASPColor.canvas)
+    }
+}
+
+// MARK: - Return in a sheet
+
+extension View {
+    /// Return presses this sheet's one yellow button (`confirm`), as the
+    /// Mac's `.keyboardShortcut(.defaultAction)`. Put it on any view inside
+    /// the sheet; it holds while the sheet is up. A sheet with a multi-line
+    /// text box passes `multiline`, so Return types a new line there and
+    /// Ctrl+Return confirms. Escape needs nothing: WinUI's dialog closes itself.
+    func returnConfirms(multiline: Bool = false, _ confirm: @escaping () -> Void) -> some View {
+        background(ReturnRegistrar(multiline: multiline, confirm: confirm))
+    }
+}
+
+private struct ReturnRegistrar: View {
+    let multiline: Bool
+    let confirm: () -> Void
+    @State var id = UUID().uuidString
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0.0, height: 0.0)
+            #if os(Windows)
+            .onAppear { KeyCommands.pushSheet(.init(id: id, confirm: confirm, multiline: multiline)) }
+            .onDisappear { KeyCommands.popSheet(id) }
+            #endif
     }
 }
 

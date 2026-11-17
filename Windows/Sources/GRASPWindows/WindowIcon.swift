@@ -16,11 +16,36 @@ nonisolated enum WindowIcon {
                 if let window = mainWindow() {
                     apply(to: window)
                     WindowChrome.apply(to: window)
+                    setMinimumSize(on: window)
                     return
                 }
                 Thread.sleep(forTimeInterval: 0.25)
             }
         }
+    }
+
+    /// The smallest the window may be dragged, in points: the sidebar (240),
+    /// the deck column (260) and a deck page whose toolbar fits on two rows.
+    /// SwiftCrossUI's `setSizeLimits` does nothing on WinUI, so this answers
+    /// WM_GETMINMAXINFO itself, scaled to the window's DPI.
+    static let minimumSize = (width: 1200.0, height: 700.0)
+
+    nonisolated(unsafe) private static var previousProc: WNDPROC?
+
+    private static func setMinimumSize(on window: HWND) {
+        let proc: WNDPROC = { hwnd, message, wParam, lParam in
+            let result = CallWindowProcW(WindowIcon.previousProc, hwnd, message, wParam, lParam)
+            if message == UINT(WM_GETMINMAXINFO), let hwnd,
+               let info = UnsafeMutablePointer<MINMAXINFO>(bitPattern: Int(lParam)) {
+                let scale = Double(max(96, GetDpiForWindow(hwnd))) / 96
+                // Outer size: the title bar and borders are a few pixels on top.
+                info.pointee.ptMinTrackSize.x = LONG(WindowIcon.minimumSize.width * scale)
+                info.pointee.ptMinTrackSize.y = LONG(WindowIcon.minimumSize.height * scale)
+            }
+            return result
+        }
+        let old = SetWindowLongPtrW(window, GWLP_WNDPROC, unsafeBitCast(proc, to: LONG_PTR.self))
+        previousProc = unsafeBitCast(old, to: WNDPROC.self)
     }
 
     private static func apply(to window: HWND) {

@@ -507,7 +507,9 @@ struct QuestionEditor: View {
     private var canEdit: Bool { editing.map { UserQuestionInput($0) != nil } ?? true }
 
     var body: some View {
-        GRASPSheet(eyebrow: "Question", title: isEditing ? "Edit question" : "Write a question", width: 540) {
+        GRASPSheet(eyebrow: "Question", title: isEditing ? "Edit question" : "Write a question", width: 540,
+                   confirm: { if !canEdit { close() } else if input.problem == nil && (isEditing || deckId != nil) { save() } },
+                   multiline: true) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if canEdit { fields } else { readOnly }
@@ -556,6 +558,8 @@ struct QuestionEditor: View {
             FieldLabel(input.kind == .trueFalse ? "Statement" : "Question")
             TextEditor(text: Binding(get: { input.prompt }, set: { input.prompt = $0 }).changesOnly())
                 .frame(height: 72.0)
+                .padding(1)
+                .edged(fill: GRASPColor.inset, edge: GRASPColor.hairlineStrong, radius: 6)
         }
         switch input.kind {
         case .multipleChoice: choiceFields
@@ -566,6 +570,8 @@ struct QuestionEditor: View {
             FieldLabel("Why (optional)")
             TextEditor(text: Binding(get: { input.explanation }, set: { input.explanation = $0 }).changesOnly())
                 .frame(height: 52.0)
+                .padding(1)
+                .edged(fill: GRASPColor.inset, edge: GRASPColor.hairlineStrong, radius: 6)
         }
         cardLink
     }
@@ -638,6 +644,8 @@ struct QuestionEditor: View {
                     set: { input.accepted = $0.components(separatedBy: "\n") }
                 ).changesOnly())
                 .frame(height: 52.0)
+                .padding(1)
+                .edged(fill: GRASPColor.inset, edge: GRASPColor.hairlineStrong, radius: 6)
                 Text("Typed answers are checked by meaning too, so small differences in wording are fine.")
                     .font(GRASPFont.meta)
                     .foregroundColor(GRASPColor.textTertiary)
@@ -837,7 +845,7 @@ struct GenerateQuestionsSheet: View {
     var body: some View {
         GRASPSheet(eyebrow: "Generate with AI", title: "Generate test questions",
                    message: "The AI writes draft questions from your notes. They wait under To review on the Questions tab until you approve them.",
-                   ai: true, width: 540) {
+                   ai: true, width: 540, confirm: { if canStart { start() } }) {
             notices
             notesGroup
             VStack(alignment: .leading, spacing: 12) {
@@ -956,7 +964,8 @@ struct DroppedQuestionsSheet: View {
 
     var body: some View {
         GRASPSheet(eyebrow: "Questions", title: "What was dropped",
-                   message: "These were not kept. Each failed a check, repeated a question you already have, or needs something from you.") {
+                   message: "These were not kept. Each failed a check, repeated a question you already have, or needs something from you.",
+                   confirm: { close() }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(drops, id: \.id) { drop in

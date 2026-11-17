@@ -111,10 +111,10 @@ private struct TestSetup: View {
                 Text("New test").font(Font.system(size: 22, weight: .semibold)).foregroundColor(GRASPColor.textPrimary)
                 row("Questions") {
                     HStack(spacing: 10) {
-                        Button("−") { questionCount = max(5, questionCount - 5) }.fixedSize()
+                        GRASPButton("\u{2212}") { questionCount = max(5, questionCount - 5) }
                         Text("\(questionCount)").font(GRASPFont.title).foregroundColor(GRASPColor.textPrimary)
                             .frame(width: 40.0)
-                        Button("+") { questionCount = min(100, questionCount + 5) }.fixedSize()
+                        GRASPButton("+") { questionCount = min(100, questionCount + 5) }
                     }
                 }
                 row("Question types") {
@@ -156,7 +156,7 @@ private struct TestSetup: View {
                         HStack(spacing: 10) {
                             Text(writing).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
                             Spacer()
-                            Button("Skip") { skip.flag.set() }.fixedSize()
+                            GRASPButton("Skip") { skip.flag.set() }
                         }
                         ProgressBar(fraction: writingFraction)
                     }
@@ -166,16 +166,27 @@ private struct TestSetup: View {
                 }
                 HStack(spacing: 8) {
                     Spacer()
-                    Button("Cancel") { cancel() }.disabled(writing != nil).fixedSize()
-                    Button("Start Test") { begin() }
+                    GRASPButton("Cancel") { cancel() }.disabled(writing != nil)
+                    // The screen's one yellow button, as on the Mac.
+                    GRASPButton("Start test", kind: .primary) { begin() }
                         .disabled(!anyType || writing != nil || sourcesProblem != nil)
-                        .fixedSize()
                 }
             }
             .frame(maxWidth: 560.0)
             .padding(32)
             Spacer()
         }
+        #if os(Windows)
+        // Return is Start test, the yellow button.
+        .onAppear {
+            KeyCommands.set(owner: "testSetup") { key in
+                guard key == .enter, anyType, writing == nil, sourcesProblem == nil else { return false }
+                begin()
+                return true
+            }
+        }
+        .onDisappear { KeyCommands.clear(owner: "testSetup") }
+        #endif
     }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
@@ -192,7 +203,7 @@ private struct TestSetup: View {
         let matching = library.matchingTestQuestionCount(deckIds: deckIds, config: config, includeQuestions: useQuestions)
         if matching < questionCount {
             Text(matching == 0 ? "No questions match these types."
-                 : "\(matching) question\(matching == 1 ? "" : "s") match these types. The test will have \(matching).")
+                 : "\(matching) question\(matching == 1 ? " matches" : "s match") these types. The test will have \(matching).")
                 .font(GRASPFont.meta)
                 .foregroundColor(matching == 0 ? GRASPColor.rejected : GRASPColor.textTertiary)
         }
@@ -340,7 +351,7 @@ private struct TestRun: View {
             if index < questions.count {
                 QuestionView(
                     question: questions[index], answer: $answer, submitsOnChoice: true,
-                    nextTitle: index == questions.count - 1 ? "Finish Test" : "Next Question",
+                    nextTitle: index == questions.count - 1 ? "Finish test" : "Next question",
                     onAnswered: { record(questions[index]) },
                     onOverride: { override(questions[index]) },
                     next: advance
@@ -390,14 +401,19 @@ private struct TestResults: View {
             StudyHeader(deckName: deckName, mode: "Test results", counter: nil, fraction: 1, close: close)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // The Mac's score: cream unless every answer was right,
+                    // the bar in the brand yellow until then.
                     HStack(spacing: 4) {
-                        Text("\(correct)").font(Font.system(size: 40, weight: .bold))
-                            .foregroundColor(correct == graded.count ? GRASPColor.success : GRASPColor.accent)
-                        Text("/ \(graded.count)").font(GRASPFont.title).foregroundColor(GRASPColor.textTertiary)
+                        Text("\(correct)").font(Font.system(size: 44, weight: .semibold))
+                            .foregroundColor(correct == graded.count ? GRASPColor.success : GRASPColor.textPrimary)
+                        Text("/ \(graded.count)").font(Font.system(size: 20, weight: .medium)).foregroundColor(GRASPColor.textTertiary)
                     }
                     ProgressBar(fraction: graded.isEmpty ? 0 : Double(correct) / Double(graded.count),
-                                tint: correct == graded.count ? GRASPColor.success : GRASPColor.accent)
-                    Text("Missed questions from your cards were added back to your flashcard queue.")
+                                tint: correct == graded.count ? GRASPColor.success : GRASPColor.brand)
+                        .frame(width: 260.0)
+                    Text(graded.contains { $0.question.cardId != nil }
+                         ? "Missed questions from your cards were added back to your flashcard queue."
+                         : "These were saved questions, so your flashcards are unchanged.")
                         .font(GRASPFont.meta)
                         .foregroundColor(GRASPColor.textTertiary)
                     VStack(alignment: .leading, spacing: 0) {
@@ -409,7 +425,7 @@ private struct TestResults: View {
                     .cornerRadius(10)
                     HStack {
                         Spacer()
-                        Button("Done") { close() }.fixedSize()
+                        GRASPButton("Done", kind: .primary) { close() }
                     }
                 }
                 .frame(maxWidth: 640.0)
@@ -434,7 +450,7 @@ private struct ResultRow: View {
             HStack(alignment: .top, spacing: 10) {
                 Text(item.isCorrect ? "✓" : "✕")
                     .font(GRASPFont.rowTitle.weight(.bold))
-                    .foregroundColor(item.isCorrect ? GRASPColor.success : GRASPColor.accent)
+                    .foregroundColor(item.isCorrect ? GRASPColor.success : GRASPColor.rejected)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(MathNotation.prettify(item.question.prompt))
                         .font(GRASPFont.rowTitle)
@@ -442,17 +458,30 @@ private struct ResultRow: View {
                     if let code = item.question.code {
                         CodeBlockView(code: code.code)
                     }
+                    if item.question.type == .trueFalse, let statement = item.question.statement {
+                        Text("Statement shown: \(MathNotation.prettify(statement))")
+                            .font(GRASPFont.meta)
+                            .foregroundColor(GRASPColor.textTertiary)
+                    }
                     if !item.isCorrect {
                         Text("You answered: \(item.question.code?.givenText(item.givenAnswer) ?? item.givenAnswer)")
-                            .font(GRASPFont.body)
-                            .foregroundColor(GRASPColor.textSecondary)
+                            .font(GRASPFont.meta)
+                            .foregroundColor(GRASPColor.textTertiary)
+                        // A missed row always says which answer was right.
+                        Text("CORRECT ANSWER")
+                            .font(GRASPFont.eyebrow)
+                            .foregroundColor(GRASPColor.textTertiary)
+                            .padding(.top, 2)
                     }
                     Text(MathNotation.prettify(item.question.code?.answerText ?? item.question.correctAnswer))
                         .font(GRASPFont.body)
-                        .foregroundColor(GRASPColor.textSecondary)
+                        .foregroundColor(item.isCorrect ? GRASPColor.textSecondary : GRASPColor.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     if !item.isCorrect && item.question.allowsMarkCorrect {
-                        QuietLink(title: "I actually got this right", action: override)
+                        Text("I actually got this right")
+                            .font(Font.system(size: 12, weight: .medium))
+                            .foregroundColor(GRASPColor.accent)
+                            .onTapGesture(perform: override)
                     }
                 }
                 Spacer()

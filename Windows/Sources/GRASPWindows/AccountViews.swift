@@ -42,20 +42,18 @@ struct SignInSheet: View {
                 ProgressView("Signing in…")
             }
             HStack(spacing: 8) {
-                Button("Create account") { submit(createAccount: true) }
+                GRASPButton("Create account") { submit(createAccount: true) }
                     .disabled(working || !canSubmit)
-                    .fixedSize()
                 Spacer()
-                Button("Cancel") {
+                GRASPButton("Cancel") {
                     account.cancelGoogleSignIn()
                     close()
                 }
                 .disabled(working)
-                .fixedSize()
-                Button("Sign In") { submit(createAccount: false) }
+                GRASPButton("Sign in", kind: .primary) { submit(createAccount: false) }
                     .disabled(working || !canSubmit)
-                    .fixedSize()
             }
+            .returnConfirms { if !working && canSubmit { submit(createAccount: false) } }
         }
         .padding(24)
         .frame(width: 420.0)

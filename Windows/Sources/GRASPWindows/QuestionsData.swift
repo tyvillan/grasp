@@ -96,6 +96,15 @@ extension Library {
         (try? questionChange { try QuestionBank.approveAll(inDecks: deckIds, db: $0) }) ?? QuestionBank.ApproveAllResult()
     }
 
+    /// One card's meter state, as the Mac's `understandingState(forCard:)`:
+    /// for the flashcard corner and the pips after a Learn answer.
+    func understandingState(forCard cardId: String) -> UnderstandingState {
+        let row = try? database.queue.read { db in try LearnState.fetchOne(db, key: cardId) }
+        guard let row = row ?? nil else { return .of(level: nil) }
+        return .of(level: LearnEngine.Level(rawValue: row.level) ?? .new, asked: true,
+                   consecutiveCorrect: row.consecutiveCorrect)
+    }
+
     /// Active cards of these decks, for linking a question to one.
     func linkableCards(inDecks deckIds: [String]) -> [Card] {
         cards(inDecks: deckIds).filter { $0.status == .active }
