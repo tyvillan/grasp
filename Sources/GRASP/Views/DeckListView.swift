@@ -145,7 +145,7 @@ struct DeckListView: View {
                                 onDelete: { beginDelete(deck) }
                             )
                         }
-                        .modifier(DeckReorderDrag(
+                        .modifier(ReorderDrag(
                             enabled: sortOption == .deckOrder, deckId: deck.id,
                             dragging: $draggingDeckId, target: $reorderTargetDeckId,
                             onMove: { reorder($0, onto: deck.id) }))
@@ -401,51 +401,3 @@ private struct DeckListRow<Content: View>: View {
         .accessibilityAction(.default, action)
     }
 }
-
-
-/// Makes a deck row draggable and a drop target for other deck rows, only
-/// while the list is in the default order. Uses `onDrag`/`onDrop` so the list knows
-/// which deck is being dragged and can draw where it would land.
-private struct DeckReorderDrag: ViewModifier {
-    let enabled: Bool
-    let deckId: String
-    @Binding var dragging: String?
-    @Binding var target: String?
-    let onMove: (String) -> Void
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content
-                .onDrag {
-                    dragging = deckId
-                    // Plain text rather than a custom type: the drop matches on
-                    // `dragging`, so no registered type can get in the way.
-                    let provider = NSItemProvider(object: "grasp-deck:\(deckId)" as NSString)
-                    return provider
-                }
-                .onDrop(of: [UTType.plainText, UTType.utf8PlainText, UTType.text], delegate: DeckReorderDelegate(
-                    deckId: deckId, dragging: $dragging, target: $target, onMove: onMove))
-        } else {
-            content
-        }
-    }
-}
-
-private struct DeckReorderDelegate: DropDelegate {
-    let deckId: String
-    @Binding var dragging: String?
-    @Binding var target: String?
-    let onMove: (String) -> Void
-
-    func validateDrop(info: DropInfo) -> Bool { return dragging != nil }
-    func dropEntered(info: DropInfo) { if dragging != nil { target = deckId } }
-    func dropExited(info: DropInfo) { if target == deckId { target = nil } }
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-    func performDrop(info: DropInfo) -> Bool {
-        defer { target = nil; dragging = nil }
-        guard let dropped = dragging, dropped != deckId else { return false }
-        onMove(dropped)
-        return true
-    }
-}
-

@@ -19,6 +19,9 @@ struct SidebarView: View {
     @State private var deletingCourse: Course?
     @AppStorage("sidebarPastTermsOpen") private var pastTermsOpen = false
     @Namespace private var selection
+    @State private var draggingCourseId: String?
+    @State private var courseTargetId: String?
+    @State private var courseOrders: [String: [String]] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,16 +34,16 @@ struct SidebarView: View {
 
                     if let term = store.currentTerm {
                         groupLabel(term.name)
-                        ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
+                        ForEach(ordered(store.courses(inSemester: term.id), group: term.id)) { courseRow($0, group: term.id, in: store.courses(inSemester: term.id)) }
                     }
 
                     ForEach(store.nonTermSemesters) { semester in
                         groupLabel(semester.name)
-                        ForEach(store.courses(inSemester: semester.id)) { courseRow($0) }
+                        ForEach(ordered(store.courses(inSemester: semester.id), group: semester.id)) { courseRow($0, group: semester.id, in: store.courses(inSemester: semester.id)) }
                     }
                     if !store.unfiledCourses.isEmpty {
                         groupLabel("No timeline")
-                        ForEach(store.unfiledCourses) { courseRow($0) }
+                        ForEach(ordered(store.unfiledCourses, group: "unfiled")) { courseRow($0, group: "unfiled", in: store.unfiledCourses) }
                     }
 
                     pastTerms
@@ -91,8 +94,35 @@ struct SidebarView: View {
         (selectedCourseId ?? ContentView.homeRoute) == id
     }
 
-    private func courseRow(_ course: Course) -> some View {
-        SidebarRow(isSelected: isSelected(course.id), namespace: selection) { hovering in
+    private func orderKey(_ group: String) -> String { "courseOrder.\(group)" }
+
+    private func order(for group: String) -> [String] {
+        courseOrders[group] ?? ListOrder.load(orderKey(group))
+    }
+
+    private func ordered(_ courses: [Course], group: String) -> [Course] {
+        ListOrder.apply(courses, saved: order(for: group))
+    }
+
+    /// Where the dragged course would land relative to `id`, within one term.
+    private func indicatorEdge(for id: String, group: String, in courses: [Course]) -> VerticalEdge? {
+        guard courseTargetId == id, let dragging = draggingCourseId, dragging != id else { return nil }
+        let ids = ordered(courses, group: group).map(\.id)
+        guard let from = ids.firstIndex(of: dragging), let to = ids.firstIndex(of: id) else { return nil }
+        return from < to ? .bottom : .top
+    }
+
+    private func reorder(_ droppedId: String, onto target: String, group: String, in courses: [Course]) {
+        let current = ordered(courses, group: group).map(\.id)
+        let updated = DeckCustomOrder.moving(droppedId, onto: target, in: current)
+        guard updated != current else { return }
+        courseOrders[group] = updated
+        ListOrder.save(updated, key: orderKey(group))
+    }
+
+    private func courseRow(_ course: Course, group: String, in courses: [Course]) -> some View {
+        SidebarRow(isSelected: isSelected(course.id), namespace: selection,
+                   dropIndicator: indicatorEdge(for: course.id, group: group, in: courses)) { hovering in
             CourseDot(color: store.courseColor(course), size: 8)
                 .scaleEffect(hovering && !Motion.isReduced ? 1.3 : 1)
                 .animation(Motion.bouncy, value: hovering)
@@ -120,6 +150,10 @@ struct SidebarView: View {
                 onDelete: { deletingCourse = course }
             )
         }
+        .modifier(ReorderDrag(
+            enabled: true, deckId: course.id,
+            dragging: $draggingCourseId, target: $courseTargetId,
+            onMove: { reorder($0, onto: course.id, group: group, in: courses) }))
     }
 
     private func groupLabel(_ text: String) -> some View {
@@ -168,7 +202,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(terms) { term in
                         groupLabel(term.name)
-                        ForEach(store.courses(inSemester: term.id)) { courseRow($0) }
+                        ForEach(ordered(store.courses(inSemester: term.id), group: term.id)) { courseRow($0, group: term.id, in: store.courses(inSemester: term.id)) }
                     }
                 }
                 .transition(Motion.slide(from: .top, distance: 8))
@@ -182,15 +216,16 @@ struct SidebarView: View {
 private struct SidebarRow<Label: View>: View {
     let isSelected: Bool
     let namespace: Namespace.ID
+    var dropIndicator: VerticalEdge?
     @ViewBuilder let label: (_ hovering: Bool) -> Label
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                label(hovering)
-            }
+        // A tap gesture, not a Button, so the row can also be dragged.
+        HStack(spacing: 12) {
+            label(hovering)
+        }
             .font(.graspUI(size: 14, weight: isSelected ? .semibold : .regular))
             .foregroundStyle(isSelected ? GRASPColor.textPrimary : GRASPColor.textSecondary)
             .padding(.leading, 12)
@@ -210,11 +245,19 @@ private struct SidebarRow<Label: View>: View {
                         .matchedGeometryEffect(id: "sidebar-selection", in: namespace)
                 }
             }
+            .overlay(alignment: dropIndicator == .top ? .top : .bottom) {
+                if dropIndicator != nil {
+                    Capsule().fill(GRASPColor.brand)
+                        .frame(height: 3)
+                        .padding(.horizontal, 6)
+                        .offset(y: dropIndicator == .top ? -2 : 2)
+                }
+            }
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        .onTapGesture(perform: action)
         .onHover { hovering = $0 }
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+        .accessibilityAction(.default, action)
     }
 }
 
