@@ -617,20 +617,9 @@ extension StubHooks {
 // MARK: - This install's facts
 
 enum FeedbackFacts {
-    /// The app's version. The Windows app has no version resource yet.
-    static let appVersion = "1.0"
-
-    /// The build: the day the installed exe was built ("20261116").
-    static let build: String = {
-        let exe = URL(fileURLWithPath: CommandLine.arguments.first ?? "")
-        let date = (try? FileManager.default.attributesOfItem(atPath: exe.path)[.modificationDate] as? Date) ?? nil
-        guard let date else { return "unknown" }
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd"
-        return f.string(from: date)
-    }()
+    /// From `AppVersion`, the one place the Windows version is kept.
+    static let appVersion = AppVersion.number
+    static let build = AppVersion.build
 
     /// "Windows 11 (10.0.26200)". Windows 11 still reports 10.0, so the
     /// build number tells them apart.

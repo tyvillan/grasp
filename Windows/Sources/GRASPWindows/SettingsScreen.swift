@@ -262,7 +262,10 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         SettingsCard("About") {
-            Caption("GRASP for Windows (prototype). Library and log: \(library.libraryFolder.path)")
+            settingRow("GRASP for Windows") {
+                Text(AppVersion.display).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
+            }
+            Caption("Library and log: \(library.libraryFolder.path)")
         }
     }
 
