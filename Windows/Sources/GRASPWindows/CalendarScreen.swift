@@ -64,15 +64,23 @@ enum CourseColorTable {
 }
 
 nonisolated enum CalendarFormat {
+    /// The Mac's date order, month before day ("Sunday, November 15",
+    /// "Sat, Nov 28", "November 2026"), whatever the PC's region. Templates
+    /// follow the locale's order, and this PC's English (UK) put the day
+    /// first ("Monday, 16 November") beside the Mac's month-first screens.
+    static let locale = Locale(identifier: "en_US")
+
     static func string(_ date: Date, template: String, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
+        formatter.locale = locale
         formatter.setLocalizedDateFormatFromTemplate(template)
         return formatter.string(from: date)
     }
 
     static func time(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = locale
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)

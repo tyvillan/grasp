@@ -81,6 +81,7 @@ struct HomeView: View {
     /// "Sunday, November 15", as the Mac formats it.
     static func dateLine(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = CalendarFormat.locale
         formatter.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
         return formatter.string(from: date)
     }
@@ -245,19 +246,28 @@ struct HomeView: View {
 
     // MARK: - Lower cards
 
-    /// The next two exams after the hero's, then "Everything else", as
-    /// four-across tiles (the Mac's adaptive grid at this width).
+    /// The next two exams after the hero's, then "Everything else". The
+    /// tiles share the column evenly, one, two or three across (the Mac's
+    /// row), and drop to fewer per row only when a tile would be narrower
+    /// than 260 pt. Sized for four across they left a gap on the right and
+    /// cut their titles short.
     private func lowerCards(snapshot: HomeSnapshot, width: Double) -> some View {
-        let columns = width >= 900 ? 4 : (width >= 600 ? 2 : 1)
-        let tileWidth = (width - Double(columns - 1) * Self.gap) / Double(columns)
         var tiles: [LowerTile] = snapshot.exams.dropFirst().prefix(2).map { .exam($0) }
         tiles.append(.due)
-        return VStack(alignment: .leading, spacing: Int(Self.gap)) {
-            ForEach(Self.rows(of: tiles, size: columns), id: \.first!.id) { row in
-                HStack(alignment: .top, spacing: Int(Self.gap)) {
-                    ForEach(row, id: \.id) { tile in
-                        lowerTile(tile, standings: snapshot.standings)
-                            .card(padding: 24, width: tileWidth, height: 160.0)
+        let fit = max(1, Int((width + Self.gap) / (260 + Self.gap)))
+        let columns = min(tiles.count, fit)
+        let tileWidth = ((width - Double(columns - 1) * Self.gap) / Double(columns)).rounded(.down)
+        // A fresh node per width: the row otherwise kept the width of the
+        // GeometryReader's first pass (920 pt, its 1000 pt guess) even once
+        // the real width arrived (see gotchas, "A layout guess sticks").
+        return ForEach([Int(width)], id: \.self) { _ in
+            VStack(alignment: .leading, spacing: Int(Self.gap)) {
+                ForEach(Self.rows(of: tiles, size: columns), id: \.first!.id) { row in
+                    HStack(alignment: .top, spacing: Int(Self.gap)) {
+                        ForEach(row, id: \.id) { tile in
+                            lowerTile(tile, standings: snapshot.standings)
+                                .card(padding: 24, width: tileWidth, height: 160.0)
+                        }
                     }
                 }
             }
@@ -488,7 +498,7 @@ private struct ExamCard: View {
             Text(summary)
                 .font(GRASPFont.meta)
                 .foregroundColor(GRASPColor.textTertiary)
-                .lineLimit(1)
+                .lineLimit(2)
         }
     }
 
