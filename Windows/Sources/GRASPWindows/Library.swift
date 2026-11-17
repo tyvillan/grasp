@@ -175,7 +175,16 @@ final class Library {
                 .order(Column("sortIndex"), Column("name"))
                 .fetchAll(db)
             coursesBySemester = Dictionary(grouping: courses, by: \.semesterId)
-            let kickers = try LessonDates.kickers(db: db)
+            // The Mac's style, month first ("AUG 27", "AUG 25–27"), whatever
+            // the PC's region order: a region-ordered single date ("11 SEP")
+            // sat beside month-first ranges in one list.
+            let kickers = try LessonDates.kickers(db: db, locale: Locale(identifier: "en_US_POSIX"))
+            // The Mac's deck order (`Deck.ordered`: sortIndex, lecture-style
+            // decks before labs, then chapter and name in natural order, decks
+            // with no chapter last). SQL text order put General and Lab 1
+            // ahead of Module 1.
+            let rank = Dictionary(uniqueKeysWithValues: Deck.ordered(
+                try Deck.filter(Column("deletedAt") == nil).fetchAll(db)).enumerated().map { ($1.id, $0) })
             decks = try Row.fetchAll(db, sql: """
                 SELECT deck.id, deck.name, deck.courseId, course.name AS courseName,
                        COUNT(card.id) AS total,
@@ -189,13 +198,13 @@ final class Library {
                      AND card.deletedAt IS NULL AND card.status != 'suspended'
                 WHERE deck.deletedAt IS NULL AND course.isArchived = 0
                 GROUP BY deck.id
-                ORDER BY deck.sortIndex, deck.chapter, deck.name
                 """, arguments: [now])
             .map { row in
                 DeckRow(id: row["id"], courseId: row["courseId"], courseName: row["courseName"],
                         name: row["name"], total: row["total"], due: row["due"], drafts: row["drafts"],
                         kicker: kickers[row["id"] as String], manualStart: row["manualStart"], manualEnd: row["manualEnd"])
             }
+            .sorted { (rank[$0.id] ?? .max) < (rank[$1.id] ?? .max) }
             archivedCourses = try Course
                 .filter(Column("isArchived") == true)
                 .order(Column("updatedAt").desc)
@@ -843,5 +852,20 @@ final class RevisionCache<Value> {
         if values.count >= limit { values = [:] }
         values[key] = value
         return value
+    }
+}
+
+/// Lecture dates in the Mac's style, month first. The core's lesson kicker
+/// ("MODULE 3 · 8 SEP") follows the PC's region order; this turns its day
+/// and month round ("MODULE 3 · SEP 8") so it matches the deck column.
+enum DeckDateStyle {
+    private static let dayMonth = try? NSRegularExpression(
+        pattern: #"\b(\d{1,2}) (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)\b"#,
+        options: [.caseInsensitive])
+
+    static func monthFirst(_ text: String) -> String {
+        guard let dayMonth else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return dayMonth.stringByReplacingMatches(in: text, range: range, withTemplate: "$2 $1")
     }
 }

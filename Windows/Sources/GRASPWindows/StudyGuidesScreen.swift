@@ -27,7 +27,7 @@ struct StudyGuidesScreen: View {
     @State var message: String?
 
     private static let sidePadding = 40.0
-    private static let maxWidth = 1180.0
+    private static let maxWidth = PageColumn.maxWidth
 
     var body: some View {
         let courses = visibleCourses

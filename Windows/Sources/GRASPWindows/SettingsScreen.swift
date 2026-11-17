@@ -43,9 +43,13 @@ struct SettingsScreen: View {
                 localAISection
                 aboutSection
             }
-            .padding(.horizontal, 32)
             .padding(.vertical, 28)
-            .frame(maxWidth: 700.0)
+            // A form reads best narrow, so it keeps a 760 pt column, but on the
+            // pages' left edge (40 pt in, like Home) instead of floating in
+            // the middle of a wide window.
+            .frame(maxWidth: 760.0)
+            .padding(.horizontal, 40)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             profileName = library.profile.name

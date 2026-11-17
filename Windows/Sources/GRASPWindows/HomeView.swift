@@ -15,9 +15,9 @@ struct HomeView: View {
     /// Opens a course at a deck (nil for All Cards).
     let onStudy: (String, String?) -> Void
 
-    /// The Mac's column: 40 pt sides, at most 1180 wide.
+    /// The Mac's column: 40 pt sides, filling the window up to `PageColumn.maxWidth`.
     private static let sidePadding = 40.0
-    private static let maxWidth = 1180.0
+    private static let maxWidth = PageColumn.maxWidth
     private static let gap = 16.0
 
     var body: some View {

@@ -71,20 +71,46 @@ enum KeyCommands {
         guard hook == nil else { return }
         hook = SetWindowsHookExW(WH_GETMESSAGE, { code, wParam, lParam in
             if code >= 0, wParam == WPARAM(PM_REMOVE),
-               let message = UnsafeMutablePointer<MSG>(bitPattern: Int(lParam)),
-               message.pointee.message == UINT(WM_KEYDOWN) {
-                let vk = Int32(message.pointee.wParam)
-                if let taken = KeyCommands.sheetKey(vk) {
-                    // A sheet is up: Return confirms it, every other key goes
-                    // to the sheet's own controls, never the screen behind.
-                    if taken { message.pointee.message = UINT(WM_NULL) }
-                } else if let handler = KeyCommands.handler, let key = KeyCommands.key(forVirtualKey: vk), handler(key) {
-                    // Swallowed: the control with focus never sees it.
+               let message = UnsafeMutablePointer<MSG>(bitPattern: Int(lParam)) {
+                let kind = message.pointee.message
+                // Only key messages carry a key code here; others' wParam can
+                // be any pointer-sized value, which a checked Int32(...)
+                // traps on (it crashed the app seconds after launch).
+                let vk = Int32(truncatingIfNeeded: message.pointee.wParam)
+                if kind == UINT(WM_KEYDOWN) {
+                    if let taken = KeyCommands.sheetKey(vk) {
+                        // A sheet is up: Return confirms it, every other key goes
+                        // to the sheet's own controls, never the screen behind.
+                        if taken { KeyCommands.swallow(message, vk) }
+                    } else if let handler = KeyCommands.handler, let key = KeyCommands.key(forVirtualKey: vk), handler(key) {
+                        // Swallowed: the control with focus never sees it.
+                        KeyCommands.swallow(message, vk)
+                    }
+                } else if kind == UINT(WM_KEYUP) || kind == UINT(WM_CHAR),
+                          // WM_CHAR carries the character: a lower-case letter
+                          // maps back to its key; Return, Space and digits are
+                          // the same number either way.
+                          KeyCommands.swallowed.contains(kind == UINT(WM_CHAR) && (97...122).contains(vk) ? vk - 32 : vk) {
+                    // The rest of a key we took. WinUI buttons act on the
+                    // key-up of Return and Space, so letting it through
+                    // pressed whatever had focus: after a click on a choice
+                    // row (which can't take focus) that was the course's
+                    // "⋯" menu, and Return in Test opened it.
+                    if kind == UINT(WM_KEYUP) { KeyCommands.swallowed.remove(vk) }
                     message.pointee.message = UINT(WM_NULL)
                 }
             }
             return CallNextHookEx(nil, code, wParam, lParam)
         }, nil, GetCurrentThreadId())
+    }
+
+    /// Keys whose key-down was taken, so their key-up and character are
+    /// taken too.
+    nonisolated(unsafe) static var swallowed: Set<Int32> = []
+
+    static func swallow(_ message: UnsafeMutablePointer<MSG>, _ vk: Int32) {
+        message.pointee.message = UINT(WM_NULL)
+        swallowed.insert(vk)
     }
 
     private static func key(forVirtualKey vk: Int32) -> Key? {
