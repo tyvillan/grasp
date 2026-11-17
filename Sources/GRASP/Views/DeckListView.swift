@@ -420,14 +420,12 @@ private struct DeckReorderDrag: ViewModifier {
             content
                 .onDrag {
                     dragging = deckId
-                    let data = (try? JSONEncoder().encode(DeckTransfer(deckId: deckId))) ?? Data()
-                    let provider = NSItemProvider()
-                    provider.registerDataRepresentation(
-                        forTypeIdentifier: UTType.graspDeck.identifier, visibility: .ownProcess
-                    ) { completion in completion(data, nil); return nil }
+                    // Plain text rather than a custom type: the drop matches on
+                    // `dragging`, so no registered type can get in the way.
+                    let provider = NSItemProvider(object: "grasp-deck:\(deckId)" as NSString)
                     return provider
                 }
-                .onDrop(of: [UTType.graspDeck], delegate: DeckReorderDelegate(
+                .onDrop(of: [UTType.plainText, UTType.utf8PlainText, UTType.text], delegate: DeckReorderDelegate(
                     deckId: deckId, dragging: $dragging, target: $target, onMove: onMove))
         } else {
             content
@@ -441,7 +439,8 @@ private struct DeckReorderDelegate: DropDelegate {
     @Binding var target: String?
     let onMove: (String) -> Void
 
-    func dropEntered(info: DropInfo) { target = deckId }
+    func validateDrop(info: DropInfo) -> Bool { dragging != nil }
+    func dropEntered(info: DropInfo) { if dragging != nil { target = deckId } }
     func dropExited(info: DropInfo) { if target == deckId { target = nil } }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool {
