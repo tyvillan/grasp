@@ -1898,14 +1898,14 @@ final class AppStore {
     /// find) actually usable, and lets any course pick up a one-off file
     /// that never lived in Obsidian.
     @discardableResult
-    func importFiles(_ urls: [URL], intoCourse courseId: String) async -> ImportSummary {
+    func importFiles(_ urls: [URL], intoCourse courseId: String, intoDeck deckId: String? = nil) async -> ImportSummary {
         guard !isImporting else { return ImportSummary() }
         isImporting = true
         importError = nil
         defer { isImporting = false }
         let summary: ImportSummary
         do {
-            summary = try await scanner.importPaths(urls, intoCourse: courseId)
+            summary = try await scanner.importPaths(urls, intoCourse: courseId, intoDeck: deckId)
             lastImportSummary = summary
             if !summary.errors.isEmpty {
                 importError = summary.errors.first

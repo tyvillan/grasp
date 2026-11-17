@@ -55,6 +55,11 @@ public struct ImportSummary: Sendable, Equatable {
 public actor VaultScanner {
     private let database: GRASPDatabase
     private let paths: VaultPathMap
+    /// Set only while `importPaths(_:intoCourse:intoDeck:)` runs for a deck:
+    /// every study-worthy file's cards go into that deck instead of the deck
+    /// named by the file's own chapter (or "General"). The actor runs one
+    /// import at a time, so a plain property is safe.
+    private var forcedDeckId: String?
 
     /// The path stored as a file's or folder's identity.
     private nonisolated func key(_ url: URL) -> String { paths.stored(forLocal: url.path) }
@@ -438,8 +443,16 @@ public actor VaultScanner {
     /// scan to ever find) actually usable, and lets any course pick up a
     /// one-off file -- a homework PDF, a scanned handout -- that never
     /// lived in Obsidian at all.
-    public func importPaths(_ urls: [URL], intoCourse courseId: String) throws -> ImportSummary {
+    /// With `intoDeck`, the files' cards land in that deck (which must belong
+    /// to the course). A file that is already imported and unchanged is read
+    /// again then, so its untouched drafts move to the deck too; cards you
+    /// approved or edited stay where they are.
+    public func importPaths(
+        _ urls: [URL], intoCourse courseId: String, intoDeck deckId: String? = nil
+    ) throws -> ImportSummary {
         var summary = ImportSummary()
+        forcedDeckId = deckId
+        defer { forcedDeckId = nil }
         try database.queue.write { db in
             guard try Course.fetchOne(db, key: courseId) != nil else {
                 summary.errors.append("Course no longer exists")
@@ -515,6 +528,7 @@ public actor VaultScanner {
                 let relativePath = key(fileURL)
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
                    existing.contentHash == contentHash, existing.deletedAt == nil,
+                   forcedDeckId == nil,
                    !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
                     summary.filesUnchanged += 1
                     return
@@ -530,6 +544,7 @@ public actor VaultScanner {
                 let relativePath = key(fileURL)
                 if let existing = try Material.filter(Column("relativePath") == relativePath).fetchOne(db),
                    existing.contentHash == contentHash, existing.deletedAt == nil,
+                   forcedDeckId == nil,
                    !(try StudyGuideActions.isStale(materialId: existing.id, db: db)) {
                     summary.filesUnchanged += 1
                     return
@@ -753,9 +768,16 @@ public actor VaultScanner {
 
         if material.isStudyWorthy {
             let noteHadCards = try Card.filter(Column("materialId") == material.id).fetchCount(db) > 0
-            guard let deck = try findOrCreateDeck(
-                courseId: courseId, chapter: material.chapter, noteHadCards: noteHadCards, db: db
-            ) else {
+            let chosenDeck: Deck?
+            if let forced = forcedDeckId, let target = try Deck.fetchOne(db, key: forced),
+               target.courseId == courseId, target.deletedAt == nil {
+                chosenDeck = target
+            } else {
+                chosenDeck = try findOrCreateDeck(
+                    courseId: courseId, chapter: material.chapter, noteHadCards: noteHadCards, db: db
+                )
+            }
+            guard let deck = chosenDeck else {
                 summary.filesImportedOrUpdated += 1
                 return
             }

@@ -1246,6 +1246,12 @@ struct DeckDetailView: View {
 
     // MARK: - Empty deck
 
+    /// "Add files to this deck" inside a deck, plain "Add files" on All Cards.
+    private var addFilesButtonTitle: String {
+        if case .deck = scope { return "Add files to this deck" }
+        return "Add files"
+    }
+
     /// The deck to write into: the open one, or a course's first deck.
     private var generationTargetDeckId: String? {
         if case .deck(let id) = scope { return id }
@@ -1283,6 +1289,22 @@ struct DeckDetailView: View {
                          : "Set up an AI model in Settings → AI to write cards")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textTertiary)
+                    // The yellow button above writes from every file in the
+                    // course. This one brings a file in for this deck only.
+                    Button {
+                        onAddFiles()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.badge.plus")
+                                .font(.graspUI(size: 14, weight: .semibold))
+                            Text(addFilesButtonTitle)
+                                .font(.graspUI(size: 14, weight: .semibold))
+                        }
+                        .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                    .disabled(store.isImporting)
+                    .help("Choose a file. Its cards go into this deck.")
                 } else {
                     Button {
                         onAddFiles()

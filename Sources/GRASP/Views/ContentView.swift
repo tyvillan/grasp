@@ -244,7 +244,13 @@ struct ContentView: View {
                         DeckDetailView(
                             scope: deckId == DeckListView.allCardsId
                                 ? .course(courseId) : .deck(deckId),
-                            onAddFiles: { chooseAndImport(for: courseId) },
+                            // A deck's own "Add files" puts the cards in that
+                            // deck; All Cards adds to the course as before.
+                            onAddFiles: {
+                                chooseAndImport(
+                                    for: courseId,
+                                    intoDeck: deckId == DeckListView.allCardsId ? nil : deckId)
+                            },
                             onAddStudyGuide: { chooseAndImportGuide(for: courseId) },
                             onDeckDeleted: { selectedDeckId = DeckListView.allCardsId }
                         )
@@ -473,13 +479,15 @@ struct ContentView: View {
         }
     }
 
-    private func chooseAndImport(for courseId: String) {
+    private func chooseAndImport(for courseId: String, intoDeck deckId: String? = nil) {
         let urls = ImportPanel.pickFilesOrFolders(
-            message: "Choose files or a folder to add to this course"
+            message: deckId == nil
+                ? "Choose files or a folder to add to this course"
+                : "Choose files or a folder to add to this deck"
         )
         guard !urls.isEmpty else { return }
         Task {
-            let summary = await store.importFiles(urls, intoCourse: courseId)
+            let summary = await store.importFiles(urls, intoCourse: courseId, intoDeck: deckId)
             showImportResult(ImportResultMessage(summary: summary))
         }
     }
