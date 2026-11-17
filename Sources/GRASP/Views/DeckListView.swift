@@ -359,31 +359,32 @@ private struct DeckListRow<Content: View>: View {
     @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
-            content()
-                .foregroundStyle(GRASPColor.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isDropTarget ? GRASPColor.accentSoft
-                              : isSelected ? GRASPColor.surfaceRaised
-                              : hovering ? GRASPColor.surfaceRaised.opacity(0.6) : .clear)
-                )
-                .overlay(alignment: .leading) {
-                    if isSelected {
-                        Capsule().fill(GRASPColor.brand)
-                            .frame(width: 3, height: 18)
-                            .offset(x: -5)
-                            .matchedGeometryEffect(id: "deck-selection", in: namespace)
-                    }
+        // A tap gesture, not a Button: a Button swallows the mouse-down, so a
+        // drag on the row (custom deck order) never started.
+    content()
+            .foregroundStyle(GRASPColor.textPrimary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isDropTarget ? GRASPColor.accentSoft
+                          : isSelected ? GRASPColor.surfaceRaised
+                          : hovering ? GRASPColor.surfaceRaised.opacity(0.6) : .clear)
+            )
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule().fill(GRASPColor.brand)
+                        .frame(width: 3, height: 18)
+                        .offset(x: -5)
+                        .matchedGeometryEffect(id: "deck-selection", in: namespace)
                 }
+            }
                 .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        .onTapGesture(perform: action)
         .onHover { hovering = $0 }
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+        .accessibilityAction(.default, action)
     }
 }
 
