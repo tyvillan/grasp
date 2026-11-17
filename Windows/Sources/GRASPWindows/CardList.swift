@@ -670,7 +670,7 @@ struct CardEditor: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 6) {
                             if let kicker = note?.kicker {
-                                Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
+                                Text(DeckDateStyle.monthFirst(kicker)).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
                             }
                             if let title = note?.title {
                                 Text(title).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textPrimary)

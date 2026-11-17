@@ -443,6 +443,10 @@ struct GRASPSheet<Content: View, Footer: View>: View {
         .padding(24)
         .frame(width: width)
         .background(GRASPColor.canvas)
+        // WinUI's dialog draws its own lighter frame around the sheet; in
+        // the canvas colour it and the sheet read as one panel, not a box
+        // inside a box.
+        .presentationBackground(GRASPColor.canvas)
     }
 }
 
@@ -500,4 +504,13 @@ struct TickBox: View {
             .background(isOn ? GRASPColor.brand : GRASPColor.hairlineStrong)
             .cornerRadius(round ? 9 : 5)
     }
+}
+
+/// The widest a page's column grows (Home, Study guides, Library). The Mac
+/// caps its column at 1180 pt, which on its own window is about two thirds
+/// of the width; on a 2560 px Windows screen 1180 left half the window
+/// empty. Pages fill the window less 40 pt sides up to this, so a very wide
+/// window still keeps lines and tiles a readable length.
+enum PageColumn {
+    static let maxWidth = 1680.0
 }

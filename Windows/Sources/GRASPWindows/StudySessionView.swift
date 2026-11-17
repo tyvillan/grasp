@@ -354,8 +354,9 @@ struct QuietLink: View {
 
 /// Learn, after the Mac's `LearnRoundView`: rounds of up to seven cards,
 /// each asked at its ladder level (multiple choice, then true / false,
-/// then written). A miss comes back two questions later; a checkpoint
-/// between rounds shows how the round went and how much of the deck is
+/// then written). As on the Mac, every card is asked once before any is
+/// asked twice: misses wait for a review pass at the end of the round
+/// ("Reviewing missed 1 of 2"), then a checkpoint between rounds shows how the round went and how much of the deck is
 /// understood.
 struct LearnSession: View {
     let library: Library
@@ -368,6 +369,11 @@ struct LearnSession: View {
     @State var queue: [LearnEngine.RoundQuestion] = []
     @State var roundTotal = 0
     @State var completed = 0
+    /// Missed this round, asked again once the main pass is done.
+    @State var missed: [LearnEngine.RoundQuestion] = []
+    @State var isReviewingMisses = false
+    @State var reviewTotal = 0
+    @State var reviewAnswered = 0
     @State var roundCorrect = 0
     @State var roundIncorrect = 0
     @State var mastery: (mastered: Int, total: Int) = (0, 0)
@@ -381,8 +387,10 @@ struct LearnSession: View {
     var body: some View {
         VStack(spacing: 0) {
             StudyHeader(deckName: deckName, mode: "Learn",
-                        counter: isAtCheckpoint || queue.isEmpty ? nil : "Question \(min(completed + 1, roundTotal)) of \(roundTotal)",
-                        fraction: roundTotal == 0 ? 0 : Double(completed) / Double(roundTotal),
+                        counter: counter,
+                        fraction: isReviewingMisses
+                            ? (reviewTotal == 0 ? 0 : Double(reviewAnswered) / Double(reviewTotal))
+                            : (roundTotal == 0 ? 0 : Double(completed) / Double(roundTotal)),
                         close: finish)
             if started && roundTotal == 0 {
                 EmptyStudy(title: "Nothing to learn",
@@ -390,10 +398,10 @@ struct LearnSession: View {
                            close: finish)
             } else if isAtCheckpoint {
                 checkpoint
-            } else if let question = queue.first {
+            } else if let question = isReviewingMisses ? missed.first : queue.first {
                 MasteryLine(mastery: mastery,
                             distribution: DeckUnderstanding.distribution(of: library.understanding(inDecks: deckIds).cards))
-                QuestionView(question: question, answer: $answer, nextTitle: queue.count == 1 ? "Finish round" : "Next question",
+                QuestionView(question: question, answer: $answer, nextTitle: isLastQuestion ? "Finish round" : "Next question",
                              onAnswered: { noteBefore(question) }, change: change) {
                     advance(question)
                 }
@@ -414,6 +422,19 @@ struct LearnSession: View {
             }
         }
         #endif
+    }
+
+    private var counter: String? {
+        if isAtCheckpoint || (queue.isEmpty && missed.isEmpty) { return nil }
+        return isReviewingMisses
+            ? "Reviewing missed \(min(reviewAnswered + 1, reviewTotal)) of \(reviewTotal)"
+            : "Question \(min(completed + 1, roundTotal)) of \(roundTotal)"
+    }
+
+    /// The last question before the checkpoint (a miss on it still comes
+    /// back, and the button then says Next question again).
+    private var isLastQuestion: Bool {
+        isReviewingMisses ? missed.count == 1 : (queue.count == 1 && missed.isEmpty)
     }
 
     private var checkpoint: some View {
@@ -461,6 +482,10 @@ struct LearnSession: View {
         queue = library.learnRound(inDecks: deckIds, focus: focus)
         roundTotal = queue.count
         completed = 0
+        missed = []
+        isReviewingMisses = false
+        reviewTotal = 0
+        reviewAnswered = 0
         roundCorrect = 0
         roundIncorrect = 0
         isAtCheckpoint = false
@@ -475,16 +500,29 @@ struct LearnSession: View {
         library.recordLearnAnswer(cardId: cardId, wasCorrect: wasCorrect)
         if wasCorrect { roundCorrect += 1 } else { roundIncorrect += 1 }
         mastery = library.mastery(inDecks: deckIds)
-        queue.removeFirst()
-        if wasCorrect {
-            completed += 1
+        if isReviewingMisses {
+            missed.removeFirst()
+            reviewAnswered += 1
         } else {
-            // Back again two questions later, while the answer is fresh.
-            queue.insert(question, at: min(2, queue.count))
+            queue.removeFirst()
+            completed += 1
+            // Set aside for the review pass, not requeued mid-round (the
+            // Mac's rule: every card once before any card twice).
+            if !wasCorrect { missed.append(question) }
         }
         answer = AnswerState()
         before = nil
-        if queue.isEmpty { isAtCheckpoint = true }
+        if !isReviewingMisses, queue.isEmpty {
+            if missed.isEmpty {
+                isAtCheckpoint = true
+            } else {
+                isReviewingMisses = true
+                reviewTotal = missed.count
+                reviewAnswered = 0
+            }
+        } else if isReviewingMisses, missed.isEmpty {
+            isAtCheckpoint = true
+        }
     }
 }
 

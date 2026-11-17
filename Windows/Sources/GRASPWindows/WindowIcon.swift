@@ -73,6 +73,17 @@ nonisolated enum WindowIcon {
         return Double(rect.right - rect.left) / scale
     }
 
+    /// The window's client height in points, for sheets that size to their
+    /// content but must still fit a short window.
+    static func clientHeight() -> Double? {
+        if cachedWindow == nil || !IsWindow(cachedWindow) { cachedWindow = mainWindow() }
+        guard let window = cachedWindow else { return nil }
+        var rect = RECT()
+        guard GetClientRect(window, &rect) else { return nil }
+        let scale = Double(max(96, GetDpiForWindow(window))) / 96
+        return Double(rect.bottom - rect.top) / scale
+    }
+
     nonisolated(unsafe) private static var cachedWindow: HWND?
 
     /// The GRASP window, for a feedback screenshot of it.

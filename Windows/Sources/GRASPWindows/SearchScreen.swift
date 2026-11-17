@@ -154,7 +154,7 @@ struct NoteReader: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     if let kicker = note?.kicker {
-                        Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
+                        Text(DeckDateStyle.monthFirst(kicker)).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.accent)
                     }
                     Text(note?.title ?? "Note")
                         .font(Font.system(size: 18, weight: .semibold))

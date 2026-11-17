@@ -166,7 +166,9 @@ struct OverviewPane: View {
             GRASPButton("\u{2190} Previous") { lessonIndex = index - 1 }.disabled(index == 0)
             GRASPButton("Next \u{2192}") { lessonIndex = index + 1 }.disabled(index + 1 >= entries.count)
         }
-        .padding(.horizontal, 28)
+        // Tighter at the window's narrow widths, so the bar fits a 1200 pt
+        // window with the deck column open.
+        .padding(.horizontal, WindowLayout.isNarrow ? 16 : 28)
         .padding(.vertical, 10)
     }
 
@@ -444,7 +446,7 @@ private struct LessonHeader: View {
             HStack(spacing: 8) {
                 if let kicker = overview.kicker {
                     // Muted, as the Mac's: yellow on this page belongs to Study.
-                    Text(kicker).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.textTertiary)
+                    Text(DeckDateStyle.monthFirst(kicker)).font(GRASPFont.eyebrow).foregroundColor(GRASPColor.textTertiary)
                 }
                 if overview.isStale {
                     Chip(text: "Out of date", tint: GRASPColor.textSecondary, soft: GRASPColor.inset)
@@ -881,7 +883,16 @@ enum LessonText {
 struct LessonChoice: Equatable, CustomStringConvertible {
     let index: Int
     let title: String
-    var description: String { "\(index + 1). \(LessonText.clean(title))" }
+    /// The drop-down is as wide as its longest label, and a long lesson
+    /// title pushed the lesson bar past a 1200 pt window (the whole page
+    /// then slid left, cutting the sidebar). Titles past 44 characters end
+    /// in an ellipsis here; the lesson itself shows the full title.
+    var description: String {
+        let clean = LessonText.clean(title)
+        let short = clean.count > 44
+            ? String(clean.prefix(43)).trimmingCharacters(in: .whitespaces) + "\u{2026}" : clean
+        return "\(index + 1). \(short)"
+    }
 }
 
 extension LessonText {

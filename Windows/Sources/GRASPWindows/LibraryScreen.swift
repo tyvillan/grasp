@@ -26,7 +26,7 @@ struct LibraryScreen: View {
     }
 
     private static let sidePadding = 40.0
-    private static let maxWidth = 1180.0
+    private static let maxWidth = PageColumn.maxWidth
     private static let gap = 16.0
 
     private var settings: AppSettings { library.settings }

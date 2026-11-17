@@ -33,17 +33,37 @@ struct SendFeedbackSheet: View {
                     Text("\u{2713}").font(GRASPFont.rowTitle.weight(.bold)).foregroundColor(GRASPColor.success)
                     Text(text).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary)
                 }
-            } else {
+            } else if let height = Self.scrollHeight(details: showsDetails) {
+                // Only a short window scrolls, and then the box ends on a
+                // hairline so a cut line reads as "more below".
                 ScrollView {
                     form
                         .frame(width: 490.0, alignment: .leading)
                         .padding(.trailing, 14)
                 }
-                .frame(height: 420.0)
+                .frame(height: height)
+                Rectangle().fill(GRASPColor.hairline).frame(width: 512.0, height: 1.0)
+            } else {
+                form.frame(width: 512.0, alignment: .leading)
             }
         } footer: {
             footer
         }
+    }
+
+    /// The form's height with What gets sent closed and open, plus the
+    /// sheet's title, footer and the dialog's own margins. When the window
+    /// has room the sheet just grows to fit (no inner scroll box, nothing
+    /// clipped); a shorter window gets a scroll box that fits it.
+    private static func scrollHeight(details: Bool) -> Double? {
+        let form = details ? 760.0 : 560.0
+        let chrome = 300.0
+        #if os(Windows)
+        guard let window = WindowIcon.clientHeight() else { return nil }
+        #else
+        let window = 1000.0
+        #endif
+        return form + chrome <= window ? nil : max(240, window - chrome)
     }
 
     // MARK: Form
