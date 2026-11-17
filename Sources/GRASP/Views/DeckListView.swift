@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import GRASPCore
 
 /// A user-chosen display order for `DeckListView`'s list -- separate from
@@ -61,6 +62,7 @@ struct DeckListView: View {
     @State private var dropTargetDeckId: String?
     /// The row a dragged deck is hovering over, in custom order.
     @State private var reorderTargetDeckId: String?
+    @State private var draggingDeckId: String?
     /// The order the student dragged this course's decks into, saved on this device.
     @State private var customOrderIds: [String] = []
     @Namespace private var selection
@@ -97,6 +99,15 @@ struct DeckListView: View {
 
     /// Dropping a dragged deck on `target` puts it in that spot and saves the
     /// whole visible order, so decks never move on their own afterwards.
+    /// Where the dragged deck would land relative to `id`: it takes the target's
+    /// place, so it ends above a target it came from below, and below one it came from above.
+    private func indicatorEdge(for id: String) -> VerticalEdge? {
+        guard sortOption == .custom, reorderTargetDeckId == id, let dragging = draggingDeckId, dragging != id else { return nil }
+        let ids = sortedDecks.map(\.id)
+        guard let from = ids.firstIndex(of: dragging), let to = ids.firstIndex(of: id) else { return nil }
+        return from < to ? .bottom : .top
+    }
+
     private func reorder(_ droppedId: String, onto target: String) {
         let current = sortedDecks.map(\.id)
         let updated = DeckCustomOrder.moving(droppedId, onto: target, in: current)
@@ -122,7 +133,8 @@ struct DeckListView: View {
                     ForEach(sortedDecks) { deck in
                         let counts = store.deckCounts[deck.id] ?? (0, 0)
                         DeckListRow(isSelected: selectedDeckId == deck.id, namespace: selection,
-                                    isDropTarget: dropTargetDeckId == deck.id || reorderTargetDeckId == deck.id) {
+                                    isDropTarget: dropTargetDeckId == deck.id,
+                                    dropIndicator: indicatorEdge(for: deck.id)) {
                             DeckRow(name: deck.name, kicker: kickers[deck.id],
                                     cardCount: counts.cardCount, dueCount: counts.dueCount,
                                     understanding: store.deckUnderstanding[deck.id])
@@ -142,15 +154,10 @@ struct DeckListView: View {
                         } isTargeted: { isTargeted in
                             dropTargetDeckId = isTargeted ? deck.id : nil
                         }
-                        .modifier(DeckReorderDrag(enabled: sortOption == .custom, deckId: deck.id))
-                        .dropDestination(for: DeckTransfer.self) { items, _ in
-                            reorderTargetDeckId = nil
-                            guard sortOption == .custom, let dropped = items.first?.deckId else { return false }
-                            reorder(dropped, onto: deck.id)
-                            return true
-                        } isTargeted: { isTargeted in
-                            reorderTargetDeckId = isTargeted && sortOption == .custom ? deck.id : nil
-                        }
+                        .modifier(DeckReorderDrag(
+                            enabled: sortOption == .custom, deckId: deck.id,
+                            dragging: $draggingDeckId, target: $reorderTargetDeckId,
+                            onMove: { reorder($0, onto: deck.id) }))
                     }
                 }
                 .padding(.horizontal, 10)
@@ -354,6 +361,7 @@ private struct DeckListRow<Content: View>: View {
     let isSelected: Bool
     let namespace: Namespace.ID
     var isDropTarget = false
+    var dropIndicator: VerticalEdge?
     @ViewBuilder let content: () -> Content
     let action: () -> Void
     @State private var hovering = false
@@ -380,7 +388,15 @@ private struct DeckListRow<Content: View>: View {
                         .matchedGeometryEffect(id: "deck-selection", in: namespace)
                 }
             }
-                .contentShape(Rectangle())
+                .overlay(alignment: dropIndicator == .top ? .top : .bottom) {
+                if dropIndicator != nil {
+                    Capsule().fill(GRASPColor.brand)
+                        .frame(height: 3)
+                        .padding(.horizontal, 6)
+                        .offset(y: dropIndicator == .top ? -2 : 2)
+                }
+            }
+            .contentShape(Rectangle())
         .onTapGesture(perform: action)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
@@ -389,17 +405,49 @@ private struct DeckListRow<Content: View>: View {
 }
 
 
-/// Makes a deck row draggable, only while the list is in custom order, so
-/// the other sort orders keep their rows as plain buttons.
+/// Makes a deck row draggable and a drop target for other deck rows, only
+/// while the list is in custom order. Uses `onDrag`/`onDrop` so the list knows
+/// which deck is being dragged and can draw where it would land.
 private struct DeckReorderDrag: ViewModifier {
     let enabled: Bool
     let deckId: String
+    @Binding var dragging: String?
+    @Binding var target: String?
+    let onMove: (String) -> Void
 
     func body(content: Content) -> some View {
         if enabled {
-            content.draggable(DeckTransfer(deckId: deckId))
+            content
+                .onDrag {
+                    dragging = deckId
+                    let data = (try? JSONEncoder().encode(DeckTransfer(deckId: deckId))) ?? Data()
+                    let provider = NSItemProvider()
+                    provider.registerDataRepresentation(
+                        forTypeIdentifier: UTType.graspDeck.identifier, visibility: .ownProcess
+                    ) { completion in completion(data, nil); return nil }
+                    return provider
+                }
+                .onDrop(of: [UTType.graspDeck], delegate: DeckReorderDelegate(
+                    deckId: deckId, dragging: $dragging, target: $target, onMove: onMove))
         } else {
             content
         }
+    }
+}
+
+private struct DeckReorderDelegate: DropDelegate {
+    let deckId: String
+    @Binding var dragging: String?
+    @Binding var target: String?
+    let onMove: (String) -> Void
+
+    func dropEntered(info: DropInfo) { target = deckId }
+    func dropExited(info: DropInfo) { if target == deckId { target = nil } }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool {
+        defer { target = nil; dragging = nil }
+        guard let dropped = dragging, dropped != deckId else { return false }
+        onMove(dropped)
+        return true
     }
 }
