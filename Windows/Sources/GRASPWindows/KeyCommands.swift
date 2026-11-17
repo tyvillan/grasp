@@ -19,7 +19,52 @@ enum KeyCommands {
 
     /// Runs on the UI thread, inside the message loop.
     nonisolated(unsafe) static var handler: ((Key) -> Bool)?
+    /// Who set `handler`, so a screen going away clears only its own (the
+    /// next screen may already have set one).
+    nonisolated(unsafe) static var owner: String?
+
+    static func set(owner: String, _ handler: @escaping (Key) -> Bool) {
+        self.owner = owner
+        self.handler = handler
+    }
+
+    static func clear(owner: String) {
+        guard self.owner == owner else { return }
+        self.owner = nil
+        handler = nil
+    }
     nonisolated(unsafe) private static var hook: HHOOK?
+
+    /// The sheets on screen, innermost last, each with what Return does
+    /// (its one yellow button). While any sheet is up the screen's handler
+    /// gets no keys. Escape is WinUI's own: the dialog closes itself.
+    struct SheetReturn {
+        let id: String
+        let confirm: () -> Void
+        /// A sheet with a multi-line text box: plain Return types a new
+        /// line there, so Ctrl+Return confirms instead.
+        let multiline: Bool
+    }
+    nonisolated(unsafe) static var sheets: [SheetReturn] = []
+
+    static func pushSheet(_ sheet: SheetReturn) {
+        sheets.removeAll { $0.id == sheet.id }
+        sheets.append(sheet)
+    }
+
+    static func popSheet(_ id: String) {
+        sheets.removeAll { $0.id == id }
+    }
+
+    /// Return in the innermost sheet: true when it was taken.
+    private static func sheetKey(_ vk: Int32) -> Bool? {
+        guard let top = sheets.last else { return nil }
+        guard vk == VK_RETURN else { return false }
+        let ctrl = GetKeyState(VK_CONTROL) < 0
+        guard ctrl || !top.multiline else { return false }
+        top.confirm()
+        return true
+    }
 
     /// Installed once, when the window first appears.
     static func install() {
@@ -27,11 +72,16 @@ enum KeyCommands {
         hook = SetWindowsHookExW(WH_GETMESSAGE, { code, wParam, lParam in
             if code >= 0, wParam == WPARAM(PM_REMOVE),
                let message = UnsafeMutablePointer<MSG>(bitPattern: Int(lParam)),
-               message.pointee.message == UINT(WM_KEYDOWN), let handler = KeyCommands.handler,
-               let key = KeyCommands.key(forVirtualKey: Int32(message.pointee.wParam)),
-               handler(key) {
-                // Swallowed: the control with focus never sees it.
-                message.pointee.message = UINT(WM_NULL)
+               message.pointee.message == UINT(WM_KEYDOWN) {
+                let vk = Int32(message.pointee.wParam)
+                if let taken = KeyCommands.sheetKey(vk) {
+                    // A sheet is up: Return confirms it, every other key goes
+                    // to the sheet's own controls, never the screen behind.
+                    if taken { message.pointee.message = UINT(WM_NULL) }
+                } else if let handler = KeyCommands.handler, let key = KeyCommands.key(forVirtualKey: vk), handler(key) {
+                    // Swallowed: the control with focus never sees it.
+                    message.pointee.message = UINT(WM_NULL)
+                }
             }
             return CallNextHookEx(nil, code, wParam, lParam)
         }, nil, GetCurrentThreadId())

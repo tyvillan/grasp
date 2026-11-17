@@ -38,7 +38,7 @@ struct StudyHeader: View {
                 }
                 Spacer()
                 if let counter {
-                    Text(counter).font(GRASPFont.rowTitle).foregroundColor(GRASPColor.textSecondary).fixedSize()
+                    Text(counter).font(Font.system(size: 17, weight: .semibold)).foregroundColor(GRASPColor.textSecondary).fixedSize()
                 }
             }
             .padding(.horizontal, 18)
@@ -53,10 +53,12 @@ struct Tally: View {
     let value: Int
     let label: String
     let tint: Color
+    /// 30 on a Learn checkpoint, 44 on the flashcard finish, as on the Mac.
+    var size = 30.0
 
     var body: some View {
         VStack(spacing: 2) {
-            Text("\(value)").font(GRASPFont.numeral).foregroundColor(tint)
+            Text("\(value)").font(Font.system(size: size, weight: .heavy)).foregroundColor(tint)
             Text(label).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
         }
     }
@@ -71,7 +73,13 @@ struct FlashcardSession: View {
     let library: Library
     let deckName: String
     let finish: () -> Void
+    /// The finish screen's one follow-on ("Learn the 3 you missed", "Take a
+    /// test"); nil hides it.
+    var onNext: ((StudyNextStep) -> Void)?
+    /// The deck's ids, to offer "Take a test" when it has approved cards.
+    var deckIds: [String] = []
     @State var queue: [Card]
+    @State var missed: Set<String> = []
     @State var index = 0
     @State var isFlipped = false
     @State var understood = 0
@@ -79,10 +87,13 @@ struct FlashcardSession: View {
     @State var editing: CardEditorTarget?
     @State var timer: FocusTimerModel
 
-    init(library: Library, deckName: String, cards: [Card], finish: @escaping () -> Void) {
+    init(library: Library, deckName: String, cards: [Card], finish: @escaping () -> Void,
+         deckIds: [String] = [], onNext: ((StudyNextStep) -> Void)? = nil) {
         self.library = library
         self.deckName = deckName
         self.finish = finish
+        self.deckIds = deckIds
+        self.onNext = onNext
         _queue = State(wrappedValue: cards)
         let settings = library.settings
         _timer = State(wrappedValue: FocusTimerModel(workMinutes: settings.focusWorkMinutes,
@@ -98,7 +109,8 @@ struct FlashcardSession: View {
                         close: { timer.reset(); finish() })
             FocusTimerBar(model: timer, settings: library.settings)
             if index < queue.count {
-                FlashcardFace(card: queue[index], isFlipped: isFlipped) { isFlipped.toggle() }
+                FlashcardFace(card: queue[index], state: library.understandingState(forCard: queue[index].id),
+                              isFlipped: isFlipped) { isFlipped.toggle() }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 controls
             } else {
@@ -115,8 +127,8 @@ struct FlashcardSession: View {
             }
         }
         #if os(Windows)
-        .onAppear { KeyCommands.handler = { handle($0) } }
-        .onDisappear { KeyCommands.handler = nil }
+        .onAppear { KeyCommands.set(owner: "flashcards") { handle($0) } }
+        .onDisappear { KeyCommands.clear(owner: "flashcards") }
         #endif
     }
 
@@ -150,21 +162,33 @@ struct FlashcardSession: View {
     }
     #endif
 
+    /// The Mac's footer: "Reveal answer" is the screen's one yellow control
+    /// until the answer is up, then the two verdicts in coral and green.
     private var controls: some View {
         VStack(spacing: 10) {
             if isFlipped {
                 HStack(spacing: 10) {
-                    VerdictButton(title: "Needs Review   1", tint: GRASPColor.accent) { submit(false) }
-                    VerdictButton(title: "I Know This   2", tint: GRASPColor.success) { submit(true) }
+                    VerdictButton(title: "Needs Review", key: "1", tint: GRASPColor.rejected,
+                                  soft: GRASPColor.rejectedSoft) { submit(false) }
+                    VerdictButton(title: "I Know This", key: "2", tint: GRASPColor.success,
+                                  soft: GRASPColor.successSoft) { submit(true) }
                 }
             } else {
-                VerdictButton(title: "Reveal Answer   Space", tint: GRASPColor.textSecondary) { isFlipped = true }
+                HStack(spacing: 8) {
+                    Text("Reveal answer").font(Font.system(size: 14, weight: .semibold)).foregroundColor(GRASPColor.ink)
+                    Text("Space").font(GRASPFont.meta).foregroundColor(GRASPColor.ink)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 46.0)
+                .background(GRASPColor.brand)
+                .cornerRadius(12)
+                .onTapGesture { isFlipped = true }
             }
             HStack(spacing: 16) {
                 QuietLink(title: "‹ Previous") {
                     if index > 0 { index -= 1; isFlipped = false }
                 }
-                QuietLink(title: "Edit Card") { editing = CardEditorTarget(card: queue[index], deckId: nil) }
+                QuietLink(title: "Edit card") { editing = CardEditorTarget(card: queue[index], deckId: nil) }
                 QuietLink(title: "Suspend") {
                     library.setStatus([queue[index].id], to: .suspended)
                     queue.remove(at: index)
@@ -180,25 +204,47 @@ struct FlashcardSession: View {
         .padding(.bottom, 20)
     }
 
+    /// The Mac's `SessionCompleteView`: "N cards done", the two tallies, the
+    /// daily goal line, then Done (the one yellow button) with at most one
+    /// outlined follow-on beside it.
     private var completion: some View {
-        VStack(spacing: 0) {
-            Text("Session complete")
-                .font(Font.system(size: 22, weight: .semibold))
+        let done = understood + toReview
+        let goal = library.settings.dailyGoal
+        let reviewed = library.studyStreak().reviewsToday
+        let next: StudyNextStep? = onNext == nil ? nil
+            : !missed.isEmpty ? .learnMissed(missed) : (library.mastery(inDecks: deckIds).total > 0 ? .test : nil)
+        return VStack(spacing: 0) {
+            SectionLabel("Session complete")
+            Text(done == 1 ? "1 card done" : "\(done) cards done")
+                .font(Font.system(size: 34, weight: .heavy))
                 .foregroundColor(GRASPColor.textPrimary)
+                .padding(.top, 10)
             HStack(spacing: 0) {
-                Tally(value: understood, label: "understood", tint: GRASPColor.success)
-                Rectangle().fill(GRASPColor.hairline).frame(width: 1.0, height: 32.0).padding(.horizontal, 26)
-                Tally(value: toReview, label: "to review", tint: GRASPColor.accent)
+                Tally(value: understood, label: "understood", tint: GRASPColor.success, size: 44)
+                Rectangle().fill(GRASPColor.hairline).frame(width: 1.0, height: 40.0).padding(.horizontal, 30)
+                Tally(value: toReview, label: "to review", tint: GRASPColor.accent, size: 44)
             }
-            .padding(.top, 24)
-            Button("Done") { finish() }.fixedSize().padding(.top, 30)
+            .padding(.top, 26)
+            if goal > 0 {
+                Text(reviewed >= goal ? "Daily goal reached" : "\(goal - reviewed) more to reach today's goal of \(goal)")
+                    .font(GRASPFont.meta)
+                    .foregroundColor(GRASPColor.textTertiary)
+                    .padding(.top, 20)
+            }
+            HStack(spacing: 12) {
+                if let next, let onNext {
+                    GRASPButton(next.title) { onNext(next) }
+                }
+                GRASPButton("Done", kind: .primary) { finish() }
+            }
+            .padding(.top, goal > 0 ? 20 : 32)
         }
     }
 
     private func submit(_ knewIt: Bool) {
         guard index < queue.count else { return }
         library.mark(queue[index].id, understood: knewIt)
-        if knewIt { understood += 1 } else { toReview += 1 }
+        if knewIt { understood += 1 } else { toReview += 1; missed.insert(queue[index].id) }
         timer.countCard()
         index += 1
         isFlipped = false
@@ -217,13 +263,15 @@ struct FlashcardSession: View {
 /// the question stays readable while you judge the answer.
 private struct FlashcardFace: View {
     let card: Card
+    /// The card's understanding, as quiet pips in its top corner.
+    let state: UnderstandingState
     let isFlipped: Bool
     let flip: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             Text(MathNotation.prettify(card.front))
-                .font(Font.system(size: 24, weight: .semibold))
+                .font(GRASPFont.studyPrompt)
                 .foregroundColor(GRASPColor.textPrimary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560.0)
@@ -239,8 +287,10 @@ private struct FlashcardFace: View {
         .padding(.horizontal, 44)
         .padding(.vertical, 52)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GRASPColor.surface)
-        .cornerRadius(16)
+        .overlay(alignment: .topTrailing) {
+            PipMeter(state: state).padding(.top, 16).padding(.trailing, 20)
+        }
+        .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: 16)
         .padding(.horizontal, 24)
         .padding(.vertical, 22)
         .onTapGesture(perform: flip)
@@ -250,19 +300,39 @@ private struct FlashcardFace: View {
 /// A wide, tinted answer button, like the Mac's `GRASPVerdictButton`.
 struct VerdictButton: View {
     let title: String
+    /// The keyboard key, shown as a small hint after the title.
+    var key: String?
     let tint: Color
+    /// The tinted fill (the Mac's 9% tint); the surface when nil.
+    var soft: Color?
     var isSelected = false
     let action: () -> Void
 
     var body: some View {
-        Text(title)
-            .font(GRASPFont.rowTitle.weight(.semibold))
-            .foregroundColor(tint)
-            .frame(maxWidth: .infinity)
-            .frame(height: 40.0)
-            .background(isSelected ? GRASPColor.accentSoft : GRASPColor.surface)
-            .cornerRadius(9)
-            .onTapGesture(perform: action)
+        HStack(spacing: 7) {
+            Text(title).font(Font.system(size: 13, weight: .semibold)).foregroundColor(tint)
+            if let key {
+                Text(key).font(GRASPFont.meta).foregroundColor(GRASPColor.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 38.0)
+        .edged(fill: isSelected ? GRASPColor.accentSoft : (soft ?? GRASPColor.surface),
+               edge: isSelected ? GRASPColor.accent : GRASPColor.hairlineStrong, radius: 9)
+        .onTapGesture(perform: action)
+    }
+}
+
+/// What the flashcard finish screen can lead to next, as on the Mac.
+enum StudyNextStep {
+    case learnMissed(Set<String>)
+    case test
+
+    var title: String {
+        switch self {
+        case .learnMissed(let ids): return ids.count == 1 ? "Learn the 1 you missed" : "Learn the \(ids.count) you missed"
+        case .test: return "Take a test"
+        }
     }
 }
 
@@ -304,6 +374,9 @@ struct LearnSession: View {
     @State var started = false
     @State var isAtCheckpoint = false
     @State var answer = AnswerState()
+    /// The answered card's meter before this answer, for the pips that show
+    /// after it (never before, so they can't bias the answer).
+    @State var before: UnderstandingState?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -318,13 +391,29 @@ struct LearnSession: View {
             } else if isAtCheckpoint {
                 checkpoint
             } else if let question = queue.first {
-                MasteryLine(mastery: mastery)
-                QuestionView(question: question, answer: $answer, nextTitle: queue.count == 1 ? "Finish Round" : "Next Question") {
+                MasteryLine(mastery: mastery,
+                            distribution: DeckUnderstanding.distribution(of: library.understanding(inDecks: deckIds).cards))
+                QuestionView(question: question, answer: $answer, nextTitle: queue.count == 1 ? "Finish round" : "Next question",
+                             onAnswered: { noteBefore(question) }, change: change) {
                     advance(question)
                 }
             }
         }
         .onAppear { if !started { startRound() } }
+        #if os(Windows)
+        // At the checkpoint Return is Keep going, the yellow button.
+        .watch(isAtCheckpoint) {
+            if isAtCheckpoint {
+                KeyCommands.set(owner: "checkpoint") { key in
+                    guard key == .enter else { return false }
+                    startRound()
+                    return true
+                }
+            } else {
+                KeyCommands.clear(owner: "checkpoint")
+            }
+        }
+        #endif
     }
 
     private var checkpoint: some View {
@@ -350,12 +439,22 @@ struct LearnSession: View {
             .frame(width: 320.0)
             .padding(.top, 30)
             HStack(spacing: 8) {
-                Button("Done for Now") { finish() }.fixedSize()
-                Button("Keep Going") { startRound() }.fixedSize()
+                GRASPButton("Done for now") { finish() }
+                GRASPButton("Keep going", kind: .primary) { startRound() }
             }
             .padding(.top, 30)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func noteBefore(_ question: LearnEngine.RoundQuestion) {
+        before = question.cardId.map { library.understandingState(forCard: $0) }
+    }
+
+    /// Before and after this answer, once answered.
+    private var change: (before: UnderstandingState, after: UnderstandingState)? {
+        guard answer.isAnswered, let before else { return nil }
+        return (before, before.afterAnswer(correct: answer.wasCorrect))
     }
 
     private func startRound() {
@@ -384,17 +483,21 @@ struct LearnSession: View {
             queue.insert(question, at: min(2, queue.count))
         }
         answer = AnswerState()
+        before = nil
         if queue.isEmpty { isAtCheckpoint = true }
     }
 }
 
+/// The deck's understanding under Learn's header, as the Mac's: the stacked
+/// bar (understood, recall, recognition, self-rated) and the count.
 private struct MasteryLine: View {
     let mastery: (mastered: Int, total: Int)
+    let distribution: DeckUnderstanding.Distribution
 
     var body: some View {
         HStack(spacing: 8) {
-            ProgressBar(fraction: mastery.total == 0 ? 0 : Double(mastery.mastered) / Double(mastery.total),
-                        tint: GRASPColor.success, height: 3.0)
+            Spacer()
+            UnderstandingBar(distribution: distribution, width: 220.0, height: 4.0)
             Text("\(mastery.mastered)/\(mastery.total) understood")
                 .font(GRASPFont.meta)
                 .foregroundColor(GRASPColor.textTertiary)
@@ -418,7 +521,7 @@ struct EmptyStudy: View {
                 .foregroundColor(GRASPColor.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420.0)
-            Button("Back to Deck") { close() }.fixedSize().padding(.top, 6)
+            GRASPButton("Back to deck", kind: .primary) { close() }.padding(.top, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -453,11 +556,20 @@ struct QuestionView: View {
     let nextTitle: String
     var onAnswered: (() -> Void)?
     var onOverride: (() -> Void)?
+    /// Learn's pips under the verdict once answered.
+    var change: (before: UnderstandingState, after: UnderstandingState)? = nil
     let next: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                if question.isComeback {
+                    Text(question.comebackWasUnderstood ? "Checking a card you understood"
+                                                        : "Coming back to a card you answered before")
+                        .font(Font.system(size: 12))
+                        .foregroundColor(GRASPColor.textTertiary)
+                        .padding(.top, 30)
+                }
                 if question.cardId == nil {
                     if question.code != nil || question.problem != nil {
                         Chip(text: "Practice question", tint: GRASPColor.success, soft: GRASPColor.successSoft)
@@ -466,11 +578,11 @@ struct QuestionView: View {
                     }
                 }
                 Text(MathNotation.prettify(question.prompt))
-                    .font(Font.system(size: 22, weight: .semibold))
+                    .font(GRASPFont.studyPrompt)
                     .foregroundColor(GRASPColor.textPrimary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 560.0)
-                    .padding(.top, 30)
+                    .padding(.top, question.isComeback ? 0 : 30)
                 switch question.type {
                 case .multipleChoice:
                     if let code = question.code { CodeContextBlock(code: code) }
@@ -485,38 +597,63 @@ struct QuestionView: View {
                     }
                 }
                 VerdictLine(question: question, answer: answer)
+                if let change { PipChange(before: change.before, after: change.after) }
                 actions
             }
             .frame(maxWidth: 600.0)
             .padding(.horizontal, 32)
             .padding(.bottom, 28)
         }
+        #if os(Windows)
+        // Return presses the yellow button (Submit, then Next), as the Mac's
+        // default action. Set again for each question, so it never acts on
+        // the one before.
+        .onAppear { installReturn() }
+        .watch(question.id) { installReturn() }
+        .onDisappear { KeyCommands.clear(owner: "question") }
+        #endif
     }
+
+    #if os(Windows)
+    private func installReturn() {
+        KeyCommands.set(owner: "question") { key in
+            guard key == .enter else { return false }
+            if answer.isAnswered {
+                next()
+            } else if answer.checkingFunction {
+                return false
+            } else if (!submitsOnChoice || question.type == .written) && canSubmit {
+                submit()
+            } else {
+                return false
+            }
+            return true
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 8) {
             if answer.isAnswered {
                 if question.allowsMarkCorrect, !answer.wasCorrect, let onOverride {
-                    Button("I Actually Got This Right") {
+                    GRASPButton("I actually got this right") {
                         answer.wasCorrect = true
                         answer.wasOverridden = true
                         onOverride()
                     }
-                    .fixedSize()
                 }
-                Button(nextTitle) { next() }.fixedSize()
+                GRASPButton(nextTitle, kind: .primary) { next() }
             } else if answer.checkingFunction {
                 // No compiler on this PC: the student marks their own code
                 // against the reference, as the Mac does where it can't run.
-                Button("I Got It") { finishFunction(correct: true) }.fixedSize()
-                Button("Not Yet") { finishFunction(correct: false) }.fixedSize()
+                GRASPButton("Not yet") { finishFunction(correct: false) }
+                GRASPButton("I got it", kind: .primary) { finishFunction(correct: true) }
             } else if question.code?.kind == .findBug && question.type == .written {
                 // Tapping a line answers it.
             } else if !submitsOnChoice || question.type == .written {
-                Button(question.code?.kind == .completeFunction ? "Check" : "Submit") { submit() }
+                GRASPButton(question.code?.kind == .completeFunction ? "Check" : "Submit", kind: .primary) { submit() }
                     .disabled(!canSubmit)
-                    .fixedSize()
             }
         }
     }
@@ -622,9 +759,17 @@ private struct ChoiceRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
-        .background(background)
-        .cornerRadius(9)
+        .edged(fill: background, edge: edge, radius: 9)
         .onTapGesture(perform: action)
+    }
+
+    private var edge: Color {
+        switch state {
+        case .right: return GRASPColor.success
+        case .wrong: return GRASPColor.rejected
+        case .selected: return GRASPColor.accent
+        case .idle: return GRASPColor.hairline
+        }
     }
 
     private var marker: String {
@@ -638,7 +783,8 @@ private struct ChoiceRow: View {
     private var markerTint: Color {
         switch state {
         case .right: return GRASPColor.success
-        case .wrong, .selected: return GRASPColor.accent
+        case .wrong: return GRASPColor.rejected
+        case .selected: return GRASPColor.accent
         case .idle: return GRASPColor.textTertiary
         }
     }
@@ -646,7 +792,8 @@ private struct ChoiceRow: View {
     private var background: Color {
         switch state {
         case .right: return GRASPColor.successSoft
-        case .wrong, .selected: return GRASPColor.accentSoft
+        case .wrong: return GRASPColor.rejectedSoft
+        case .selected: return GRASPColor.accentSoft
         case .idle: return GRASPColor.surface
         }
     }
@@ -673,9 +820,16 @@ private struct TrueFalse: View {
     }
 
     private func option(_ label: String) -> some View {
-        VerdictButton(title: label, tint: tint(label), isSelected: !answer.isAnswered && answer.selected == label) {
+        VerdictButton(title: label, tint: tint(label), soft: soft(label),
+                      isSelected: !answer.isAnswered && answer.selected == label) {
             pick(label)
         }
+    }
+
+    private func soft(_ label: String) -> Color? {
+        guard answer.isAnswered else { return nil }
+        if label == question.correctAnswer { return GRASPColor.successSoft }
+        return label == answer.selected ? GRASPColor.rejectedSoft : nil
     }
 
     private func tint(_ label: String) -> Color {
@@ -683,7 +837,7 @@ private struct TrueFalse: View {
             return answer.selected == label ? GRASPColor.accent : GRASPColor.textSecondary
         }
         if label == question.correctAnswer { return GRASPColor.success }
-        return label == answer.selected ? GRASPColor.accent : GRASPColor.textTertiary
+        return label == answer.selected ? GRASPColor.rejected : GRASPColor.textTertiary
     }
 }
 
@@ -695,17 +849,27 @@ private struct WrittenAnswer: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            TextField("Type the answer, then press Enter", text: $answer.written)
-                .frame(width: 420.0)
+            TextField("Type the answer", text: $answer.written.changesOnly())
+                .font(Font.system(size: 15))
+                .frame(width: 418.0)
                 .disabled(answer.isAnswered)
                 .onSubmit(perform: submit)
-            if answer.isAnswered, answer.verdict != .correct {
-                HStack(spacing: 6) {
-                    Text("Answer").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
-                    Text(MathNotation.prettify(question.correctAnswer))
-                        .font(GRASPFont.body)
-                        .foregroundColor(GRASPColor.textPrimary)
+                .padding(1)
+                .edged(fill: GRASPColor.inset, edge: GRASPColor.hairlineStrong, radius: 9)
+            if answer.isAnswered, answer.verdict == .close {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Your answer works. The card says:").font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
+                    Text(MathNotation.prettify(question.correctAnswer)).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary)
                 }
+                .frame(width: 418.0, alignment: .leading)
+            } else if answer.isAnswered, answer.verdict != .correct, !answer.wasOverridden {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("YOUR ANSWER").font(GRASPFont.eyebrow).foregroundColor(GRASPColor.textTertiary)
+                    Text(answer.written).font(GRASPFont.body).foregroundColor(GRASPColor.textSecondary)
+                    Text("CARD SAYS").font(GRASPFont.eyebrow).foregroundColor(GRASPColor.textTertiary).padding(.top, 6)
+                    Text(MathNotation.prettify(question.correctAnswer)).font(GRASPFont.body).foregroundColor(GRASPColor.textPrimary)
+                }
+                .frame(width: 418.0, alignment: .leading)
             }
         }
     }
@@ -719,7 +883,8 @@ private struct VerdictLine: View {
         if answer.isAnswered {
             Text(text)
                 .font(GRASPFont.body)
-                .foregroundColor(answer.wasCorrect ? GRASPColor.success : GRASPColor.accent)
+                .foregroundColor(answer.wasCorrect ? (answer.verdict == .close ? GRASPColor.accent : GRASPColor.success)
+                                                   : GRASPColor.rejected)
         }
     }
 
@@ -729,7 +894,7 @@ private struct VerdictLine: View {
         case .correct: return "✓ Correct"
         case .close: return "✓ Close. Check your spelling"
         default:
-            return question.type == .written ? "✕ Not quite" : "✕ Not quite. The answer is \(MathNotation.prettify(question.correctAnswer))"
+            return "✕ Not quite"
         }
     }
 }

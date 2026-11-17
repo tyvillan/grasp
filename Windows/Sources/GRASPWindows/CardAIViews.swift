@@ -75,18 +75,20 @@ struct FillGapsSheet: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button("Fill Gaps") {
-                    let trimmed = topic.trimmingCharacters(in: .whitespaces)
-                    start(perNote, trimmed.isEmpty ? nil : trimmed)
-                    close()
-                }
-                .fixedSize()
+                GRASPButton("Cancel") { close() }
+                GRASPButton("Fill gaps", kind: .primary) { begin() }
             }
+            .returnConfirms { begin() }
         }
         .padding(24)
         .frame(width: 460.0)
         .background(GRASPColor.canvas)
+    }
+
+    private func begin() {
+        let trimmed = topic.trimmingCharacters(in: .whitespaces)
+        start(perNote, trimmed.isEmpty ? nil : trimmed)
+        close()
     }
 }
 
@@ -134,15 +136,19 @@ struct DuplicateReviewSheet: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button(groups.isEmpty ? "Done" : "Cancel") { close() }.fixedSize()
-                if !groups.isEmpty {
-                    Button("Merge") {
+                if groups.isEmpty {
+                    GRASPButton("Done", kind: .primary) { close() }
+                } else {
+                    GRASPButton("Cancel") { close() }
+                    GRASPButton("Merge", kind: .primary) {
                         merge(merges)
                         close()
                     }
                     .disabled(merges.isEmpty)
-                    .fixedSize()
                 }
+            }
+            .returnConfirms {
+                if groups.isEmpty { close() } else if !merges.isEmpty { merge(merges); close() }
             }
         }
         .padding(24)

@@ -356,7 +356,7 @@ private struct GuideRow: View {
                 Text("No parts found").font(GRASPFont.meta).foregroundColor(GRASPColor.rejected).fixedSize()
             }
             Spacer()
-            Menu("•••") {
+            Menu("\u{22EF}") {
                 if let url {
                     Button("Open") { ExternalLink.openFile(url) }
                     Button("Show in Explorer") { ExternalLink.showInExplorer(url) }

@@ -113,21 +113,31 @@ struct ContentView: View {
         // Read here, in the body, so opening Send feedback redraws the
         // window: a read inside the sheet's Binding alone isn't tracked.
         let feedbackOpen = feedback.isPresenting
-        HStack(spacing: 0) {
-            Sidebar(library: library, route: $route)
-                .frame(width: Sidebar.width)
-                .frame(maxHeight: .infinity)
-                .background(GRASPColor.sidebar)
-            HairlineColumn()
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(GRASPColor.canvas)
-                // The soft feedback ask, at the bottom right, never blocking.
-                .overlay(alignment: .bottomTrailing) {
-                    if let ask = feedback.showingAsk {
-                        FeedbackAskCard(ask: ask)
+        // One reader around the whole window: SwiftCrossUI makes the window's
+        // minimum the content's size when offered nothing, where every
+        // wrapping line stands one word to a line, so the window could grow
+        // taller than the screen and never shrink back. A reader takes the
+        // size it's offered, so the window follows the user; the real minimum
+        // is `WindowIcon`'s WM_GETMINMAXINFO.
+        GeometryReader { proxy in
+            let _ = WindowLayout.note(width: proxy.size.width)
+            HStack(spacing: 0) {
+                Sidebar(library: library, route: $route)
+                    .frame(width: Sidebar.width)
+                    .frame(maxHeight: .infinity)
+                    .background(GRASPColor.sidebar)
+                HairlineColumn()
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(GRASPColor.canvas)
+                    // The soft feedback ask, at the bottom right, never blocking.
+                    .overlay(alignment: .bottomTrailing) {
+                        if let ask = feedback.showingAsk {
+                            FeedbackAskCard(ask: ask)
+                        }
                     }
-                }
+            }
+            .frame(width: Self.finite(proxy.size.width), height: Self.finite(proxy.size.height))
         }
         .watch(route) {
             Self.noteScreen(route)
@@ -154,6 +164,11 @@ struct ContentView: View {
     }
 
     private var feedback: FeedbackService { FeedbackService.shared }
+
+    /// A reader can be offered infinity while SwiftCrossUI measures.
+    private static func finite(_ value: Double) -> Double {
+        value.isFinite ? max(0, value) : 2000
+    }
 
     /// The screen feedback names, in fixed words. A deck page sets its own.
     private static func noteScreen(_ route: Route) {
@@ -566,7 +581,7 @@ struct DeckColumn: View {
             HStack(spacing: 6) {
                 SectionLabel("Decks")
                 Spacer()
-                Menu("•••") {
+                Menu("\u{22EF}") {
                     Button("New Deck…") { organize(.newDeck(courseId: course.id)) }
                     Button("Edit Course…") { organize(.editCourse(course)) }
                     Button("Dates for This Course…") { organize(.dates(course)) }
@@ -771,7 +786,15 @@ struct DeckView: View {
     private func session(_ mode: StudyMode) -> some View {
         switch mode {
         case .flashcards(let cards):
-            FlashcardSession(library: library, deckName: scope.title, cards: cards, finish: end)
+            FlashcardSession(library: library, deckName: scope.title, cards: cards, finish: end,
+                             deckIds: scope.deckIds) { step in
+                // The finish screen's follow-on: straight into the next mode.
+                library.finishSession()
+                switch step {
+                case .learnMissed(let ids): self.mode = .practice(ids)
+                case .test: self.mode = .test
+                }
+            }
         case .learn:
             LearnSession(library: library, deckName: scope.title, deckIds: scope.deckIds, finish: end)
         case .practice(let cards):
@@ -858,16 +881,32 @@ struct DeckView: View {
                 Spacer()
                 deckMenu
             }
+            // The Mac's one muted line for why Study, Learn or Test is dimmed.
+            if let note = studyNote(canTest: canTest) {
+                Text(note).font(GRASPFont.meta).foregroundColor(GRASPColor.textTertiary)
+            }
         }
         .padding(.horizontal, 28)
         .padding(.top, 22)
         .padding(.bottom, 16)
     }
 
+    /// The Mac's `studyUnavailableNote`, then the Test reason. A deck of only
+    /// drafts says it in the drafts strip instead.
+    private func studyNote(canTest: Bool) -> String? {
+        guard tab == .cards else { return nil }
+        let active = scope.total - scope.drafts
+        if scope.total == 0 { return "No cards yet. Write some from your notes to start studying." }
+        if active == 0 { return scope.drafts > 0 ? nil : "Nothing active to study. Reactivate suspended cards." }
+        if scope.due == 0 { return "Nothing due right now. Learn or Test any time." }
+        if !canTest { return "Add cards or write questions to take a test." }
+        return nil
+    }
+
     /// The deck's own actions and the tools, in one menu: SwiftCrossUI has
     /// no right-click, and one menu on the page costs one view, not one a row.
     private var deckMenu: some View {
-        Menu("•••") {
+        Menu("\u{22EF}") {
             if hasModel {
                 if scope.drafts > 0 {
                     Button("Refine \(scope.drafts) drafts with AI") {

@@ -85,8 +85,9 @@ struct DeckFilesSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Done") { close() }.fixedSize()
+                GRASPButton("Done", kind: .primary) { close() }
             }
+            .returnConfirms { close() }
         }
         .padding(24)
         .frame(width: 640.0)
@@ -143,7 +144,7 @@ private struct FileRow: View {
                             .foregroundColor(GRASPColor.textTertiary).fixedSize()
                     }
                 }
-                Menu("•••") {
+                Menu("\u{22EF}") {
                     Button("View Note Text") { read() }
                     if let url, exists {
                         Button("Open in Default App") { ExternalLink.openFile(url) }

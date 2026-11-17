@@ -119,7 +119,7 @@ struct FocusTimerBar: View {
     var body: some View {
         HStack(spacing: 10) {
             if model.phase == .idle {
-                QuietLink(title: "⏱ Start Focus Timer") { model.start() }
+                QuietLink(title: "⏱ Start focus timer") { model.start() }
             } else {
                 Text(model.isElapsed ? (model.phase == .breaking ? "Break's up" : "Time's up") : model.timeText)
                     .font(Font.system(size: 13, weight: .semibold))
@@ -138,7 +138,7 @@ struct FocusTimerBar: View {
                         .fixedSize()
                 }
                 if model.isElapsed {
-                    Button(model.phase == .breaking ? "Back to Work" : "Take a Break") { model.advance() }.fixedSize()
+                    GRASPButton(model.phase == .breaking ? "Back to work" : "Take a break") { model.advance() }
                 } else {
                     Button(model.isRunning ? "Pause" : "Resume") {
                         if model.isRunning { model.pause() } else { model.resume() }
@@ -154,7 +154,7 @@ struct FocusTimerBar: View {
                     .foregroundColor(GRASPColor.textTertiary)
                     .fixedSize()
             }
-            QuietLink(title: "Timer Settings") { showingSettings = true }
+            QuietLink(title: "Timer settings") { showingSettings = true }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
@@ -178,7 +178,7 @@ private struct FocusTimerSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Focus Timer")
+            Text("Focus timer")
                 .font(Font.system(size: 18, weight: .semibold))
                 .foregroundColor(GRASPColor.textPrimary)
             stepper("Work interval", value: settings.focusWorkMinutes, unit: "min", range: 5...90, step: 5) {
@@ -196,18 +196,20 @@ private struct FocusTimerSettings: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
-                Button("Done") {
-                    model.workMinutes = settings.focusWorkMinutes
-                    model.breakMinutes = settings.focusBreakMinutes
-                    model.cardTarget = settings.focusCardTarget
-                    close()
-                }
-                .fixedSize()
+                GRASPButton("Done", kind: .primary) { done() }
             }
+            .returnConfirms { done() }
         }
         .padding(24)
         .frame(width: 400.0)
         .background(GRASPColor.canvas)
+    }
+
+    private func done() {
+        model.workMinutes = settings.focusWorkMinutes
+        model.breakMinutes = settings.focusBreakMinutes
+        model.cardTarget = settings.focusCardTarget
+        close()
     }
 
     private func stepper(_ label: String, value: Int, unit: String, range: ClosedRange<Int>, step: Int,

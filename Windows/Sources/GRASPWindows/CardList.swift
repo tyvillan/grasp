@@ -76,29 +76,21 @@ struct CardList: View {
                 .padding(.vertical, 10)
                 .edged(fill: GRASPColor.surface, edge: GRASPColor.hairline, radius: GRASPRadius.inner)
             }
-            HStack(spacing: 10) {
-                // The Mac's pills: All, Drafts, Due, Understood, with counts.
-                // Suspended only appears when a card is suspended.
-                let filters = CardFilter.allCases.filter { option in
-                    option != .suspended || filter == .suspended || cards.contains { $0.status == .suspended }
+            // One row when the window is wide; on a narrow window the pills
+            // keep their row and the filter, sort and buttons drop under them.
+            if WindowLayout.isNarrow {
+                VStack(alignment: .leading, spacing: 10) {
+                    filterPills(cards: cards, levels: levels, now: now)
+                    HStack(spacing: 10) {
+                        Spacer()
+                        toolbarControls
+                    }
                 }
-                SegmentedChoice(options: filters, selection: filter,
-                                label: { option in
-                                    "\(option.label) \(cards.filter { option.includes($0, levels: levels, now: now) }.count)"
-                                }) {
-                    filter = $0
-                    shown = Self.pageSize
-                }
-                Spacer()
-                TextField("Filter cards", text: $text.changesOnly())
-                    .frame(width: 160.0)
-                Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { let new = $0 ?? .deckOrder; if new != sort { sort = new } }))
-                GRASPButton(selection == nil ? "Select" : "Done") {
-                    selection = selection == nil ? [] : nil
-                    confirmingBulkDelete = false
-                }
-                GRASPButton("+ New card") {
-                    editing = CardEditorTarget(card: nil, deckId: scope.deckIds.first)
+            } else {
+                HStack(spacing: 10) {
+                    filterPills(cards: cards, levels: levels, now: now)
+                    Spacer()
+                    toolbarControls
                 }
             }
 
@@ -154,6 +146,36 @@ struct CardList: View {
         .sheet(isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             if let editing {
                 CardEditor(library: library, target: editing, deckChoices: deckChoices, moveTargets: moveTargets) { self.editing = nil }
+            }
+        }
+    }
+
+    /// The Mac's pills: All, Drafts, Due, Understood, with counts.
+    /// Suspended only appears when a card is suspended.
+    private func filterPills(cards: [Card], levels: [String: LearnEngine.Level], now: Date) -> some View {
+        let filters = CardFilter.allCases.filter { option in
+            option != .suspended || filter == .suspended || cards.contains { $0.status == .suspended }
+        }
+        return SegmentedChoice(options: filters, selection: filter,
+                               label: { option in
+                                   "\(option.label) \(cards.filter { option.includes($0, levels: levels, now: now) }.count)"
+                               }) {
+            filter = $0
+            shown = Self.pageSize
+        }
+    }
+
+    private var toolbarControls: some View {
+        HStack(spacing: 10) {
+            TextField("Filter cards", text: $text.changesOnly())
+                .frame(width: 160.0)
+            Picker(of: CardSort.allCases, selection: Binding(get: { sort }, set: { let new = $0 ?? .deckOrder; if new != sort { sort = new } }))
+            GRASPButton(selection == nil ? "Select" : "Done") {
+                selection = selection == nil ? [] : nil
+                confirmingBulkDelete = false
+            }
+            GRASPButton("+ New card") {
+                editing = CardEditorTarget(card: nil, deckId: scope.deckIds.first)
             }
         }
     }
@@ -315,12 +337,49 @@ struct PipMeter: View {
     }
 
     /// The Mac's `UnderstandingState.stageColor`.
-    private var stageColor: Color {
+    private var stageColor: Color { Self.stageColor(state) }
+
+    static func stageColor(_ state: UnderstandingState) -> Color {
         switch state.level {
         case .new: return GRASPColor.textTertiary
         case .recognition, .familiar: return GRASPColor.textSecondary
         case .recall: return GRASPColor.accent
         case .mastered: return GRASPColor.success
+        }
+    }
+}
+
+/// The Mac's `PipChange`, under a Learn answer: the pips before, an arrow
+/// and the pips after with one line when the level changed; else the card's
+/// one state with its word ("Missed once..." after a first miss).
+struct PipChange: View {
+    let before: UnderstandingState
+    let after: UnderstandingState
+
+    var body: some View {
+        if let caption = UnderstandingState.changeCaption(from: before, to: after) {
+            VStack(spacing: 6) {
+                HStack(spacing: 10) {
+                    PipMeter(state: before)
+                    Text("\u{2192}").font(Font.system(size: 11, weight: .semibold)).foregroundColor(GRASPColor.textTertiary)
+                    PipMeter(state: after)
+                }
+                Text(caption)
+                    .font(Font.system(size: 12.5, weight: .medium))
+                    .foregroundColor(PipMeter.stageColor(after))
+            }
+        } else {
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    PipMeter(state: after)
+                    Text(after.word).font(Font.system(size: 12)).foregroundColor(GRASPColor.textSecondary)
+                }
+                if after.missedOnce {
+                    Text("Missed once. Miss it again in a row and it drops a level.")
+                        .font(Font.system(size: 12))
+                        .foregroundColor(GRASPColor.textTertiary)
+                }
+            }
         }
     }
 }
@@ -450,7 +509,12 @@ struct UnderstandingPanel: View {
             let height: Double = 37 + notesHeight + buttonHeight
             GeometryReader { proxy in
                 let barWidth = Self.width(proxy.size.width)
-                content(distribution: distribution, weakest: weakest, practiceIds: practiceIds, barWidth: barWidth)
+                // A fresh node when the width changes: a node keeps its cached
+                // layout when offered the same size again, so the weakest
+                // notes' bars kept the old width after the window narrowed.
+                ForEach([Int(barWidth)], id: \.self) { _ in
+                    content(distribution: distribution, weakest: weakest, practiceIds: practiceIds, barWidth: barWidth)
+                }
             }
             .frame(height: height)
             .padding(16)
@@ -650,11 +714,11 @@ struct CardEditor: View {
                         Button("Delete…") { confirmingDelete = true }.fixedSize()
                     }
                     Spacer()
-                    Button("Cancel") { close() }.fixedSize()
-                    Button(isNew ? "Add Card" : "Save") { save() }
+                    GRASPButton("Cancel") { close() }
+                    GRASPButton(isNew ? "Add card" : "Save", kind: .primary) { save() }
                         .disabled(!canSave)
-                        .fixedSize()
                 }
+                .returnConfirms(multiline: true) { if canSave { save() } }
             }
         }
         .padding(24)

@@ -135,11 +135,11 @@ private struct CourseEditor: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button(original == nil ? "Add Course" : "Save") { save() }
+                GRASPButton("Cancel") { close() }
+                GRASPButton(original == nil ? "Add course" : "Save", kind: .primary) { save() }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .fixedSize()
             }
+            .returnConfirms { if !name.trimmingCharacters(in: .whitespaces).isEmpty { save() } }
         }
         .padding(24)
         .frame(width: 460.0)
@@ -227,20 +227,22 @@ private struct LectureDateSheet: View {
                     .fixedSize()
                 }
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button("Save") {
-                    // A range runs earliest to latest whichever way round it was set.
-                    let low = isRange ? min(start, end) : start
-                    let high = isRange ? max(start, end) : nil
-                    library.setLectureDate(deck.id, start: low, end: high)
-                    close()
-                }
-                .fixedSize()
+                GRASPButton("Cancel") { close() }
+                GRASPButton("Save", kind: .primary) { saveDate() }
             }
+            .returnConfirms { saveDate() }
         }
         .padding(24)
         .frame(width: 460.0)
         .background(GRASPColor.canvas)
+    }
+
+    private func saveDate() {
+        // A range runs earliest to latest whichever way round it was set.
+        let low = isRange ? min(start, end) : start
+        let high = isRange ? max(start, end) : nil
+        library.setLectureDate(deck.id, start: low, end: high)
+        close()
     }
 }
 
@@ -263,13 +265,13 @@ private struct CourseDeleteConfirmation: View {
                 .foregroundColor(GRASPColor.textSecondary)
             HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button("Delete") {
+                GRASPButton("Cancel") { close() }
+                // A delete is the coral pill, and Return never presses it.
+                GRASPButton("Delete", kind: .destructive) {
                     library.deleteCourse(course.id)
                     close()
                     onDeleted()
                 }
-                .fixedSize()
             }
         }
         .padding(24)
@@ -333,8 +335,8 @@ private struct DeckNameEditor: View {
             TextField("Deck name (e.g. Midterm Review)", text: $name)
             HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button(deck == nil ? "Create" : "Save") {
+                GRASPButton("Cancel") { close() }
+                GRASPButton(deck == nil ? "Create" : "Save", kind: .primary) {
                     if let deck {
                         library.renameDeck(deck.id, to: name)
                         close()
@@ -393,8 +395,8 @@ private struct DeckDeleteConfirmation: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { close() }.fixedSize()
-                Button("Delete Deck") {
+                GRASPButton("Cancel") { close() }
+                GRASPButton("Delete deck", kind: .destructive) {
                     let target = (count == 0 || deleteCards || siblings.isEmpty) ? nil : (moveTo ?? siblings.first?.id)
                     library.deleteDeck(deck.id, movingCardsTo: target)
                     close()
@@ -514,8 +516,9 @@ struct CourseDatesSheet: View {
                 }
                 .fixedSize()
                 Spacer()
-                Button("Done") { close() }.fixedSize()
+                GRASPButton("Done", kind: .primary) { close() }
             }
+            .returnConfirms { close() }
         }
         .padding(24)
         .frame(width: 460.0)
