@@ -19,7 +19,7 @@ struct LessonDatesTests {
         #expect(LessonDates.format(start: day(2026, 8, 30), end: day(2026, 9, 2), locale: us) == "AUG 30 – SEP 2")
     }
 
-    @Test("extracted dates win; a manual date only fills in where there are none")
+    @Test("a manual date wins over the notes' dates; without one the notes' dates show")
     func kickers() async throws {
         let db = try GRASPDatabase.inMemory()
         let ids = try await db.queue.write { conn -> (dated: String, manual: String, bare: String, both: String) in
@@ -49,7 +49,7 @@ struct LessonDatesTests {
         #expect(kickers[ids.dated] == "AUG 27–29")
         #expect(kickers[ids.manual] == "SEP 3")
         #expect(kickers[ids.bare] == nil)
-        #expect(kickers[ids.both] == "AUG 25")
+        #expect(kickers[ids.both] == "SEP 3")
     }
 
     @Test("setting a range, then clearing it")
@@ -70,5 +70,35 @@ struct LessonDatesTests {
         try await db.queue.write { try LessonDates.setManual(deckId: deckId, start: nil, end: self.day(2026, 9, 2), db: $0) }
         kickers = try await db.queue.read { try LessonDates.kickers(db: $0, locale: self.us) }
         #expect(kickers[deckId] == nil)
+    }
+}
+
+extension LessonDatesTests {
+    @Test("a manual range on a deck whose notes carry dates shows, and clearing it restores the notes' date")
+    func manualRangeBeatsNotes() async throws {
+        let db = try GRASPDatabase.inMemory()
+        let deckId = try await db.queue.write { conn -> String in
+            let course = Course(semesterId: nil, name: "Systems")
+            try course.insert(conn)
+            let deck = Deck(courseId: course.id, name: "Module 9")
+            try deck.insert(conn)
+            let note = Material(courseId: course.id, relativePath: "/n/m9.md", kind: .markdown,
+                                contentHash: "h9", title: "2026-10-29_Module-9_Pointers")
+            try note.insert(conn)
+            let card = Card(materialId: note.id, front: "Q", back: "A", origin: .parser, status: .active)
+            try card.insert(conn)
+            try DeckCard(deckId: deck.id, cardId: card.id, sortIndex: 0).insert(conn)
+            return deck.id
+        }
+        var kickers = try await db.queue.read { try LessonDates.kickers(db: $0, locale: self.us) }
+        #expect(kickers[deckId] == "OCT 29")
+        try await db.queue.write {
+            try LessonDates.setManual(deckId: deckId, start: self.day(2026, 10, 29), end: self.day(2026, 11, 3), db: $0)
+        }
+        kickers = try await db.queue.read { try LessonDates.kickers(db: $0, locale: self.us) }
+        #expect(kickers[deckId] == "OCT 29 – NOV 3")
+        try await db.queue.write { try LessonDates.setManual(deckId: deckId, start: nil, end: nil, db: $0) }
+        kickers = try await db.queue.read { try LessonDates.kickers(db: $0, locale: self.us) }
+        #expect(kickers[deckId] == "OCT 29")
     }
 }

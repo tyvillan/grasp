@@ -734,10 +734,10 @@ final class AppStore {
     /// SEP 2" when its notes span several class days), for `DeckListView`'s
     /// sidebar rows -- just the date, not the full "LECTURE 2 · AUG 27"
     /// kicker the Overview tab and source-note viewers show, since the
-    /// deck's own name already says which lecture it is. The range is the
-    /// earliest-to-latest date across every note linked to the deck when
-    /// that's extractable; else `deck.manualLessonDate`/`manualLessonDateEnd`,
-    /// if the student set one; else none at all.
+    /// deck's own name already says which lecture it is. A date or range the
+    /// student set (`deck.manualLessonDate`/`manualLessonDateEnd`) wins; else
+    /// the earliest-to-latest date across every note linked to the deck, when
+    /// that's extractable; else none at all.
     func deckKickers(for decks: [Deck]) -> [String: String] {
         let extracted = (try? database.queue.read { db -> [String: (start: Date, end: Date)] in
             var result: [String: (start: Date, end: Date)] = [:]
@@ -753,10 +753,10 @@ final class AppStore {
         }) ?? [:]
         var result: [String: String] = [:]
         for deck in decks {
-            if let range = extracted[deck.id] {
-                result[deck.id] = Self.formatLessonDate(start: range.start, end: range.end)
-            } else if let start = deck.manualLessonDate {
+            if let start = deck.manualLessonDate {
                 result[deck.id] = Self.formatLessonDate(start: start, end: deck.manualLessonDateEnd)
+            } else if let range = extracted[deck.id] {
+                result[deck.id] = Self.formatLessonDate(start: range.start, end: range.end)
             }
         }
         return result
@@ -783,11 +783,9 @@ final class AppStore {
     }
 
     /// Sets or clears the lecture date (or range) the student assigned by
-    /// hand, for a deck whose notes carry no extractable date. Never
-    /// touches a date that *was* extracted -- `deckKickers` always prefers
-    /// that one, so a manual date only ever fills in where extraction
-    /// found nothing. `end` nil (or equal to `start`) means a single date,
-    /// not a range.
+    /// hand. It wins over a date read from the deck's notes, and clearing it
+    /// brings the notes' date back. `end` nil (or equal to `start`) means a
+    /// single date, not a range.
     func setDeckManualLessonDate(_ deckId: String, start: Date?, end: Date? = nil) throws {
         try database.queue.write { db in
             guard var deck = try Deck.fetchOne(db, key: deckId) else { return }

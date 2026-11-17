@@ -25,10 +25,11 @@ public enum LessonDates {
         return "\(startText) – \(endText)".uppercased()
     }
 
-    /// Each live deck's date text, by deck id. The earliest-to-latest date
-    /// across the notes its cards come from when any note has one; else the
-    /// date the student set by hand; else nothing. A manual date never
-    /// overrides an extracted one.
+    /// Each live deck's date text, by deck id. The date (or range) the student
+    /// set by hand when there is one, because it is their correction; else the
+    /// earliest-to-latest date across the notes the deck's cards come from;
+    /// else nothing. (A manual date used to lose to the notes' dates, so a
+    /// range typed for a module whose notes carried dates never showed.)
     public static func kickers(db: Database, locale: Locale = .current) throws -> [String: String] {
         var extracted: [String: (start: Date, end: Date)] = [:]
         let rows = try Row.fetchAll(db, sql: """
@@ -51,10 +52,10 @@ public enum LessonDates {
 
         var result: [String: String] = [:]
         for deck in try Deck.filter(Column("deletedAt") == nil).fetchAll(db) {
-            if let range = extracted[deck.id] {
-                result[deck.id] = format(start: range.start, end: range.end, locale: locale)
-            } else if let start = deck.manualLessonDate {
+            if let start = deck.manualLessonDate {
                 result[deck.id] = format(start: start, end: deck.manualLessonDateEnd, locale: locale)
+            } else if let range = extracted[deck.id] {
+                result[deck.id] = format(start: range.start, end: range.end, locale: locale)
             }
         }
         return result

@@ -290,12 +290,10 @@ private struct DeckRow: View {
     }
 }
 
-/// Lets the student assign a lecture date by hand when a deck's notes
-/// carry none to extract -- the iPhone counterpart to the Mac's sheet of
-/// the same name in `Sources/GRASP/Views/DeckActions.swift`. Never shown
-/// as overriding an extracted date: `AppStore.deckKickers` always prefers
-/// the extracted one, so this only ever fills in where extraction found
-/// nothing.
+/// Lets the student set a deck's lecture date or range by hand -- the iPhone
+/// counterpart to the Mac's sheet of the same name in
+/// `Sources/GRASP/Views/DeckActions.swift`. It wins over the date read from
+/// the deck's notes, and clearing it brings the notes' date back.
 private struct DeckLectureDateSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -324,7 +322,7 @@ private struct DeckLectureDateSheet: View {
                         DatePicker("Ends", selection: $endDate, in: date..., displayedComponents: .date)
                     }
                 } footer: {
-                    Text("Shown in the deck list when GRASP can't read a date from this deck's notes.")
+                    Text("Shown in the deck list instead of the date GRASP reads from this deck's notes. Clear it to go back to the notes' date.")
                 }
                 if deck.manualLessonDate != nil {
                     Section {

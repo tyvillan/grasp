@@ -156,11 +156,9 @@ struct DeckDeleteSheet: View {
     }
 }
 
-/// Lets the student assign a lecture date by hand when a deck's notes
-/// carry none to extract (no date in the filename or front matter). Never
-/// shown as overriding an extracted date -- `AppStore.deckKickers` always
-/// prefers the extracted one, so this only ever fills in where extraction
-/// found nothing.
+/// Lets the student set a deck's lecture date or range by hand. It wins over
+/// the date GRASP reads from the deck's notes (`AppStore.deckKickers`), and
+/// clearing it brings the notes' date back.
 struct DeckLectureDateSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -182,7 +180,7 @@ struct DeckLectureDateSheet: View {
     var body: some View {
         GRASPSheet(
             eyebrow: deck.name, title: "Lecture date",
-            message: "Shown in the sidebar when GRASP can't read a date from this deck's notes.",
+            message: "Shown in the sidebar instead of the date GRASP reads from this deck's notes. Clear it to go back to the notes' date.",
             icon: "calendar", width: 420
         ) {
             VStack(alignment: .leading, spacing: 12) {
