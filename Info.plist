@@ -65,6 +65,16 @@
                 <string>public.data</string>
             </array>
         </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.tyvillan.grasp.deck</string>
+            <key>UTTypeDescription</key>
+            <string>GRASP Deck</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
     </array>
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>

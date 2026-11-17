@@ -8,7 +8,7 @@ import GRASPCore
 /// `isDeckListCollapsed`) rather than per-course, since "how I like my
 /// decks arranged" is a habit, not something that varies course to course.
 private enum DeckSortOption: String, CaseIterable, Identifiable {
-    case deckOrder, alphabetical, dateAdded, mostDue
+    case deckOrder, alphabetical, dateAdded, mostDue, custom
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ private enum DeckSortOption: String, CaseIterable, Identifiable {
         case .alphabetical: return "Alphabetical (A–Z)"
         case .dateAdded: return "Date Added"
         case .mostDue: return "Most Due First"
+        case .custom: return "Custom (drag to arrange)"
         }
     }
 }
@@ -58,6 +59,10 @@ struct DeckListView: View {
     @State private var settingLectureDateFor: Deck?
     @State private var deletingDeck: Deck?
     @State private var dropTargetDeckId: String?
+    /// The row a dragged deck is hovering over, in custom order.
+    @State private var reorderTargetDeckId: String?
+    /// The order the student dragged this course's decks into, saved on this device.
+    @State private var customOrderIds: [String] = []
     @Namespace private var selection
 
     /// Summed from `store.deckCounts`, the same per-deck counts every real
@@ -85,9 +90,20 @@ struct DeckListView: View {
             return decks.sorted { $0.createdAt < $1.createdAt }
         case .mostDue:
             return decks.sorted { (store.deckCounts[$0.id]?.dueCount ?? 0) > (store.deckCounts[$1.id]?.dueCount ?? 0) }
+        case .custom:
+            return DeckCustomOrder.apply(decks, saved: customOrderIds)
         }
     }
 
+    /// Dropping a dragged deck on `target` puts it in that spot and saves the
+    /// whole visible order, so decks never move on their own afterwards.
+    private func reorder(_ droppedId: String, onto target: String) {
+        let current = sortedDecks.map(\.id)
+        let updated = DeckCustomOrder.moving(droppedId, onto: target, in: current)
+        guard updated != current else { return }
+        customOrderIds = updated
+        DeckCustomOrder.save(updated, courseId: courseId)
+    }
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -106,7 +122,7 @@ struct DeckListView: View {
                     ForEach(sortedDecks) { deck in
                         let counts = store.deckCounts[deck.id] ?? (0, 0)
                         DeckListRow(isSelected: selectedDeckId == deck.id, namespace: selection,
-                                    isDropTarget: dropTargetDeckId == deck.id) {
+                                    isDropTarget: dropTargetDeckId == deck.id || reorderTargetDeckId == deck.id) {
                             DeckRow(name: deck.name, kicker: kickers[deck.id],
                                     cardCount: counts.cardCount, dueCount: counts.dueCount,
                                     understanding: store.deckUnderstanding[deck.id])
@@ -125,6 +141,15 @@ struct DeckListView: View {
                             return true
                         } isTargeted: { isTargeted in
                             dropTargetDeckId = isTargeted ? deck.id : nil
+                        }
+                        .modifier(DeckReorderDrag(enabled: sortOption == .custom, deckId: deck.id))
+                        .dropDestination(for: DeckTransfer.self) { items, _ in
+                            reorderTargetDeckId = nil
+                            guard sortOption == .custom, let dropped = items.first?.deckId else { return false }
+                            reorder(dropped, onto: deck.id)
+                            return true
+                        } isTargeted: { isTargeted in
+                            reorderTargetDeckId = isTargeted && sortOption == .custom ? deck.id : nil
                         }
                     }
                 }
@@ -170,6 +195,13 @@ struct DeckListView: View {
                     }
                 }
                 .pickerStyle(.inline)
+                if sortOption == .custom, !customOrderIds.isEmpty {
+                    Divider()
+                    Button("Reset Custom Order") {
+                        customOrderIds = []
+                        DeckCustomOrder.save([], courseId: courseId)
+                    }
+                }
             } label: {
                 Image(systemName: "arrow.up.arrow.down.circle")
                     .font(.graspUI(size: 14))
@@ -193,6 +225,7 @@ struct DeckListView: View {
     }
 
     private func load() {
+        customOrderIds = DeckCustomOrder.load(courseId: courseId)
         decks = (try? store.decks(inCourse: courseId)) ?? []
         kickers = store.deckKickers(for: decks)
         exams = store.guidedExams(courseId: courseId)
@@ -351,5 +384,21 @@ private struct DeckListRow<Content: View>: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+
+/// Makes a deck row draggable, only while the list is in custom order, so
+/// the other sort orders keep their rows as plain buttons.
+private struct DeckReorderDrag: ViewModifier {
+    let enabled: Bool
+    let deckId: String
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.draggable(DeckTransfer(deckId: deckId))
+        } else {
+            content
+        }
     }
 }
