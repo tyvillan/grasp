@@ -9,7 +9,7 @@ import GRASPCore
 /// `isDeckListCollapsed`) rather than per-course, since "how I like my
 /// decks arranged" is a habit, not something that varies course to course.
 private enum DeckSortOption: String, CaseIterable, Identifiable {
-    case deckOrder, alphabetical, dateAdded, mostDue, custom
+    case deckOrder, alphabetical, dateAdded, mostDue
 
     var id: String { rawValue }
 
@@ -19,7 +19,6 @@ private enum DeckSortOption: String, CaseIterable, Identifiable {
         case .alphabetical: return "Alphabetical (A–Z)"
         case .dateAdded: return "Date Added"
         case .mostDue: return "Most Due First"
-        case .custom: return "Custom (drag to arrange)"
         }
     }
 }
@@ -60,7 +59,7 @@ struct DeckListView: View {
     @State private var settingLectureDateFor: Deck?
     @State private var deletingDeck: Deck?
     @State private var dropTargetDeckId: String?
-    /// The row a dragged deck is hovering over, in custom order.
+    /// The row a dragged deck is hovering over, in the default order.
     @State private var reorderTargetDeckId: String?
     @State private var draggingDeckId: String?
     /// The order the student dragged this course's decks into, saved on this device.
@@ -85,15 +84,14 @@ struct DeckListView: View {
     private var sortedDecks: [Deck] {
         switch sortOption {
         case .deckOrder:
-            return decks
+            // The default order, rearranged by whatever the user has dragged.
+            return DeckCustomOrder.apply(decks, saved: customOrderIds)
         case .alphabetical:
             return decks.sorted { NaturalOrder.isOrdered($0.name, before: $1.name) }
         case .dateAdded:
             return decks.sorted { $0.createdAt < $1.createdAt }
         case .mostDue:
             return decks.sorted { (store.deckCounts[$0.id]?.dueCount ?? 0) > (store.deckCounts[$1.id]?.dueCount ?? 0) }
-        case .custom:
-            return DeckCustomOrder.apply(decks, saved: customOrderIds)
         }
     }
 
@@ -102,7 +100,7 @@ struct DeckListView: View {
     /// Where the dragged deck would land relative to `id`: it takes the target's
     /// place, so it ends above a target it came from below, and below one it came from above.
     private func indicatorEdge(for id: String) -> VerticalEdge? {
-        guard sortOption == .custom, reorderTargetDeckId == id, let dragging = draggingDeckId, dragging != id else { return nil }
+        guard sortOption == .deckOrder, reorderTargetDeckId == id, let dragging = draggingDeckId, dragging != id else { return nil }
         let ids = sortedDecks.map(\.id)
         guard let from = ids.firstIndex(of: dragging), let to = ids.firstIndex(of: id) else { return nil }
         return from < to ? .bottom : .top
@@ -148,7 +146,7 @@ struct DeckListView: View {
                             )
                         }
                         .modifier(DeckReorderDrag(
-                            enabled: sortOption == .custom, deckId: deck.id,
+                            enabled: sortOption == .deckOrder, deckId: deck.id,
                             dragging: $draggingDeckId, target: $reorderTargetDeckId,
                             onMove: { reorder($0, onto: deck.id) }))
                         .dropDestination(for: CardTransfer.self) { items, _ in
@@ -202,9 +200,9 @@ struct DeckListView: View {
                     }
                 }
                 .pickerStyle(.inline)
-                if sortOption == .custom, !customOrderIds.isEmpty {
+                if sortOption == .deckOrder, !customOrderIds.isEmpty {
                     Divider()
-                    Button("Reset Custom Order") {
+                    Button("Reset Deck Order") {
                         customOrderIds = []
                         DeckCustomOrder.save([], courseId: courseId)
                     }
@@ -406,7 +404,7 @@ private struct DeckListRow<Content: View>: View {
 
 
 /// Makes a deck row draggable and a drop target for other deck rows, only
-/// while the list is in custom order. Uses `onDrag`/`onDrop` so the list knows
+/// while the list is in the default order. Uses `onDrag`/`onDrop` so the list knows
 /// which deck is being dragged and can draw where it would land.
 private struct DeckReorderDrag: ViewModifier {
     let enabled: Bool
@@ -419,7 +417,6 @@ private struct DeckReorderDrag: ViewModifier {
         if enabled {
             content
                 .onDrag {
-                    DragLog.write("drag start \(deckId)")
                     dragging = deckId
                     // Plain text rather than a custom type: the drop matches on
                     // `dragging`, so no registered type can get in the way.
@@ -440,12 +437,11 @@ private struct DeckReorderDelegate: DropDelegate {
     @Binding var target: String?
     let onMove: (String) -> Void
 
-    func validateDrop(info: DropInfo) -> Bool { DragLog.write("validate \(deckId) dragging=\(dragging ?? "nil")"); return dragging != nil }
-    func dropEntered(info: DropInfo) { DragLog.write("entered \(deckId)"); if dragging != nil { target = deckId } }
+    func validateDrop(info: DropInfo) -> Bool { return dragging != nil }
+    func dropEntered(info: DropInfo) { if dragging != nil { target = deckId } }
     func dropExited(info: DropInfo) { if target == deckId { target = nil } }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool {
-        DragLog.write("perform \(deckId) dragging=\(dragging ?? "nil")")
         defer { target = nil; dragging = nil }
         guard let dropped = dragging, dropped != deckId else { return false }
         onMove(dropped)
@@ -453,12 +449,3 @@ private struct DeckReorderDelegate: DropDelegate {
     }
 }
 
-/// Temporary: records drag events so a failing deck drag can be diagnosed.
-enum DragLog {
-    static func write(_ line: String) {
-        let url = URL(fileURLWithPath: "/tmp/grasp-drag.log")
-        let data = Data((line + "\n").utf8)
-        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
-        else { try? data.write(to: url) }
-    }
-}
