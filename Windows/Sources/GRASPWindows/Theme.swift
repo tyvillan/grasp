@@ -39,12 +39,23 @@ enum GRASPColor {
     static let figureBlue = adaptive(light: 0x2F6FD0, dark: 0x58C4DD)
     static let figureAmber = adaptive(light: 0xC47A0B, dark: 0xF2B84B)
 
+    /// The sidebar's own surface at a strength, for the fade that says its
+    /// list scrolls (not a new colour: `surface` with alpha).
+    static func sidebarFade(_ opacity: Double) -> Color {
+        .adaptive(light: Color(rgb: 0xFFFDF3, opacity: opacity), dark: Color(rgb: 0x171917, opacity: opacity))
+    }
+
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         .adaptive(light: Color(rgb: light), dark: Color(rgb: dark))
     }
 }
 
 extension Color {
+    init(rgb: UInt32, opacity: Double) {
+        self.init(red: Double((rgb >> 16) & 0xFF) / 255, green: Double((rgb >> 8) & 0xFF) / 255,
+                  blue: Double(rgb & 0xFF) / 255, opacity: opacity)
+    }
+
     init(rgb: UInt32) {
         self.init(
             red: Double((rgb >> 16) & 0xFF) / 255,

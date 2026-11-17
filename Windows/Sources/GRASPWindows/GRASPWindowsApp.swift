@@ -257,6 +257,8 @@ struct Sidebar: View {
             .padding(.top, 18)
             .padding(.bottom, 10)
 
+            GeometryReader { proxy in
+            let room = proxy.size.height.isFinite ? Double(proxy.size.height) : .infinity
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     SidebarRow(title: "Home", dot: nil, isSelected: route == .home) { route = .home }
@@ -274,6 +276,14 @@ struct Sidebar: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 12)
+            }
+            .overlay(alignment: .bottom) {
+                // More below: the list's last rows fade into the strip under
+                // it, only while the list is taller than its room.
+                if Self.listHeight(groups: groups, pastTermsOpen: pastTermsOpen) > room {
+                    ScrollFade()
+                }
+            }
             }
             .frame(maxHeight: .infinity)
 
@@ -309,6 +319,27 @@ struct Sidebar: View {
                               onCreated: { route = .course($0) },
                               close: { addingCourse = false })
         }
+    }
+
+    /// About how tall the list is, from its rows (36 pt a row, 54 for a
+    /// course name that wraps, 43 a group label, 50 the Past terms row).
+    /// SwiftCrossUI can't report a scroll view's content height, so this
+    /// errs tall: a name over 22 characters counts as two lines.
+    static func listHeight(groups: (current: [(title: String, courses: [Course])],
+                                    past: [(title: String, courses: [Course])]),
+                           pastTermsOpen: Bool) -> Double {
+        var height = 5 * 38.0 + 12
+        for group in groups.current {
+            height += 43
+            height += group.courses.reduce(0) { $0 + ($1.name.count > 22 ? 56.0 : 38.0) }
+        }
+        if !groups.past.isEmpty {
+            height += 50
+            if pastTermsOpen {
+                for term in groups.past { height += 43 + Double(term.courses.count) * 38 }
+            }
+        }
+        return height
     }
 
     private func groupLabel(_ title: String) -> some View {
@@ -935,5 +966,20 @@ struct DeckView: View {
                 .padding(.horizontal, 28)
                 .padding(.vertical, 20)
         }
+    }
+}
+
+/// The quiet "more below" cue at the foot of the sidebar's list: the
+/// sidebar's surface fading in over 28 pt, so the last row half shows.
+private struct ScrollFade: View {
+    private static let steps: [Double] = [0.0, 0.25, 0.45, 0.62, 0.76, 0.87, 0.95]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Self.steps, id: \.self) { opacity in
+                Rectangle().fill(GRASPColor.sidebarFade(opacity)).frame(height: 4.0)
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }

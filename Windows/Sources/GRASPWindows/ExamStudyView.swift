@@ -337,6 +337,7 @@ private struct ExamHeader: View {
 
     static func date(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = CalendarFormat.locale
         formatter.dateFormat = "EEEE, MMM d"
         return formatter.string(from: date)
     }
@@ -701,6 +702,7 @@ struct ExamColumnRow: View {
 
     static func date(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = CalendarFormat.locale
         formatter.dateFormat = "MMM d"
         return formatter.string(from: date)
     }
