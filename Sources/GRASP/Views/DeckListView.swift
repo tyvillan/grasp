@@ -147,6 +147,10 @@ struct DeckListView: View {
                                 onDelete: { beginDelete(deck) }
                             )
                         }
+                        .modifier(DeckReorderDrag(
+                            enabled: sortOption == .custom, deckId: deck.id,
+                            dragging: $draggingDeckId, target: $reorderTargetDeckId,
+                            onMove: { reorder($0, onto: deck.id) }))
                         .dropDestination(for: CardTransfer.self) { items, _ in
                             guard !items.isEmpty else { return false }
                             try? store.bulkMoveCards(items.flatMap(\.cardIds), toDeck: deck.id)
@@ -154,10 +158,6 @@ struct DeckListView: View {
                         } isTargeted: { isTargeted in
                             dropTargetDeckId = isTargeted ? deck.id : nil
                         }
-                        .modifier(DeckReorderDrag(
-                            enabled: sortOption == .custom, deckId: deck.id,
-                            dragging: $draggingDeckId, target: $reorderTargetDeckId,
-                            onMove: { reorder($0, onto: deck.id) }))
                     }
                 }
                 .padding(.horizontal, 10)
@@ -419,6 +419,7 @@ private struct DeckReorderDrag: ViewModifier {
         if enabled {
             content
                 .onDrag {
+                    DragLog.write("drag start \(deckId)")
                     dragging = deckId
                     // Plain text rather than a custom type: the drop matches on
                     // `dragging`, so no registered type can get in the way.
@@ -439,14 +440,25 @@ private struct DeckReorderDelegate: DropDelegate {
     @Binding var target: String?
     let onMove: (String) -> Void
 
-    func validateDrop(info: DropInfo) -> Bool { dragging != nil }
-    func dropEntered(info: DropInfo) { if dragging != nil { target = deckId } }
+    func validateDrop(info: DropInfo) -> Bool { DragLog.write("validate \(deckId) dragging=\(dragging ?? "nil")"); return dragging != nil }
+    func dropEntered(info: DropInfo) { DragLog.write("entered \(deckId)"); if dragging != nil { target = deckId } }
     func dropExited(info: DropInfo) { if target == deckId { target = nil } }
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func performDrop(info: DropInfo) -> Bool {
+        DragLog.write("perform \(deckId) dragging=\(dragging ?? "nil")")
         defer { target = nil; dragging = nil }
         guard let dropped = dragging, dropped != deckId else { return false }
         onMove(dropped)
         return true
+    }
+}
+
+/// Temporary: records drag events so a failing deck drag can be diagnosed.
+enum DragLog {
+    static func write(_ line: String) {
+        let url = URL(fileURLWithPath: "/tmp/grasp-drag.log")
+        let data = Data((line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() }
+        else { try? data.write(to: url) }
     }
 }
