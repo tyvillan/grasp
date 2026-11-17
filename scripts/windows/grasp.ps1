@@ -3,7 +3,7 @@
 #   scripts\windows\grasp.cmd check    swift run grasp-check
 #   scripts\windows\grasp.cmd test     swift test
 #   scripts\windows\grasp.cmd build    swift build
-#   scripts\windows\grasp.cmd app      builds and opens the GRASP app (Windows\)
+#   scripts\windows\grasp.cmd app      builds AND opens the app, only on a throwaway GRASP_SUPPORT_DIR
 #   scripts\windows\grasp.cmd app-build  builds the app without opening it
 #   scripts\windows\grasp.cmd app-release  optimised build, for everyday use
 #   scripts\windows\grasp.cmd uia-probe  finds which control crashes UI Automation
@@ -174,6 +174,45 @@ function Invoke-UiaProbe([string]$Bin) {
     Write-Host "Logs and results: $logs"
 }
 
+# --- Throwaway library guard ----------------------------------------------
+
+# How long 'app' leaves GRASP open before closing it, so a scripted run
+# can't hang for hours.
+$AppRunMinutes = 10
+
+# 'app' builds AND runs GRASP, and on 2026-11-16 it opened the real library
+# because nothing named another one. It now runs only when GRASP_SUPPORT_DIR
+# (the library folder override in Library.swift) points somewhere other than
+# the real library, and that folder holds no sign-in file, so it can't sync.
+function Assert-ThrowawayLibrary {
+    function Refuse($why) {
+        Write-Host ''
+        Write-Host "grasp.cmd app refused to start GRASP. $why" -ForegroundColor Red
+        Write-Host 'It only runs on a throwaway library: set GRASP_SUPPORT_DIR to an empty folder,' -ForegroundColor Red
+        Write-Host 'or to a copy of the library with every session.bin removed, then try again.' -ForegroundColor Red
+        Write-Host 'To build without running, use grasp.cmd app-build or app-release.' -ForegroundColor Red
+        exit 1
+    }
+    $dir = $env:GRASP_SUPPORT_DIR
+    if ([string]::IsNullOrWhiteSpace($dir)) {
+        Refuse 'GRASP_SUPPORT_DIR is not set, so it would open your real library.'
+    }
+    $sep = [string][char]92
+    $full = [System.IO.Path]::GetFullPath($dir).TrimEnd([char]92) + $sep
+    $real = @($env:LOCALAPPDATA, $env:APPDATA) | Where-Object { $_ } |
+        ForEach-Object { [System.IO.Path]::GetFullPath((Join-Path $_ 'GRASP')).TrimEnd([char]92) + $sep }
+    foreach ($r in $real) {
+        if ($full.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Refuse "GRASP_SUPPORT_DIR points at your real library ($r)."
+        }
+    }
+    if (Test-Path $full) {
+        $signIn = Get-ChildItem -Path $full -Recurse -Filter 'session.bin' -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($signIn) { Refuse "The folder has a sign-in file ($($signIn.FullName)), so GRASP could sync with your account." }
+    }
+}
+
 # --- App linking -----------------------------------------------------------
 
 # Linker flags for GRASPWindows.exe: embed the app icon
@@ -202,16 +241,28 @@ try {
         'test'  { Step 'swift test';            & swift test @flags @SwiftArgs }
         'build' { Step 'swift build';           & swift build @flags @SwiftArgs }
         'app'   {
-            # The app is its own package, so its SwiftCrossUI dependency
-            # stays out of the Mac and iPhone builds.
+            # Builds AND runs the app, so it refuses unless GRASP_SUPPORT_DIR
+            # names a throwaway library with no sign-in file (see
+            # Assert-ThrowawayLibrary). The app is its own package, so its
+            # SwiftCrossUI dependency stays out of the Mac and iPhone builds.
+            Assert-ThrowawayLibrary
             Set-Location (Join-Path $Repo 'Windows')
             # Name SwiftCrossUI's backend outright. Left to DefaultBackend's
             # platform conditions, Swift 6.4's build system still compiles
             # the Linux-only Gtk targets and fails on a missing gtk/gtk.h.
             $env:SCUI_DEFAULT_BACKEND = 'WinUIBackend'
             $appFlags = Get-AppLinkFlags
-            Step 'swift run GRASPWindows'
-            & swift run @flags @appFlags @SwiftArgs GRASPWindows
+            Step 'swift build --product GRASPWindows'
+            & swift build @flags @appFlags @SwiftArgs --product GRASPWindows
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $bin = (& swift build @flags @SwiftArgs --show-bin-path | Select-Object -Last 1).Trim()
+            Step "Running GRASPWindows on $env:GRASP_SUPPORT_DIR (closed after $AppRunMinutes minutes)"
+            $proc = Start-Process -FilePath (Join-Path $bin 'GRASPWindows.exe') -PassThru
+            if (-not $proc.WaitForExit($AppRunMinutes * 60 * 1000)) {
+                Stop-Process -Id $proc.Id -Force
+                Write-Host "GRASP was still open after $AppRunMinutes minutes, so it was closed." -ForegroundColor Yellow
+            }
+            exit 0
         }
         'app-build' {
             # The same build as 'app', without opening the window: for

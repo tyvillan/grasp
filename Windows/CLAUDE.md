@@ -27,7 +27,7 @@ The UI framework is [SwiftCrossUI](https://github.com/moreSwift/swift-cross-ui),
 ```powershell
 scripts\windows\grasp.cmd check       # core smoke test
 scripts\windows\grasp.cmd test        # full core test suite (vault tests skip off the Mac)
-scripts\windows\grasp.cmd app         # build and open the Windows app (blocks while it runs)
+scripts\windows\grasp.cmd app         # builds AND opens the app; refuses unless GRASP_SUPPORT_DIR is a throwaway library
 scripts\windows\grasp.cmd app-build   # build the app without opening it
 scripts\windows\grasp.cmd app-release # optimised build (~12 min, recompiles WinUI); the desktop shortcut runs this one
 scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Automation
@@ -35,13 +35,15 @@ scripts\windows\grasp.cmd uia-probe   # diagnostic: which controls crash UI Auto
 
 - Anything after the command is passed on to swift, e.g. `grasp.cmd test --filter Study`.
 - **Test libraries:** set `GRASP_SUPPORT_DIR` to a scratch folder so experiments don't touch Tyler's real library in `%LOCALAPPDATA%\GRASP`.
+- **Warning: `grasp.cmd app` builds AND runs, and it opened Tyler's real library once on 2026-11-16.** A Task 3 build was started with `app` instead of `app-build`, and a debug GRASP sat open on the real library for about four minutes (it refreshed the sign-in and wrote the database; nothing was clicked and no feedback was sent). `app` now refuses, with a plain message, unless `GRASP_SUPPORT_DIR` is set, isn't `%LOCALAPPDATA%\GRASP` or `%APPDATA%\GRASP` (or inside them), and holds no `session.bin` sign-in file; it closes GRASP after 10 minutes. To just build, use `app-build` or `app-release`. Never open the real library for any reason; ask Tyler instead.
+- **Time limits:** wrap every scripted run (screenshots, timings, `app`) in a 10 minute limit (`Start-Process -PassThru` then `WaitForExit(600000)` and kill). A timing script once hung for nine hours on its mouse helper.
 - **One instance per exe name:** SwiftCrossUI redirects a second launch of the same exe name to the running window. To run a test copy next to Tyler's window, copy the exe under another name. The exe is at `Windows\.build\out\Products\Debug-windows-x86_64\GRASPWindows.exe`.
 - **Closing Tyler's window:** close it normally before rebuilding, or the exe is locked. Tell him you did.
 
 ## Ground rules
 
 1. **Branch `windows-app`.** Commit and push there. Don't merge into `main`; the Mac session merges once the Mac and iPhone are checked.
-2. **Before every push:** `grasp.cmd test` passes (vault tests skipping is expected) and `grasp.cmd app` builds with no errors or warnings from GRASP code.
+2. **Before every push:** `grasp.cmd test` passes (vault tests skipping is expected) and `grasp.cmd app-build` builds with no errors or warnings from GRASP code.
 3. **Edit freely** in `Windows/`, `scripts/windows/`, `WINDOWS.md`, and tests.
 4. **`Sources/GRASPCore/` is shared with the Mac and iPhone, which you can't build here.**
    - Platform fixes wrapped in `#if os(Windows)` / `#if canImport(...)` are fine.
@@ -504,3 +506,9 @@ Checked on a throwaway profile (the sample notes, four cards) against DESIGN.md 
 - **Timings (debug build, four-card sample deck, ms):** Study opens in 159, Reveal answer 76, next card 119 to 159; Learn (missed cards) opens in 564, picking a choice 68, Submit 148, Next 215, to the checkpoint 254; Practice weakest opens in 109; Test setup 179, Start test 175, an answer 114, Next 92, results 153. A scripted release run hung on the mouse helper and was dropped.
 - **Pitfalls:** in PowerShell, `$s` and `$S` are the same variable. GNU sed's replacement treats `\u` as "uppercase the next letter" and rewrites every file's line endings; use Python for edits. A window moved to y = 0 against a docked app bar snaps to full height; test at y = 100. Scripted screenshots at other scales need a DPI-aware capture (`SetProcessDPIAware`), or they come out cropped. Long wrapped prompts are left-aligned on Windows where the Mac centres each line (`multilineTextAlignment(.center)` isn't honoured for wrapped lines).
 - **Still differs from the Mac:** the typed-answer judge ("Close enough", the AI check) and the Learn streak aren't ported; test results have no "Retry N missed"; no question thumbnails or "Explain this" block.
+
+## Version number (Windows, 2026-11-16, branch `version-number`)
+
+- The Windows version lives in one place: `AppVersion.number` in `Windows/Sources/GRASPWindows/AppVersion.swift`, now **0.1.0** (Tyler's choice; it matches the iPhone project, the old placeholder was "1.0"). Raise it there when a build goes out. The build is the day the exe was built (`AppVersion.build`, "20261116").
+- Settings > About shows "GRASP for Windows" and "Version 0.1.0 (build 20261116)". Send feedback's "What gets sent" and the payload's `app_version` / `build` read the same constants through `FeedbackFacts`.
+- The Mac's version is separate (its own project) and was not changed. There's no exe version resource yet; if one is added, have `AppVersion` read it so there's still only one source.
