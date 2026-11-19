@@ -40,6 +40,20 @@ struct ExamLayoutTests {
         #expect(ExamLayout.bucketSkills(parts) == nil)
     }
 
+    @Test("an AI-written guide is never sorted under the C++ topics")
+    func aiGuideNotBucketed() throws {
+        let parts = [part("Module 5", skills: [
+            "Distinguish between biological sex and the cultural construction of gender.",
+            "Contrast the characteristics of caste-based social systems with class-based social systems.",
+            "Identify different forms of intersex conditions based on chromosomal and anatomical patterns.",
+            "Explain the relationship between subsistence contributions and gender stratification.",
+            "Analyze how naturalizing discourse is used to justify social hierarchies.",
+        ])]
+        // The same wording used to be sorted into "Classes and OOP" and friends.
+        #expect(ExamLayout.bucketSkills(parts) != nil)
+        #expect(ExamLayout.bucketSkills(parts, aiWritten: true) == nil)
+    }
+
     @Test("assignments and practice are split from topics")
     func bands() {
         #expect(ExamLayout.band(for: part("Assignment 3 - separate compilation")) == .assignments)

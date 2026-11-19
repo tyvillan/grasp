@@ -35,7 +35,7 @@ struct ExamGuideContent: View {
                     description: Text("GRASP couldn't find parts like \"Part 1 · Title\" in this exam's guides yet.")
                 )
             }
-            let buckets = ExamLayout.bucketSkills(page.parts)
+            let buckets = ExamLayout.bucketSkills(page.parts, aiWritten: page.guides.contains { $0.parser.hasPrefix("ai:") })
             if let buckets {
                 SkillsByTopic(buckets: buckets, terms: page.parts.flatMap(\.terms), subject: page.exam.title, onRate: { skill, rating in
                     store.rateSkill(guideId: skill.guideId, skillId: skill.skillId, rating: rating)

@@ -53,8 +53,12 @@ public enum ExamLayout {
 
     /// Every distinct skill in the parts, grouped by topic in a fixed order.
     /// nil when most skills fit no topic (a subject these keywords don't
-    /// know), so the page falls back to the document's own parts.
-    public static func bucketSkills(_ parts: [StudyGuideActions.PagePart]) -> [Bucket]? {
+    /// know), so the page falls back to the document's own parts. nil too for
+    /// an AI-written guide (`aiWritten`): these topics are C++ keywords, and
+    /// a guide for any other subject would land under headings like "Loops
+    /// and decisions". Its skills show under its own parts instead.
+    public static func bucketSkills(_ parts: [StudyGuideActions.PagePart], aiWritten: Bool = false) -> [Bucket]? {
+        guard !aiWritten else { return nil }
         var seen = Set<String>()
         var grouped: [Topic: [StudyGuideActions.Skill]] = [:]
         var total = 0
