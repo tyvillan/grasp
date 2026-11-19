@@ -27,6 +27,10 @@ struct GenerateStudyGuideSheet: View {
     /// Optional extra material the AI reads along with the decks' notes.
     @State private var extraFile: URL?
 
+    /// Opened from an exam row: the course is already decided, so only its
+    /// decks are shown, for the student to tick.
+    private var isForExam: Bool { presetExamId != nil && courses.contains { $0.id == presetCourseId } }
+
     private var orderedSelectedCourseIds: [String] { courses.map(\.id).filter(selectedCourses.contains) }
     private var requestEstimate: Int { AIQuotaEstimate.studyGuideRequests(decks: selectedDecks.count) }
     /// "6 decks · about 6 requests · roughly 8 min": a local model takes
@@ -44,13 +48,16 @@ struct GenerateStudyGuideSheet: View {
     var body: some View {
         GRASPSheet(
             eyebrow: "Study guide", title: "New study guide",
-            message: "Pick the courses and decks to practice. GRASP writes practice problems with worked answers, "
-                + "sample test questions and key terms from each deck's notes.",
+            message: isForExam
+                ? "Pick the lectures to include. GRASP writes practice problems with worked answers, "
+                    + "sample test questions and key terms from each deck's notes."
+                : "Pick the courses and decks to practice. GRASP writes practice problems with worked answers, "
+                    + "sample test questions and key terms from each deck's notes.",
             icon: AIGlyph.symbol, width: 560, height: 660
         ) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    coursesSection
+                    if !isForExam { coursesSection }
                     ForEach(courses.filter { selectedCourses.contains($0.id) }) { course in
                         decksSection(course)
                     }
@@ -227,6 +234,8 @@ struct GenerateStudyGuideSheet: View {
         }
         if let presetCourseId, let preset = courses.first(where: { $0.id == presetCourseId }) {
             toggle(preset)
+            // From an exam row the student picks the lectures themselves.
+            if isForExam { selectedDecks = [] }
             if let presetExamId, exams.contains(where: { $0.id == presetExamId }) { examId = presetExamId }
         } else if courses.count == 1, let only = courses.first {
             toggle(only)
