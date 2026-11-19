@@ -88,6 +88,7 @@ struct ExamGuideContent: View {
             total: page.questionCount,
             decks: decks,
             showsSkills: showsSkills,
+            isOnlyPart: page.parts.count == 1,
             exampleStates: exampleStates,
             allTerms: page.parts.flatMap(\.terms),
             subject: page.exam.title,
@@ -262,6 +263,8 @@ private struct PartSection: View {
     let total: Int?
     let decks: [Deck]
     let showsSkills: Bool
+    /// The guide has just this one part: no "Part 1" label, and it starts open.
+    let isOnlyPart: Bool
     let exampleStates: [String: UnderstandingState]
     let allTerms: [StudyGuideDocument.Term]
     let subject: String
@@ -307,6 +310,7 @@ private struct PartSection: View {
         .padding(.horizontal, 20).padding(.vertical, 16)
         .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(GRASPColor.hairline))
+        .task { if isOnlyPart { isOpen = true } }
     }
 
     @ViewBuilder
@@ -392,7 +396,7 @@ private struct PartSection: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                if let number = part.number {
+                if let number = part.number, !isOnlyPart {
                     Text("Part \(number)")
                         .graspType(.eyebrow)
                         .textCase(.uppercase)
