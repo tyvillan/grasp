@@ -168,6 +168,8 @@ struct DeckDetailView: View {
     @Namespace private var tabSwitch
     /// Opens the editor for a new question on the Questions tab.
     @State private var isWritingQuestion = false
+    /// Select mode on the Questions tab; its Select button sits beside Add.
+    @State private var isSelectingQuestions = false
     /// Opens "Generate questions with AI" on the Questions tab.
     @State private var isGeneratingQuestions = false
     @State private var isImportingPhoto = false
@@ -430,13 +432,15 @@ struct DeckDetailView: View {
                 ScrollView {
                     QuestionsTab(deckIds: scopeDeckIds, courseId: courseId, isWriting: $isWritingQuestion,
                                  isGenerating: $isGeneratingQuestions, isImportingPhoto: $isImportingPhoto,
-                                 decks: scopeDecksForQuestions, scopeName: deckName)
+                                 decks: scopeDecksForQuestions, scopeName: deckName,
+                                 externalSelecting: $isSelectingQuestions)
                         .frame(maxWidth: .infinity)
                 }
             }
         }
         .background(GRASPColor.canvas)
         .navigationTitle(deckName)
+        .onChange(of: contentTab) { isSelectingQuestions = false }
         .task(id: scope) { loadScopeIdentity() }
         .onChange(of: store.revision) { load() }
         // Sticky across deck switches on purpose -- someone comparing two
@@ -757,7 +761,14 @@ struct DeckDetailView: View {
         switch contentTab {
         case .cards: addMenuButton
         case .overview: editMenuButton
-        case .questions: questionsAddMenuButton
+        case .questions:
+            questionsAddMenuButton
+            if !isSelectingQuestions {
+                Button("Select") { isSelectingQuestions = true }
+                    .buttonStyle(GRASPQuietButton())
+                    .lineLimit(1).fixedSize()
+                    .help("Pick several questions to move, copy, suspend or delete")
+            }
         }
         overflowMenu
     }

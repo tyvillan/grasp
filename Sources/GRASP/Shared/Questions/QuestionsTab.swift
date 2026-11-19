@@ -20,6 +20,9 @@ struct QuestionsTab: View {
     /// The decks a new question can go in.
     let decks: [Deck]
     var scopeName = ""
+    /// When the screen puts its own Select button in its toolbar (the Mac
+    /// deck page), it owns the select-mode flag and this tab hides its own.
+    var externalSelecting: Binding<Bool>?
 
     private enum Filter: Hashable { case all, review }
 
@@ -36,7 +39,13 @@ struct QuestionsTab: View {
     @State private var notApproved: [String: String] = [:]
     @State private var showingDrops = false
     /// Select mode: tick several questions, then move, copy, suspend or delete them together.
-    @State private var selecting = false
+    @State private var localSelecting = false
+    private var selecting: Bool {
+        get { externalSelecting?.wrappedValue ?? localSelecting }
+        nonmutating set {
+            if let externalSelecting { externalSelecting.wrappedValue = newValue } else { localSelecting = newValue }
+        }
+    }
     @State private var selectedIds: Set<String> = []
     @State private var pick: DeckPick?
     /// Every deck of this course, for moving and copying.
@@ -264,10 +273,12 @@ struct QuestionsTab: View {
                     .lineLimit(1).fixedSize()
                     .help("Approves every draft that passes its checks. A draft that fails one stays here.")
             }
-            Button("Select") { selecting = true }
-                .buttonStyle(GRASPQuietButton())
-                .lineLimit(1).fixedSize()
-                .help("Pick several questions to move, copy, suspend or delete")
+            if externalSelecting == nil {
+                Button("Select") { selecting = true }
+                    .buttonStyle(GRASPQuietButton())
+                    .lineLimit(1).fixedSize()
+                    .help("Pick several questions to move, copy, suspend or delete")
+            }
         }
     }
 
