@@ -211,11 +211,23 @@ public enum StudyGuideBuilder {
         return DeckSource(deck: deck, text: sections.joined(separator: "\n\n"), terms: terms)
     }
 
+    /// `notes` with the student's optional extra material added after them,
+    /// cut so the whole stays inside the model's word budget (the deck's own
+    /// notes keep at least half of it). Nil or blank extra text changes nothing.
+    static func withExtraSource(_ notes: String, extra: String?, wordBudget: Int) -> String {
+        guard let extra = extra?.trimmingCharacters(in: .whitespacesAndNewlines), !extra.isEmpty else { return notes }
+        let share = max(150, wordBudget / 2)
+        let words = extra.split(whereSeparator: \.isWhitespace)
+        let cut = words.count > share ? words.prefix(share).joined(separator: " ") : extra
+        return notes + "\n\n## Extra study material from the student\n" + cut
+    }
+
     /// Writes the guides. `progress` (when given) gets one step per deck.
     /// Cooperative cancellation stops after the deck in flight; whatever
     /// was finished for a course is still saved.
     public static func generate(
         courseIds: [String], deckIds: [String], problemsPerDeck: Int, examEventId: String?,
+        extraSource: String? = nil,
         using generator: any CardGenerator, database: GRASPDatabase, now: Date = Date()
     ) async throws -> Outcome {
         let progress = AIProgress.current
@@ -248,7 +260,8 @@ public enum StudyGuideBuilder {
                 }
                 guard let source else { outcome.skippedDecks.append(deck.name); continue }
                 let generated = await generator.generateStudyGuidePart(
-                    deckName: deck.name, courseName: course.name, noteContext: source.text,
+                    deckName: deck.name, courseName: course.name, noteContext: Self.withExtraSource(source.text, extra: extraSource,
+                                                      wordBudget: generator.overviewContextWordBudget),
                     cardTerms: source.terms, problemCount: problemsPerDeck
                 )
                 guard var part = generated.part else { outcome.skippedDecks.append(deck.name); continue }

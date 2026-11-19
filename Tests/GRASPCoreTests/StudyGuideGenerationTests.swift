@@ -152,6 +152,37 @@ struct StudyGuideGenerationTests {
         return (db, made.0, made.1, made.2)
     }
 
+    @Test("extra study material reaches the model after the deck's notes, and nothing changes without it")
+    func extraSourceIsPassedOn() async throws {
+        let (db, courseId, ids, _) = try await makeLibrary()
+        let plain = RecordingGenerator()
+        _ = try await StudyGuideBuilder.generate(
+            courseIds: [courseId], deckIds: Array(ids.values), problemsPerDeck: 4, examEventId: nil,
+            using: plain, database: db
+        )
+        let extra = RecordingGenerator()
+        _ = try await StudyGuideBuilder.generate(
+            courseIds: [courseId], deckIds: Array(ids.values), problemsPerDeck: 4, examEventId: nil,
+            extraSource: "Chapter 4 review sheet", using: extra, database: db
+        )
+        #expect(plain.calls.allSatisfy { !$0.notes.contains("Chapter 4 review sheet") })
+        #expect(!extra.calls.isEmpty)
+        #expect(extra.calls.allSatisfy { $0.notes.contains("Chapter 4 review sheet") })
+        // The deck's own notes are still there, ahead of the extra material.
+        for (with, without) in zip(extra.calls, plain.calls) {
+            #expect(with.notes.hasPrefix(without.notes))
+        }
+    }
+
+    @Test("long extra material is cut to half the word budget; blank extra changes nothing")
+    func extraSourceIsCut() {
+        let long = Array(repeating: "word", count: 5000).joined(separator: " ")
+        let combined = StudyGuideBuilder.withExtraSource("notes", extra: long, wordBudget: 1000)
+        #expect(combined.split(whereSeparator: \.isWhitespace).count < 600)
+        #expect(StudyGuideBuilder.withExtraSource("notes", extra: "  \n ", wordBudget: 1000) == "notes")
+        #expect(StudyGuideBuilder.withExtraSource("notes", extra: nil, wordBudget: 1000) == "notes")
+    }
+
     @Test("one guide per course, one part per deck in natural order, linked to its decks and the chosen exam")
     func buildsGuide() async throws {
         let (db, courseId, ids, examId) = try await makeLibrary()

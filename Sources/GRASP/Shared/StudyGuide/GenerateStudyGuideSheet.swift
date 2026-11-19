@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import GRASPCore
 
 /// "New Study Guide": pick courses, pick decks within them, and GRASP
@@ -23,6 +24,8 @@ struct GenerateStudyGuideSheet: View {
     @State private var problemsPerDeck = 5
     @State private var examId = ""
     @State private var exams: [CalendarEvent] = []
+    /// Optional extra material the AI reads along with the decks' notes.
+    @State private var extraFile: URL?
 
     private var orderedSelectedCourseIds: [String] { courses.map(\.id).filter(selectedCourses.contains) }
     private var requestEstimate: Int { AIQuotaEstimate.studyGuideRequests(decks: selectedDecks.count) }
@@ -65,7 +68,8 @@ struct GenerateStudyGuideSheet: View {
             Button {
                 store.generateStudyGuides(
                     courseIds: orderedSelectedCourseIds, deckIds: Array(selectedDecks),
-                    problemsPerDeck: problemsPerDeck, examEventId: examId.isEmpty ? nil : examId
+                    problemsPerDeck: problemsPerDeck, examEventId: examId.isEmpty ? nil : examId,
+                    extraSourceFile: extraFile
                 )
                 dismiss()
             } label: {
@@ -142,6 +146,21 @@ struct GenerateStudyGuideSheet: View {
                 Spacer()
                 GRASPSegmented(selection: $problemsPerDeck, options: [3, 5, 8].map { ($0, "\($0)") })
             }
+            #if os(macOS)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Extra study material").graspType(.body)
+                    Text(extraFile?.lastPathComponent ?? "Optional. A file the AI reads along with the notes.")
+                        .graspType(.meta).foregroundStyle(GRASPColor.textTertiary).lineLimit(1)
+                }
+                Spacer()
+                if extraFile != nil {
+                    Button("Remove") { extraFile = nil }.buttonStyle(GRASPQuietButton())
+                }
+                Button(extraFile == nil ? "Choose file…" : "Change…") { chooseExtraFile() }
+                    .buttonStyle(GRASPQuietButton())
+            }
+            #endif
             if !exams.isEmpty {
                 HStack {
                     Text("Attach to an exam").graspType(.body)
@@ -166,6 +185,9 @@ struct GenerateStudyGuideSheet: View {
                     .foregroundStyle(GRASPColor.rejected)
             } else {
                 Text("Written by \(store.generatorStatus).")
+                if extraFile != nil, store.aiMode.usesCloud, store.hasCloudKey {
+                    Label("The extra file is sent to Google Gemini too.", systemImage: "cloud")
+                }
                 if store.aiMode.usesCloud, store.hasCloudKey {
                     Label("Your notes for these decks are sent to Google Gemini. Its free tier may use what you send "
                           + "to improve Google's products.", systemImage: "cloud")
@@ -181,6 +203,19 @@ struct GenerateStudyGuideSheet: View {
     }
 
     // MARK: - State
+
+    #if os(macOS)
+    private func chooseExtraFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = ExtraSourceReader.allowedExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.message = "Choose a file for the AI to read along with the notes"
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK { extraFile = panel.url }
+    }
+    #endif
 
     private func load() {
         let ordered = store.semesters.reversed().flatMap { store.courses(inSemester: $0.id) } + store.unfiledCourses

@@ -190,7 +190,7 @@ extension AppStore {
     /// already running.
     @discardableResult
     func generateStudyGuides(courseIds: [String], deckIds: [String], problemsPerDeck: Int,
-                             examEventId: String?) -> Bool {
+                             examEventId: String?, extraSourceFile: URL? = nil) -> Bool {
         lastStudyGuideRun = nil
         let run = AIActivity(headline: "Writing practice guide", units: 1, purpose: "study guide")
         return runAIJob(Self.studyGuideJobKey, activity: run) { [weak self] run in
@@ -198,11 +198,14 @@ extension AppStore {
             let generator = await CardGenerators.select()
             let outcome: StudyGuideBuilder.Outcome?
             var failure: String?
+            // Read here, in the background: OCR of a scanned file is slow.
+            let extra = await Task.detached { extraSourceFile.flatMap(ExtraSourceReader.text(from:)) }.value
             do {
                 outcome = try await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
                     try await StudyGuideBuilder.generate(
                         courseIds: courseIds, deckIds: deckIds, problemsPerDeck: problemsPerDeck,
-                        examEventId: examEventId, using: generator, database: self.database
+                        examEventId: examEventId, extraSource: extra,
+                        using: generator, database: self.database
                     )
                 }
             } catch {
