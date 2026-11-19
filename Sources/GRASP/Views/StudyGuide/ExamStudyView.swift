@@ -39,12 +39,7 @@ struct ExamStudyView: View {
         VStack(spacing: 0) {
             HStack {
                 if !isPracticeSet {
-                    Picker("View", selection: $tab) {
-                        ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                    GRASPSegmented(selection: $tab, options: Tab.allCases.map { ($0, $0.rawValue) })
                 }
                 Spacer()
                 if importing {
