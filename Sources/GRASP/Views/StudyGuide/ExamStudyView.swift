@@ -54,27 +54,23 @@ struct ExamStudyView: View {
                     }
                     .buttonStyle(GRASPQuietButton())
                     .help("A graded quiz on this study guide: its terms and AI-written questions about each part")
-                    Menu {
+                    PillMenu(title: "Download", systemImage: "square.and.arrow.down") {
                         // Flat: each format is one click away, grouped by
                         // which version of the guide it saves.
-                        ForEach([true, false], id: \.self) { answerKey in
-                            Section(answerKey ? "Study Guide with Answer Key" : "Practice Sheet, No Answers") {
-                                ForEach(ExportFormat.allCases) { format in
-                                    Button {
-                                        if let document = exportDocument(answerKey: answerKey) {
-                                            DocumentExporter.save(document, as: format)
-                                        }
-                                    } label: {
-                                        Label(format.rawValue, systemImage: format.systemImage)
+                        var items: [PillMenuItem] = []
+                        for answerKey in [true, false] {
+                            if !items.isEmpty { items.append(.divider) }
+                            items.append(.header(answerKey ? "Study Guide with Answer Key" : "Practice Sheet, No Answers"))
+                            for format in ExportFormat.allCases {
+                                items.append(.action(format.rawValue, systemImage: format.systemImage) {
+                                    if let document = exportDocument(answerKey: answerKey) {
+                                        DocumentExporter.save(document, as: format)
                                     }
-                                }
+                                })
                             }
                         }
-                    } label: {
-                        Label("Download", systemImage: "square.and.arrow.down")
+                        return items
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
                     .help("Save this exam's guide as a PDF, Word document or Markdown file")
                 }
                 if !isPracticeSet {
