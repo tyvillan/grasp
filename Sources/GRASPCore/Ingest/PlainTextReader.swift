@@ -9,6 +9,9 @@ public enum PlainTextReader {
         let data = try Data(contentsOf: url)
         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252)
             ?? String(decoding: data, as: UTF8.self)
+        if ["html", "htm"].contains(url.pathExtension.lowercased()) {
+            return HTMLTextReader.text(from: text) ?? ""
+        }
         return url.pathExtension.lowercased() == "rtf" || looksLikeRTF(text) ? rtfToText(text) : text
     }
 

@@ -332,13 +332,13 @@ public actor VaultScanner {
 
     /// Extensions imported only when the file itself is chosen, not found
     /// while scanning a folder.
-    static let explicitOnlyExtensions: Set<String> = ["txt", "text", "rtf"]
+    static let explicitOnlyExtensions: Set<String> = ["txt", "text", "rtf", "html", "htm"]
 
     private static let importableKinds: [String: MaterialKind] = [
         // Plain text and RTF are read as notes: `.txt` is valid Markdown and
         // `.rtf` is converted to plain text first (see `PlainTextReader`).
         // They are `explicitOnlyExtensions`: never picked up by folder scans.
-        "md": .markdown, "txt": .markdown, "text": .markdown, "rtf": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
+        "md": .markdown, "txt": .markdown, "text": .markdown, "rtf": .markdown, "html": .markdown, "htm": .markdown, "pdf": .pdf, "docx": .docx, "ipynb": .ipynb,
         "pptx": .pptx, "png": .image, "jpg": .image, "jpeg": .image,
     ]
 

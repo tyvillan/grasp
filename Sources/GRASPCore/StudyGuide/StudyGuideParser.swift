@@ -318,6 +318,14 @@ public enum StudyGuideParser {
 
             if !line.bullet, let heading = match(partHeading, line.text), let title = heading[1] {
                 flushParagraph()
+                // "Part 1 · Worked examples" after "Part 1 · Lectures 1 to 5" is
+                // the same part's examples, not a part of its own.
+                if let current = partIndex, let number = heading[0].flatMap(Int.init),
+                   document.parts[current].number == number,
+                   title.lowercased().hasPrefix("worked example") || title.lowercased() == "examples" {
+                    index += 1
+                    return
+                }
                 document.parts.append(StudyGuideDocument.Part(
                     number: heading[0].flatMap(Int.init),
                     title: StudyGuideParser.displayTitle(title),
