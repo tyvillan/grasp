@@ -272,6 +272,8 @@ private struct PartSection: View {
     let onRate: (StudyGuideActions.Skill, SkillConfidence?) -> Void
     let onOpenPage: (String, Int) -> Void
     @State private var isOpen = false
+    /// The only part opens itself once, so collapsing it sticks when the page scrolls off and back.
+    @State private var didAutoOpen = false
 
     /// One line saying what's inside, so a closed part still tells you
     /// whether it's worth opening.
@@ -310,7 +312,9 @@ private struct PartSection: View {
         .padding(.horizontal, 20).padding(.vertical, 16)
         .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(GRASPColor.hairline))
-        .task { if isOnlyPart { isOpen = true } }
+        .task {
+            if isOnlyPart, !didAutoOpen { didAutoOpen = true; isOpen = true }
+        }
     }
 
     @ViewBuilder
