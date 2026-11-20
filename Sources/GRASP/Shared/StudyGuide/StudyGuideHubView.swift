@@ -29,7 +29,6 @@ struct StudyGuideHubView<Destination: View>: View {
     @State private var openTarget: StudyGuideHubTarget?
     @State private var showingGenerator = false
     /// Courses whose full list of upcoming exams is showing.
-    @State private var expandedCourses: Set<String> = []
     /// Set when "Make a study guide" is pressed on an exam row.
     @State private var generatorPreset: (courseId: String, examId: String)?
 
@@ -128,9 +127,7 @@ struct StudyGuideHubView<Destination: View>: View {
                     #if os(macOS)
                     pageHeader(showsAction: true)
                     #endif
-                    ForEach(Array(courses.enumerated()), id: \.element.id) { index, course in
-                        courseBlock(course).revealOnAppear(index: index)
-                    }
+                    timeline
                 }
                 #if os(macOS)
                 // The same column as Home and Library: it starts and ends
@@ -173,37 +170,27 @@ struct StudyGuideHubView<Destination: View>: View {
         .padding(.top, showsAction ? 0 : 24)
     }
 
-    private func courseBlock(_ course: StudyGuideActions.HubCourse) -> some View {
-        let upcoming = course.exams.filter { !$0.isPast }
-        let past = course.exams.filter { $0.isPast && !$0.guides.isEmpty }
-        return VStack(alignment: .leading, spacing: 10) {
-            Text(course.course.name)
-                .font(.graspDisplay(22))
-                .tracking(-0.3)
-                .foregroundStyle(GRASPColor.textPrimary)
-            if !upcoming.isEmpty {
-                let limit = 3
-                let expanded = expandedCourses.contains(course.id)
-                let shown = expanded ? upcoming : Array(upcoming.prefix(limit))
-                group("Upcoming exams", shown.map { examRow($0, in: course.course) })
-                if upcoming.count > limit {
-                    Button(expanded ? "Show fewer" : "Show \(upcoming.count - limit) more") {
-                        withAnimation(Motion.fade) {
-                            if expanded { expandedCourses.remove(course.id) } else { expandedCourses.insert(course.id) }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.graspUI(size: 13, weight: .medium))
-                    .foregroundStyle(GRASPColor.textSecondary)
-                    .padding(.top, 2)
-                }
-            }
-            if !course.practiceSets.isEmpty {
-                group("Practice sets", course.practiceSets.map { practiceRow($0, in: course.course) })
-            }
-            if !past.isEmpty {
-                group("Past exams", past.map { examRow($0, in: course.course) })
-            }
+    /// Upcoming exams from every course, soonest first, each row naming its
+    /// course; then practice sets; past exams last, most recent first.
+    @ViewBuilder
+    private var timeline: some View {
+        let upcoming = courses.flatMap { course in
+            course.exams.filter { !$0.isPast }.map { (entry: $0, course: course.course) }
+        }.sorted { $0.entry.exam.startsAt < $1.entry.exam.startsAt }
+        let practice = courses.flatMap { course in
+            course.practiceSets.map { (guide: $0, course: course.course) }
+        }.sorted { $0.guide.createdAt > $1.guide.createdAt }
+        let past = courses.flatMap { course in
+            course.exams.filter { $0.isPast && !$0.guides.isEmpty }.map { (entry: $0, course: course.course) }
+        }.sorted { $0.entry.exam.startsAt > $1.entry.exam.startsAt }
+        if !upcoming.isEmpty {
+            group("Upcoming exams", upcoming.map { examRow($0.entry, in: $0.course) }).revealOnAppear(index: 0)
+        }
+        if !practice.isEmpty {
+            group("Practice sets", practice.map { practiceRow($0.guide, in: $0.course) }).revealOnAppear(index: 1)
+        }
+        if !past.isEmpty {
+            group("Past exams", past.map { examRow($0.entry, in: $0.course) }).revealOnAppear(index: 2)
         }
     }
 
@@ -224,14 +211,15 @@ struct StudyGuideHubView<Destination: View>: View {
 
     private func examRow(_ entry: StudyGuideActions.HubExam, in course: Course) -> AnyView {
         let date = entry.exam.startsAt.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-        let when = entry.isPast ? "\(date) · past" : "\(date) · \(entry.exam.countdownText())"
+        let when = (entry.isPast ? "\(date) · past" : "\(date) · \(entry.exam.countdownText())")
+        let withCourse = "\(course.name) · \(when)"
         if entry.guides.isEmpty {
-            return AnyView(missingGuideRow(entry, when: when, in: course))
+            return AnyView(missingGuideRow(entry, when: withCourse, in: course))
         }
         return AnyView(row(
             icon: "graduationcap" + (entry.isPast ? "" : ".fill"),
             title: entry.exam.title,
-            subtitle: "\(when) · \(entry.guides.count) guide\(entry.guides.count == 1 ? "" : "s")",
+            subtitle: "\(withCourse) · \(entry.guides.count) guide\(entry.guides.count == 1 ? "" : "s")",
             target: .exam(courseId: course.id, examEventId: entry.exam.id),
             dimmed: entry.isPast
         ))
@@ -296,7 +284,7 @@ struct StudyGuideHubView<Destination: View>: View {
         return row(
             icon: guide.parser.hasPrefix("ai:") ? "wand.and.stars" : "doc.text",
             title: guide.title,
-            subtitle: "\(parts) part\(parts == 1 ? "" : "s") · \(guide.parser.hasPrefix("ai:") ? "written" : "added") \(made)",
+            subtitle: "\(course.name) · \(parts) part\(parts == 1 ? "" : "s") · \(guide.parser.hasPrefix("ai:") ? "written" : "added") \(made)",
             target: .practice(courseId: course.id, guideId: guide.id),
             dimmed: false
         )
