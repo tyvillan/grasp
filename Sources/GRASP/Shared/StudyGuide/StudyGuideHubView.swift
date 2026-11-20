@@ -27,10 +27,14 @@ struct StudyGuideHubView<Destination: View>: View {
 
     @State private var courses: [StudyGuideActions.HubCourse] = []
     @State private var openTarget: StudyGuideHubTarget?
-    @State private var showingGenerator = false
-    /// Courses whose full list of upcoming exams is showing.
-    /// Set when "Make a study guide" is pressed on an exam row.
-    @State private var generatorPreset: (courseId: String, examId: String)?
+    /// One value that is both "open the sheet" and what to open it with, so
+    /// the sheet can never be built from a stale course or exam.
+    @State private var generatorRequest: GeneratorRequest?
+    private struct GeneratorRequest: Identifiable {
+        let id = UUID()
+        var courseId: String?
+        var examId: String?
+    }
 
     private var job: AppStore.AIJob? { store.aiJob(AppStore.studyGuideJobKey) }
 
@@ -62,8 +66,7 @@ struct StudyGuideHubView<Destination: View>: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        generatorPreset = nil
-                        showingGenerator = true
+                        generatorRequest = GeneratorRequest()
                     } label: {
                         Label("New Study Guide…", systemImage: "wand.and.stars")
                     }
@@ -75,8 +78,8 @@ struct StudyGuideHubView<Destination: View>: View {
             .navigationDestination(for: StudyGuideHubTarget.self) { destination($0) }
             .navigationDestination(item: $openTarget) { destination($0) }
         }
-        .sheet(isPresented: $showingGenerator) {
-            GenerateStudyGuideSheet(presetCourseId: generatorPreset?.courseId, presetExamId: generatorPreset?.examId)
+        .sheet(item: $generatorRequest) { request in
+            GenerateStudyGuideSheet(presetCourseId: request.courseId, presetExamId: request.examId)
         }
         .task { load() }
         .onChange(of: store.revision) { load() }
@@ -115,7 +118,7 @@ struct StudyGuideHubView<Destination: View>: View {
                     Text("Add a professor's or your own exam guide from a course's Add Guide button, "
                          + "or have GRASP write a practice guide from your lecture decks.")
                 } actions: {
-                    Button("Create guide") { generatorPreset = nil; showingGenerator = true }
+                    Button("Create guide") { generatorRequest = GeneratorRequest() }
                         .buttonStyle(GRASPProminentButton())
                         .disabled(job != nil)
                 }
@@ -156,8 +159,7 @@ struct StudyGuideHubView<Destination: View>: View {
             Spacer(minLength: GRASPSpace.m)
             if showsAction {
                 Button {
-                    generatorPreset = nil
-                    showingGenerator = true
+                    generatorRequest = GeneratorRequest()
                 } label: {
                     Label("New study guide", systemImage: "wand.and.stars")
                 }
@@ -229,8 +231,7 @@ struct StudyGuideHubView<Destination: View>: View {
     /// action. Not a link; there is nothing to open yet.
     private func missingGuideRow(_ entry: StudyGuideActions.HubExam, when: String, in course: Course) -> some View {
         let action = Button {
-            generatorPreset = (course.id, entry.exam.id)
-            showingGenerator = true
+            generatorRequest = GeneratorRequest(courseId: course.id, examId: entry.exam.id)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: AIGlyph.symbol)
