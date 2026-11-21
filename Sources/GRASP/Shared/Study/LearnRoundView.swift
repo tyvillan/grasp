@@ -75,6 +75,9 @@ struct LearnRoundView: View {
         .background(GRASPColor.canvas)
         .adaptiveStudySheet()
         .dimsWindowBehind()
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress { handleChoiceKey($0) }
         .task {
             streak = store.learnStreak()
             startRound()
@@ -455,6 +458,22 @@ struct LearnRoundView: View {
 
     /// Tapping the already-selected choice deselects it -- picking an
     /// answer isn't a one-way commitment until Submit.
+    /// A to E or 1 to 5 selects that choice of a multiple-choice question (Return
+    /// then checks it). Typing into a written answer is left alone.
+    private func handleChoiceKey(_ press: KeyPress) -> KeyPress.Result {
+        guard !isAnswered, !isAtCheckpoint, !writtenFieldFocused, press.modifiers.isEmpty,
+              let question = currentQueue.first, question.type == .multipleChoice else { return .ignored }
+        let choices = question.choices ?? []
+        let key = press.characters.lowercased()
+        let position: Int?
+        if let n = Int(key), (1...9).contains(n) { position = n - 1 }
+        else if key.count == 1, let ascii = key.unicodeScalars.first?.value, (97...105).contains(ascii) { position = Int(ascii) - 97 }
+        else { position = nil }
+        guard let position, position < choices.count else { return .ignored }
+        selectedChoice = choices[position]
+        return .handled
+    }
+
     private func toggleSelection(_ choice: String) {
         guard !isAnswered else { return }
         selectedChoice = (selectedChoice == choice) ? nil : choice

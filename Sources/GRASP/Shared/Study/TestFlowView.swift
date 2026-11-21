@@ -509,6 +509,9 @@ struct TestRunView: View {
         .background(GRASPColor.canvas)
         .adaptiveStudySheet()
         .dimsWindowBehind()
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress { handleAnswerKey($0) }
         .onAppear {
             // Picking an unfinished test up where it was left.
             guard !resumed else { return }
@@ -816,6 +819,39 @@ struct TestRunView: View {
         .padding(.vertical, 14)
         .background(GRASPColor.canvas)
         .background(alignment: .top) { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+    }
+
+    /// A to E or 1 to 5 picks that choice of a multiple-choice question; T and F
+    /// answer a true/false one. Typing into a written answer is left alone.
+    private func handleAnswerKey(_ press: KeyPress) -> KeyPress.Result {
+        guard index < questions.count, !isAnswered, !writtenFieldFocused, press.modifiers.isEmpty else { return .ignored }
+        let question = questions[index]
+        let key = press.characters.lowercased()
+        switch question.type {
+        case .multipleChoice:
+            let choices = question.choices ?? []
+            let position: Int?
+            if let n = Int(key), (1...9).contains(n) { position = n - 1 }
+            else if key.count == 1, let ascii = key.unicodeScalars.first?.value, (97...105).contains(ascii) { position = Int(ascii) - 97 }
+            else { position = nil }
+            guard let position, position < choices.count else { return .ignored }
+            let choice = choices[position]
+            selectedChoice = choice
+            submit(choice == question.correctAnswer, given: choice, question: question)
+            return .handled
+        case .trueFalse:
+            let label: String
+            switch key {
+            case "t", "1": label = "True"
+            case "f", "2": label = "False"
+            default: return .ignored
+            }
+            selectedChoice = label
+            submit(question.correctAnswer == label, given: label, question: question)
+            return .handled
+        case .written:
+            return .ignored
+        }
     }
 
     private func choiceList(_ question: LearnEngine.RoundQuestion) -> some View {
