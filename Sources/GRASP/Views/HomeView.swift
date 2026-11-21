@@ -23,6 +23,7 @@ struct HomeView: View {
     @State private var studying: StudyTarget?
     /// Tests finished since midnight.
     @State private var testsToday = 0
+    @State private var week: StudyProgress.Week?
     /// "yyyy-MM-dd|id,id": which plan steps were ticked off, today only.
     @AppStorage("todayPlanChecked") private var checkedStore = ""
     @AppStorage("dailyCardGoal") private var dailyGoal = 20
@@ -64,6 +65,7 @@ struct HomeView: View {
                         planCard
                         todaySoFar
                     }
+                    weekCard
                     lowerCards
                     if let deck = Dashboard.jumpBackIn(decks) {
                         continueCard(deck)
@@ -100,6 +102,7 @@ struct HomeView: View {
         standings = byId
         plan = store.todayPlan(exams: upcoming, decks: decks)
         streak = store.studyStreak()
+        week = store.studyWeek()
         let midnight = Calendar.current.startOfDay(for: Date())
         testsToday = (try? store.database.queue.read { db in
             try TestAttempt.filter(Column("finishedAt") >= midnight).fetchCount(db)
@@ -229,6 +232,59 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .graspCard(padding: 28)
+    }
+
+    // MARK: - This week
+
+    /// The last seven days at a glance: reviews per day, how it compares with
+    /// the week before, tests finished, and the decks furthest from understood.
+    @ViewBuilder
+    private var weekCard: some View {
+        if let week, week.totalReviews > 0 || week.previousReviews > 0 || week.testsFinished > 0 {
+            let peak = max(week.days.map(\.reviews).max() ?? 1, 1)
+            let weakest = decks
+                .filter { $0.cardCount >= 8 }
+                .map { deck -> (AppStore.DeckSummary, Double) in
+                    (deck, store.deckUnderstanding[deck.deckId]?.solidShare ?? 0)
+                }
+                .sorted { $0.1 < $1.1 }
+                .prefix(3)
+            VStack(alignment: .leading, spacing: 16) {
+                SectionLabel("This week")
+                HStack(alignment: .bottom, spacing: GRASPSpace.xl) {
+                    soFarFigure("\(week.totalReviews)", week.totalReviews == 1 ? "card reviewed" : "cards reviewed")
+                    soFarFigure("\(week.daysStudied) of 7", "days studied")
+                    soFarFigure("\(week.testsFinished)", week.testsFinished == 1 ? "test finished" : "tests finished")
+                    Spacer(minLength: GRASPSpace.m)
+                    HStack(alignment: .bottom, spacing: 6) {
+                        ForEach(Array(week.days.enumerated()), id: \.offset) { index, day in
+                            VStack(spacing: 4) {
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(index == week.days.count - 1 ? GRASPColor.brand : GRASPColor.textPrimary.opacity(0.35))
+                                    .frame(width: 14, height: max(4, 48 * CGFloat(day.reviews) / CGFloat(peak)))
+                                Text(day.date.formatted(.dateTime.weekday(.narrow)))
+                                    .font(.graspUI(size: 10, weight: .medium))
+                                    .foregroundStyle(GRASPColor.textTertiary)
+                            }
+                            .help("\(day.date.formatted(.dateTime.weekday(.wide))): \(day.reviews) review\(day.reviews == 1 ? "" : "s")")
+                        }
+                    }
+                }
+                if week.previousReviews > 0 {
+                    Text(week.change == 0 ? "The same as the week before."
+                         : week.change > 0 ? "\(week.change) more than the week before."
+                         : "\(-week.change) fewer than the week before.")
+                        .graspType(.meta).foregroundStyle(GRASPColor.textTertiary)
+                }
+                if !weakest.isEmpty {
+                    Text("Furthest from understood: " + weakest.map(\.0.deckName).joined(separator: ", "))
+                        .graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .graspCard(padding: 24)
+            .revealOnAppear(index: 3)
+        }
     }
 
     // MARK: - Today so far

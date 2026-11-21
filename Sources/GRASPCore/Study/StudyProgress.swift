@@ -41,4 +41,50 @@ public enum StudyProgress {
         ) ?? 0
         return Streak(days: streak, studiedToday: studiedToday, reviewsToday: reviewsToday)
     }
+
+    // MARK: - The last seven days
+
+    /// The last seven days (today and the six before), for the Home "This
+    /// week" card.
+    public struct Week: Sendable, Equatable {
+        /// Oldest first; `days.last` is today.
+        public let days: [Day]
+        /// Cards reviewed in the seven days before those.
+        public let previousReviews: Int
+        public let testsFinished: Int
+
+        public struct Day: Sendable, Equatable {
+            public let date: Date
+            public let reviews: Int
+            public init(date: Date, reviews: Int) { self.date = date; self.reviews = reviews }
+        }
+
+        public init(days: [Day], previousReviews: Int, testsFinished: Int) {
+            self.days = days; self.previousReviews = previousReviews; self.testsFinished = testsFinished
+        }
+
+        public var totalReviews: Int { days.reduce(0) { $0 + $1.reviews } }
+        public var daysStudied: Int { days.filter { $0.reviews > 0 }.count }
+        /// Reviews this week minus the week before.
+        public var change: Int { totalReviews - previousReviews }
+    }
+
+    public static func week(now: Date = Date(), calendar: Calendar = .current, db: Database) throws -> Week {
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
+        let before = calendar.date(byAdding: .day, value: -7, to: start) ?? start
+        let reviewTimes = try Date.fetchAll(db, sql: "SELECT reviewedAt FROM review WHERE reviewedAt >= ?", arguments: [before])
+        var perDay: [Date: Int] = [:]
+        var previous = 0
+        for time in reviewTimes {
+            if time < start { previous += 1 } else { perDay[calendar.startOfDay(for: time), default: 0] += 1 }
+        }
+        let days = (0..<7).map { offset -> Week.Day in
+            let date = calendar.date(byAdding: .day, value: offset, to: start) ?? start
+            return Week.Day(date: date, reviews: perDay[date] ?? 0)
+        }
+        let tests = try Int.fetchOne(
+            db, sql: "SELECT COUNT(*) FROM testAttempt WHERE finishedAt >= ?", arguments: [start]) ?? 0
+        return Week(days: days, previousReviews: previous, testsFinished: tests)
+    }
 }

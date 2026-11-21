@@ -1716,6 +1716,10 @@ final class AppStore {
 
     /// Consecutive days studied, counting back from today; studying
     /// yesterday but not yet today keeps it alive (see `StudyProgress`).
+    func studyWeek(now: Date = Date()) -> StudyProgress.Week? {
+        try? database.queue.read { db in try StudyProgress.week(now: now, db: db) }
+    }
+
     func studyStreak(now: Date = Date()) -> StudyStreak {
         (try? database.queue.read { db in try StudyProgress.streak(now: now, db: db) })
             ?? StudyStreak(days: 0, studiedToday: false, reviewsToday: 0)
