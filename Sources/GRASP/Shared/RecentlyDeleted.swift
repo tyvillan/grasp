@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import GRASPCore
+import GRDB
 
 /// A short-lived "Deleted 3 cards. Undo" notice.
 struct UndoNotice: Identifiable {
@@ -87,5 +88,17 @@ struct UndoBanner: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(notice.id)
         }
+    }
+}
+
+extension AppStore {
+    /// The course's files, oldest note first, for choosing which to write cards from.
+    func courseMaterials(inCourse courseId: String) -> [GRASPCore.Material] {
+        (try? database.queue.read { db in
+            try GRASPCore.Material
+                .filter(Column("courseId") == courseId && Column("deletedAt") == nil)
+                .order(sql: "noteDate IS NULL, noteDate, title")
+                .fetchAll(db)
+        }) ?? []
     }
 }

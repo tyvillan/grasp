@@ -85,6 +85,23 @@ struct CourseCardGenerationTests {
         }
     }
 
+    @Test("with a chosen file, only that file is read")
+    func onlyChosenFile() async throws {
+        let (db, course, deck, materials) = try await makeCourse(notes: ["Mitosis splits a cell.", "Osmosis moves water."])
+        let generator = ScriptedGenerator()
+        var seen: [String] = []
+        generator.script = { _, context in
+            seen.append(context)
+            return [GeneratedCard(front: "Osmosis", back: "Water moves across a membrane")]
+        }
+        let outcome = try await CardAI.generateCards(
+            fromCourse: course, intoDeck: deck, onlyMaterialIds: [materials[1]], using: generator, database: db)
+        #expect(outcome == .generated(created: 1, notesRead: 1, notesWithoutText: 0))
+        #expect(seen == ["Osmosis moves water."])
+        let written = try await cards(in: db, deck: deck)
+        #expect(written.allSatisfy { $0.materialId == materials[1] })
+    }
+
     @Test("one note: its cards land in the deck as AI drafts pointing at the note")
     func oneNote() async throws {
         let (db, course, deck, materials) = try await makeCourse(notes: ["Chlorophyll absorbs light."])

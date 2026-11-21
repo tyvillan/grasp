@@ -116,6 +116,9 @@ struct DeckDetailView: View {
     private struct GenerationNotice { let message: String; let isError: Bool }
     private var reduceMotion: Bool { Motion.isReduced }
     @State private var showingGenerateSheet = false
+    @State private var choosingSourceFiles = false
+    /// The files the last "write from these files" run used, so Retry repeats it.
+    @State private var lastChosenFileIds: Set<String>?
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
     /// The meter's view of each card, and the note filter a "Weakest
     /// notes" row sets (nil: not filtering; `.some(nil)` is the "Other" group).
@@ -534,6 +537,14 @@ struct DeckDetailView: View {
         .sheet(isPresented: $isCreatingCard, onDismiss: load) {
             CardCreateSheet(courseId: courseId, deckId: defaultCardCreateDeckId)
         }
+        .sheet(isPresented: $choosingSourceFiles) {
+            if let courseId {
+                ChooseSourceFilesSheet(courseId: courseId, deckName: deckName) { ids in
+                    lastChosenFileIds = ids
+                    generateFromCourse(onlyMaterialIds: ids)
+                }
+            }
+        }
         .sheet(isPresented: $showingGenerateSheet) {
             GenerateCardsSheet { maxPerNote, topic in
                 runGenerate(maxPerNote: maxPerNote, topic: topic)
@@ -915,6 +926,11 @@ struct DeckDetailView: View {
                         help: "New draft cards for concepts this deck's notes mention that have no card yet") {
                     showingGenerateSheet = true
                 },
+                .action("Generate cards from chosen files…", ai: true,
+                        disabled: !isGeneratorAvailable || aiBusy || generationTargetDeckId == nil || courseFileCount == 0,
+                        help: "The AI reads only the course files you pick, instead of all of them") {
+                    choosingSourceFiles = true
+                },
                 .action(isRefiningDeck ? "Refining…" : "Refine deck with AI", ai: true,
                         disabled: !isGeneratorAvailable || isRefiningDeck || aiBusy || refineCount(.everything) == 0,
                         help: "Checks every card against its own note and cleans up wording") {
@@ -1281,6 +1297,7 @@ struct DeckDetailView: View {
                     // The one filled button on an empty deck: Study is
                     // disabled here, so this is the page's yellow.
                     Button {
+                        lastChosenFileIds = nil
                         generateFromCourse()
                     } label: {
                         HStack(spacing: 10) {
@@ -1300,6 +1317,20 @@ struct DeckDetailView: View {
                          : "Set up an AI model in Settings → AI to write cards")
                         .graspType(.meta)
                         .foregroundStyle(GRASPColor.textTertiary)
+                    Button {
+                        choosingSourceFiles = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checklist")
+                                .font(.graspUI(size: 14, weight: .semibold))
+                            Text("Choose which files")
+                                .font(.graspUI(size: 14, weight: .semibold))
+                        }
+                        .padding(.horizontal, 6)
+                    }
+                    .buttonStyle(GRASPQuietButton())
+                    .disabled(!canGenerate)
+                    .help("Write cards from only the files you pick")
                     // The yellow button above writes from every file in the
                     // course. This one brings a file in for this deck only.
                     Button {
@@ -1351,7 +1382,7 @@ struct DeckDetailView: View {
                             .foregroundStyle(GRASPColor.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                         if hasFiles {
-                            Button("Retry") { generateFromCourse() }
+                            Button("Retry") { generateFromCourse(onlyMaterialIds: lastChosenFileIds) }
                                 .buttonStyle(GRASPQuietButton())
                                 .disabled(!canGenerate)
                         }
@@ -1379,7 +1410,7 @@ struct DeckDetailView: View {
 
     /// Writes the deck's first cards from the course's notes. Same strip as
     /// "Generate cards"; failures come back as a notice with Retry.
-    private func generateFromCourse() {
+    private func generateFromCourse(onlyMaterialIds: Set<String>? = nil) {
         guard let courseId, let deckId = generationTargetDeckId else { return }
         let generation = scopeGeneration
         generationNotice = nil
@@ -1388,7 +1419,7 @@ struct DeckDetailView: View {
             let notice: GenerationNotice?
             do {
                 let outcome = try await AIProgress.$current.withValue(run.reporter(forUnit: 0)) {
-                    try await store.generateCards(fromCourse: courseId, intoDeck: deckId)
+                    try await store.generateCards(fromCourse: courseId, intoDeck: deckId, onlyMaterialIds: onlyMaterialIds)
                 }
                 switch outcome {
                 case .noMaterials:

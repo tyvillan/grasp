@@ -535,11 +535,13 @@ final class AppStore {
     /// only ever means the model found nothing to add.
     func generateCards(
         fromCourse courseId: String, intoDeck deckId: String,
-        maxPerNote: Int = CardAI.defaultMaxGeneratedPerNote, topic: String? = nil
+        maxPerNote: Int = CardAI.defaultMaxGeneratedPerNote, topic: String? = nil,
+        onlyMaterialIds: Set<String>? = nil
     ) async throws -> CardAI.CourseGenerationOutcome {
         defer { reload() }
         return try await CardAI.generateCards(
             fromCourse: courseId, intoDeck: deckId, maxPerNote: maxPerNote, topic: topic,
+            onlyMaterialIds: onlyMaterialIds,
             using: await CardGenerators.select(), database: database
         )
     }

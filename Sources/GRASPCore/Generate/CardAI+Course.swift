@@ -31,12 +31,16 @@ extension CardAI {
     /// `deckId` as each note finishes -- so a caller watching the database
     /// sees them arrive, and a failure or stop keeps everything before it.
     ///
+    /// With `onlyMaterialIds`, only those files are read instead of every file
+    /// in the course ("write cards from this one file").
+    ///
     /// Progress is reported per note, like `generateAdditionalCards`.
     /// Cancellation stops after the current note and returns what was
     /// written. Cards that duplicate one already in the course are skipped.
     public static func generateCards(
         fromCourse courseId: String, intoDeck deckId: String,
         maxPerNote: Int = defaultMaxGeneratedPerNote, topic: String? = nil,
+        onlyMaterialIds: Set<String>? = nil,
         using generator: any CardGenerator, database: GRASPDatabase
     ) async throws -> CourseGenerationOutcome {
         struct Source: Sendable { let id: String; let text: String }
@@ -52,7 +56,7 @@ extension CardAI {
                     .fetchAll(db)
                 var withText: [Source] = []
                 var noText = 0
-                for material in materials {
+                for material in materials where onlyMaterialIds?.contains(material.id) ?? true {
                     let text = try NoteText.fetchOne(db, key: material.id)?.reflowed ?? ""
                     if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { noText += 1 }
                     else { withText.append(Source(id: material.id, text: text)) }
