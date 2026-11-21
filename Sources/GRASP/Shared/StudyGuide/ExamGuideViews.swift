@@ -15,6 +15,8 @@ struct ExamGuideContent: View {
     /// Opens a guide's file at a page, for the tables and figures its text
     /// can't carry.
     let onOpenPage: (PDFPageTarget) -> Void
+    /// Starts a test on just these parts (by `PagePart.id`). Nil where the app has no such test.
+    var onTestWeakSpots: (([String]) -> Void)? = nil
     @State private var questionsNotice: String?
     /// Each worked example's understanding meter, by `QuestionUnderstanding.key`.
     /// Shared with the saved question made from it.
@@ -35,6 +37,7 @@ struct ExamGuideContent: View {
                     description: Text("GRASP couldn't find parts like \"Part 1 · Title\" in this exam's guides yet.")
                 )
             }
+            weakSpotsSection
             let buckets = ExamLayout.bucketSkills(page.parts, aiWritten: page.guides.contains { $0.parser.hasPrefix("ai:") })
             if let buckets {
                 SkillsByTopic(buckets: buckets, terms: page.parts.flatMap(\.terms), subject: page.exam.title, onRate: { skill, rating in
@@ -64,6 +67,60 @@ struct ExamGuideContent: View {
                 .filter { $0.answer?.isEmpty == false }.map(QuestionUnderstanding.key(of:))
             exampleStates = store.questionStates(forKeys: Set(keys))
         }
+    }
+
+    /// The parts the student is weakest on, from their skill ratings and how
+    /// each worked example is understood.
+    @ViewBuilder
+    private var weakSpotsSection: some View {
+        let spots = WeakSpots.rank(parts: page.parts, states: exampleStates, limit: 4)
+        if !spots.isEmpty, page.parts.count > 1 {
+            let names = Dictionary(decks.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SectionLabel("Where you're weak")
+                    Spacer()
+                    if let onTestWeakSpots {
+                        Button("Test these") { onTestWeakSpots(spots.map(\.partId)) }
+                            .buttonStyle(GRASPQuietButton())
+                            .help("A test on just these parts")
+                    }
+                }
+                VStack(spacing: 0) {
+                    ForEach(Array(spots.enumerated()), id: \.element.id) { index, spot in
+                        if index > 0 { Rectangle().fill(GRASPColor.hairline).frame(height: 1) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(spot.partTitle).graspType(.rowTitle).foregroundStyle(GRASPColor.textPrimary)
+                            Text(Self.weakSummary(spot)).graspType(.meta).foregroundStyle(GRASPColor.textSecondary)
+                            if !spot.weakSkills.isEmpty {
+                                Text(spot.weakSkills.prefix(2).joined(separator: " · "))
+                                    .graspType(.meta).foregroundStyle(GRASPColor.textTertiary).lineLimit(2)
+                            }
+                            let deckNames = spot.deckIds.compactMap { names[$0] }
+                            if !deckNames.isEmpty {
+                                Text("Review: " + deckNames.joined(separator: ", "))
+                                    .graspType(.meta).foregroundStyle(GRASPColor.accent).lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 11)
+                    }
+                }
+                .background(GRASPColor.surface, in: RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: GRASPRadius.card, style: .continuous)
+                    .strokeBorder(GRASPColor.hairline))
+            }
+        }
+    }
+
+    static func weakSummary(_ spot: WeakSpots.Spot) -> String {
+        var pieces: [String] = []
+        if spot.missedExamples > 0 { pieces.append("\(spot.missedExamples) missed") }
+        if spot.untriedExamples > 0 { pieces.append("\(spot.untriedExamples) not tried") }
+        if spot.exampleCount > 0 && !pieces.isEmpty { pieces[pieces.count - 1] += " of \(spot.exampleCount) examples" }
+        let skills = spot.weakSkills.count
+        if skills > 0 { pieces.append("\(skills) skill\(skills == 1 ? "" : "s") to work on") }
+        return pieces.joined(separator: " · ")
     }
 
     /// What the "Save Questions" menu item reports.

@@ -32,6 +32,8 @@ struct ExamStudyView: View {
     @State private var openPage: PDFPageTarget?
     @State private var importing = false
     @State private var testPhase: TestPhase?
+    /// Set when a test is started from "Where you're weak": just those parts.
+    @State private var weakPartIds: [String]?
 
     private var testScopeKey: String { "guide:" + (practiceGuideId ?? examEventId) }
 
@@ -49,7 +51,7 @@ struct ExamStudyView: View {
                         .foregroundStyle(GRASPColor.textSecondary)
                 }
                 if let page, !page.parts.isEmpty {
-                    Button { testPhase = .setup } label: {
+                    Button { weakPartIds = nil; testPhase = .setup } label: {
                         Label("Test", systemImage: "checklist")
                     }
                     .buttonStyle(GRASPQuietButton())
@@ -102,7 +104,7 @@ struct ExamStudyView: View {
         .sheet(item: $openPage) { target in
             GuidePageSheet(target: target)
         }
-        .sheet(item: $testPhase, onDismiss: load) { phase in
+        .sheet(item: $testPhase, onDismiss: { weakPartIds = nil; load() }) { phase in
             if let page { testSheet(phase, page: page) }
         }
         .task(id: practiceGuideId ?? examEventId) { load() }
@@ -113,9 +115,11 @@ struct ExamStudyView: View {
     private func testSheet(_ phase: TestPhase, page: StudyGuideActions.ExamPage) -> some View {
         switch phase {
         case .setup:
-            TestSetupSheet(deckIds: page.deckIds, deckName: page.exam.title,
+            let focused = weakPartIds.map { page.restricted(toParts: Set($0)) } ?? page
+            let key = weakPartIds == nil ? testScopeKey : testScopeKey + ":weak"
+            TestSetupSheet(deckIds: focused.deckIds, deckName: weakPartIds == nil ? page.exam.title : "\(page.exam.title): weak parts",
                            onResume: { id in $testPhase.advance(to: TestPhase.resuming(id, store: store), store: store) },
-                           guide: (page, testScopeKey)) { attemptId, questions, aiWarning in
+                           guide: (focused, key)) { attemptId, questions, aiWarning in
                 $testPhase.advance(to: .running(attemptId: attemptId, questions: questions, aiWarning: aiWarning), store: store)
             }
         case .running(let attemptId, let questions, let aiWarning, let answered):
@@ -164,11 +168,14 @@ struct ExamStudyView: View {
     private var guideTab: some View {
         if let page {
             ScrollView {
-                ExamGuideContent(page: page, decks: decks) { target in
+                ExamGuideContent(page: page, decks: decks, onOpenPage: { target in
                     // The whole file opens in the Mac's own viewer; a page
                     // opens in the sheet, beside the problem that needs it.
                     if target.wholeFile { NSWorkspace.shared.open(target.url) } else { openPage = target }
-                }
+                }, onTestWeakSpots: { ids in
+                    weakPartIds = ids
+                    testPhase = .setup
+                })
                 .frame(maxWidth: 760, alignment: .leading)
                 .padding(.horizontal, 32)
                 .padding(.vertical, 28)
