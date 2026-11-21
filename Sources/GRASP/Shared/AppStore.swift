@@ -865,6 +865,9 @@ final class AppStore {
         guard !cardIds.isEmpty else { return }
         try database.queue.write { db in try CardActions.delete(cardIds, db: db) }
         reload()
+        postUndo(cardIds.count == 1 ? "Card deleted" : "\(cardIds.count) cards deleted") { [weak self] in
+            self?.restoreCards(cardIds)
+        }
     }
 
     /// One "keep this card, fold these into it" instruction from the
@@ -1109,6 +1112,9 @@ final class AppStore {
     /// while the fresh view offered to start a second run over the same
     /// cards.
     private(set) var aiJobs: [String: AIJob] = [:]
+
+    /// The notice offering to undo the last delete. (Stored here: an extension can't hold it.)
+    var undoNotice: UndoNotice?
 
     /// What the last "New Study Guide" run did, for the Study Guide page.
     /// (Stored here: an extension can't hold it.)
@@ -1838,10 +1844,18 @@ final class AppStore {
     /// soft-deleted when that's nil (never hard-deleted, which would take
     /// their study history with them).
     func deleteDeck(_ deckId: String, migrateCardsTo targetDeckId: String?) throws {
+        let name = (try? deck(deckId))?.name ?? "Deck"
+        let members = targetDeckId == nil ? [] : cardIds(inDeck: deckId)
         try database.queue.write { db in
             try LibraryActions.deleteDeck(deckId, migrateCardsTo: targetDeckId, db: db)
         }
         reload()
+        postUndo("Deck \u{201C}\(name)\u{201D} deleted") { [weak self] in
+            guard let self else { return }
+            self.restoreDeck(deckId)
+            // A deck deleted by moving its cards elsewhere gets them back.
+            if !members.isEmpty { try? self.bulkMoveCards(members, toDeck: deckId) }
+        }
     }
 
     /// Moves a card to the end of another deck. A card belongs to one deck

@@ -119,6 +119,8 @@ struct ContentView: View {
         // only navigates. `tutorialTarget` marks the controls it points at.
         .environment(store.tutorial)
         .overlay { TutorialOverlay().environment(store.tutorial) }
+        .overlay(alignment: .bottom) { UndoBanner() }
+        .animation(Motion.snappy, value: store.undoNotice?.id)
         .onChange(of: store.tutorial.token) { _, _ in prepareTutorialScreen() }
         .task { store.startTutorialIfFirstTime() }
         // Feedback: the Send feedback sheet, and the two soft asks.

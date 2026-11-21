@@ -83,6 +83,49 @@ public enum CardActions {
         }
     }
 
+    /// Brings soft-deleted cards back (their deck memberships were never
+    /// touched by `delete`). Returns how many came back.
+    @discardableResult
+    public static func restore(_ cardIds: [String], now: Date = Date(), db: Database) throws -> Int {
+        var restored = 0
+        for chunk in cardIds.chunked(into: chunkSize) {
+            try Card
+                .filter(chunk.contains(Column("id")))
+                .filter(Column("deletedAt") != nil)
+                .updateAll(db, Column("deletedAt").set(to: nil as Date?), Column("updatedAt").set(to: now))
+            restored += db.changesCount
+        }
+        return restored
+    }
+
+    /// A card deleted on its own (not along with its deck), for the
+    /// "Recently deleted" list.
+    public struct DeletedCard: Identifiable, Sendable {
+        public var id: String { card.id }
+        public let card: Card
+        public let deckName: String?
+    }
+
+    /// Cards deleted by themselves, newest first. Cards that went with a
+    /// deleted deck are listed under that deck instead (they have no deck
+    /// membership left).
+    public static func recentlyDeleted(limit: Int = 200, db: Database) throws -> [DeletedCard] {
+        let cards = try Card.fetchAll(db, sql: """
+            SELECT card.* FROM card
+            WHERE card.deletedAt IS NOT NULL
+              AND EXISTS (SELECT 1 FROM deckCard JOIN deck ON deck.id = deckCard.deckId
+                          WHERE deckCard.cardId = card.id AND deck.deletedAt IS NULL)
+            ORDER BY card.deletedAt DESC LIMIT ?
+            """, arguments: [limit])
+        return try cards.map { card in
+            let name = try String.fetchOne(db, sql: """
+                SELECT deck.name FROM deckCard JOIN deck ON deck.id = deckCard.deckId
+                WHERE deckCard.cardId = ? AND deck.deletedAt IS NULL LIMIT 1
+                """, arguments: [card.id])
+            return DeletedCard(card: card, deckName: name)
+        }
+    }
+
     public static func setStatus(_ cardIds: [String], to status: CardStatus, now: Date = Date(), db: Database) throws {
         for chunk in cardIds.chunked(into: chunkSize) {
             try Card

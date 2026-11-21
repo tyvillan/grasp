@@ -9,6 +9,8 @@ import GRASPCore
 struct LibraryView: View {
     @Environment(AppStore.self) private var store
     @State private var showingArchivedCourses = false
+    @State private var showingRecentlyDeleted = false
+    @State private var recentlyDeletedCount = 0
     @State private var showingExcludedFolders = false
     @State private var showingDuplicateReview = false
     @State private var duplicateGroups: [AppStore.DuplicateGroup] = []
@@ -20,6 +22,10 @@ struct LibraryView: View {
     @State private var showingLayoutInfo = false
     @State private var cardCounts: (all: [String: Int], unchecked: [String: Int]) = ([:], [:])
     private var sweepActivity: AIActivity? { store.aiJob(AppStore.sweepJobKey)?.activity }
+
+    private func refreshRecentlyDeleted() {
+        recentlyDeletedCount = store.recentlyDeletedDecks().count + store.recentlyDeletedCards().count
+    }
 
     private var totalCards: Int { store.deckCounts.values.reduce(0) { $0 + $1.cardCount } }
     private var courseCount: Int { store.coursesBySemester.values.reduce(0) { $0 + $1.count } }
@@ -42,6 +48,10 @@ struct LibraryView: View {
                         icon: "folder.badge.minus", title: "Excluded folders", count: store.excludedFolders.count,
                         detail: "Skipped on every vault import until you bring them back."
                     ) { showingExcludedFolders = true }
+                    LibraryHiddenTile(
+                        icon: "trash", title: "Recently deleted", count: recentlyDeletedCount,
+                        detail: "Decks and cards you deleted. Bring any of them back."
+                    ) { showingRecentlyDeleted = true }
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .revealOnAppear(index: 1)
@@ -62,6 +72,9 @@ struct LibraryView: View {
             OffTopicCoursesSheet(unchecked: cardCounts.unchecked) { ids in sweepCardsForContext(inCourses: ids) }
         }
         .sheet(isPresented: $showingArchivedCourses) { ArchivedCoursesSheet() }
+        .sheet(isPresented: $showingRecentlyDeleted, onDismiss: refreshRecentlyDeleted) { RecentlyDeletedSheet() }
+        .task { refreshRecentlyDeleted() }
+        .onChange(of: store.revision) { refreshRecentlyDeleted() }
         .sheet(isPresented: $showingExcludedFolders) { ExcludedFoldersSheet() }
         .sheet(isPresented: $showingDuplicateReview) {
             DuplicateReviewSheet(groups: duplicateGroups) { merges in
@@ -605,6 +618,46 @@ struct ArchivedCoursesSheet: View {
                 try? store.setCourseArchived(course.id, archived: false)
             }
         }
+    }
+}
+
+/// Decks and cards that were deleted, each with a way back.
+struct RecentlyDeletedSheet: View {
+    @Environment(AppStore.self) private var store
+    private struct Entry: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let isDeck: Bool
+    }
+    @State private var entries: [Entry] = []
+
+    var body: some View {
+        LibraryListSheet(
+            title: "Recently deleted",
+            message: "Decks and cards you deleted. Restoring a deck brings back the cards that went with it.",
+            icon: "trash", items: entries, id: \.id,
+            emptyTitle: "Nothing deleted",
+            emptyDetail: "Decks and cards you delete appear here."
+        ) { entry in
+            LibraryListRow(title: entry.title, detail: entry.detail, actionTitle: "Restore") {
+                if entry.isDeck { store.restoreDeck(entry.id) } else { store.restoreCards([entry.id]) }
+                load()
+            }
+        }
+        .task { load() }
+    }
+
+    private func load() {
+        let decks = store.recentlyDeletedDecks().map { item in
+            Entry(id: item.id, title: item.deck.name,
+                  detail: "Deck · \(item.cardCount) card\(item.cardCount == 1 ? "" : "s")", isDeck: true)
+        }
+        let cards = store.recentlyDeletedCards().map { item in
+            Entry(id: item.id, title: item.card.front,
+                  detail: "Card" + (item.deckName.map { " · from \($0)" } ?? ""), isDeck: false)
+        }
+        entries = decks + cards
     }
 }
 

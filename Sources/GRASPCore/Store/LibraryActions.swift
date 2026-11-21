@@ -167,4 +167,53 @@ public enum LibraryActions {
         deck.updatedAt = now
         try deck.save(db)
     }
+
+    /// A deck removed from view, for the "Recently deleted" list.
+    public struct DeletedDeck: Identifiable, Sendable {
+        public var id: String { deck.id }
+        public let deck: Deck
+        /// Cards that went with it (the ones that were in no other deck).
+        public let cardCount: Int
+    }
+
+    /// Cards that `deleteDeck` soft-deleted along with a deck: deleted at the
+    /// same moment as the deck, and in no deck now.
+    static func cardsDeleted(withDeck deck: Deck, db: Database) throws -> [String] {
+        guard let at = deck.deletedAt else { return [] }
+        return try String.fetchAll(db, sql: """
+            SELECT id FROM card
+            WHERE deletedAt = ? AND id NOT IN (SELECT cardId FROM deckCard)
+            """, arguments: [at])
+    }
+
+    public static func recentlyDeletedDecks(limit: Int = 50, db: Database) throws -> [DeletedDeck] {
+        let decks = try Deck.filter(Column("deletedAt") != nil)
+            .order(Column("deletedAt").desc).limit(limit).fetchAll(db)
+        return try decks.map { DeletedDeck(deck: $0, cardCount: try cardsDeleted(withDeck: $0, db: db).count) }
+    }
+
+    /// Brings a deleted deck back, with the cards that went with it. A deck
+    /// deleted by moving its cards elsewhere comes back empty: those cards
+    /// now belong to the other deck. Returns the number of cards restored.
+    @discardableResult
+    public static func restoreDeck(_ deckId: String, now: Date = Date(), db: Database) throws -> Int {
+        guard var deck = try Deck.fetchOne(db, key: deckId), deck.deletedAt != nil else { return 0 }
+        let cardIds = try cardsDeleted(withDeck: deck, db: db)
+        deck.deletedAt = nil
+        deck.updatedAt = now
+        try deck.save(db)
+        var ordered: [String] = []
+        if !cardIds.isEmpty {
+            ordered = try String.fetchAll(db, sql: """
+                SELECT id FROM card WHERE id IN (\(databaseQuestionMarks(count: cardIds.count)))
+                ORDER BY createdAt, front
+                """, arguments: StatementArguments(cardIds))
+        }
+        for (index, cardId) in ordered.enumerated() {
+            try db.execute(sql: "INSERT OR IGNORE INTO deckCard (deckId, cardId, sortIndex) VALUES (?, ?, ?)",
+                           arguments: [deckId, cardId, index])
+        }
+        _ = try CardActions.restore(ordered, now: now, db: db)
+        return ordered.count
+    }
 }
