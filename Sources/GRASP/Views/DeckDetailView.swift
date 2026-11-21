@@ -117,6 +117,7 @@ struct DeckDetailView: View {
     private var reduceMotion: Bool { Motion.isReduced }
     @State private var showingGenerateSheet = false
     @State private var choosingSourceFiles = false
+    @State private var sharingDeck: Deck?
     /// The files the last "write from these files" run used, so Retry repeats it.
     @State private var lastChosenFileIds: Set<String>?
     @State private var learnLevels: [String: LearnEngine.Level] = [:]
@@ -537,6 +538,7 @@ struct DeckDetailView: View {
         .sheet(isPresented: $isCreatingCard, onDismiss: load) {
             CardCreateSheet(courseId: courseId, deckId: defaultCardCreateDeckId)
         }
+        .sheet(item: $sharingDeck) { deck in ShareDeckSheet(deck: deck) }
         .sheet(isPresented: $choosingSourceFiles) {
             if let courseId {
                 ChooseSourceFilesSheet(courseId: courseId, deckName: deckName) { ids in
@@ -845,6 +847,10 @@ struct DeckDetailView: View {
             // course, not a deck, so it has none of these.
             if case .deck(let id) = scope, let deck = (try? store.deck(id)) ?? nil {
                 items.append(.divider)
+                items.append(.action("Share deck…", systemImage: "square.and.arrow.up",
+                                     help: "Save this deck as a file a classmate can open in GRASP, or print it") {
+                    sharingDeck = deck
+                })
                 items.append(.action("Rename deck…", systemImage: "pencil") { renamingDeck = deck })
                 items.append(.action(deck.manualLessonDate == nil ? "Set lecture date…" : "Change lecture date…",
                                      systemImage: "calendar") { datingDeck = deck })
@@ -941,6 +947,12 @@ struct DeckDetailView: View {
                 .divider,
             ]
             items += addSourceItems
+            if let courseId {
+                items.append(.action("Add a shared deck…", systemImage: "square.and.arrow.down",
+                                     help: "Open a GRASP deck file someone sent you") {
+                    DeckFileImporter.chooseAndImport(into: courseId, store: store)
+                })
+            }
             return items
         }
         .tutorialTarget(.addMenu)
